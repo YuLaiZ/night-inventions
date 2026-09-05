@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给屏幕擦擦灰</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .progress-row {
+    margin-top: clamp(20px, 5vw, 26px);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.1em;
+  }
+  .progress-row .num { font-family: var(--mono); }
+
+  .glass {
+    margin-top: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(156, 200, 255, 0.05), rgba(156, 200, 255, 0.02));
+    touch-action: none;
+  }
+  canvas { display: block; width: 100%; cursor: crosshair; }
+
+  .endnote {
+    display: none;
+    margin-top: 16px;
+    text-align: center;
+    color: var(--gold);
+    font-size: clamp(15px, 4vw, 17px);
+  }
+  .endnote.show { display: block; animation: fadein 0.8s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .go-row { margin-top: 16px; text-align: center; }
+  button.again {
+    display: none;
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 24px;
+    cursor: pointer;
+  }
+  button.again.show { display: inline-block; }
+  button.again:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>给屏幕擦擦灰</h1>
+  <p class="sub">盯着屏幕一整天，它也该被照顾一下。<em>按住，来回擦</em>——灰不擦不知道，一擦吓一跳。</p>
+
+  <div class="progress-row">
+    <span>擦拭进度</span>
+    <span><span class="num" id="done">0</span> / <span class="num" id="total">0</span></span>
+  </div>
+
+  <div class="glass" id="glass">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <p class="endnote" id="endnote">擦干净了。透过屏幕看出去，今晚的夜色也不赖。</p>
+
+  <div class="go-row">
+    <button class="again" id="again" type="button">再撒一把灰</button>
+  </div>
+
+  <p class="hint">灰是想象中的，解压是真的。手机上用指头擦也一样。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var dust = [];           // {x, y, r, on}
+  var RADIUS = 36;         // 擦除半径（canvas 像素）
+  var DUST_N = 220;
+  var wiped = 0;
+
+  function resize() {
+    var glass = document.getElementById('glass');
+    var w = glass.clientWidth;
+    var h = Math.max(240, Math.min(420, Math.round(w * 0.6)));
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // 尺寸变化后灰点按新画布重新播（保留已擦计数比例会失真，直接重撒）
+    if (!dust.length) scatter();
+    else draw();
+  }
+
+  function scatter() {
+    dust = [];
+    wiped = 0;
+    var w = cv.clientWidth, h = cv.clientHeight;
+    for (var i = 0; i < DUST_N; i++) {
+      dust.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: 0.8 + Math.random() * 2.2,
+        a: 0.25 + Math.random() * 0.5,
+        on: true
+      });
+    }
+    document.getElementById('total').textContent = String(DUST_N);
+    updateProgress();
+    draw();
+  }
+
+  function draw() {
+    var w = cv.clientWidth, h = cv.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    // 一层淡淡的雾底，擦完也不至于空得刺眼
+    ctx.fillStyle = 'rgba(199, 208, 226, 0.03)';
+    ctx.fillRect(0, 0, w, h);
+    for (var i = 0; i < dust.length; i++) {
+      var d = dust[i];
+      if (!d.on) continue;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(220, 228, 244, ' + d.a + ')';
+      ctx.fill();
+    }
+  }
+
+  function updateProgress() {
+    document.getElementById('done').textContent = String(wiped);
+  }
+
+  function wipeAt(px, py) {
+    var touched = false;
+    for (var i = 0; i < dust.length; i++) {
+      var d = dust[i];
+      if (!d.on) continue;
+      var dx = d.x - px, dy = d.y - py;
+      if (dx * dx + dy * dy <= RADIUS * RADIUS) {
+        d.on = false;
+        wiped++;
+        touched = true;
+      }
+    }
+    if (touched) {
+      updateProgress();
+      draw();
+      if (wiped >= dust.length) finish();
+    }
+  }
+
+  function finish() {
+    document.getElementById('endnote').classList.add('show');
+    document.getElementById('again').classList.add('show');
+  }
+
+  function pos(e) {
+    var rect = cv.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  var wiping = false;
+  cv.addEventListener('pointerdown', function (e) {
+    wiping = true;
+    var p = pos(e);
+    wipeAt(p.x, p.y);
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!wiping) return;
+    var p = pos(e);
+    wipeAt(p.x, p.y);
+    e.preventDefault();
+  });
+  window.addEventListener('pointerup', function () { wiping = false; });
+
+  document.getElementById('again').addEventListener('click', function () {
+    document.getElementById('endnote').classList.remove('show');
+    this.classList.remove('show');
+    scatter();
+  });
+
+  window.addEventListener('resize', function () {
+    // 窗口尺寸变化：按新画布重撒（进度重置，无伤大雅）
+    dust = [];
+    document.getElementById('endnote').classList.remove('show');
+    document.getElementById('again').classList.remove('show');
+    resize();
+    scatter();
+  });
+
+  resize();
+  scatter();
+})();
+</script>
+</body>
+</html>

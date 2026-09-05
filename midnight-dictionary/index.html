@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜词典</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .date-line {
+    margin-top: clamp(24px, 5vw, 32px);
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.3em;
+    text-align: center;
+  }
+  .date-line .num { font-family: var(--mono); letter-spacing: 0.1em; }
+
+  .entry {
+    margin-top: clamp(16px, 4vw, 22px);
+    border-top: 1px solid var(--gold);
+    border-bottom: 1px solid var(--gold);
+    padding: clamp(18px, 4vw, 28px) clamp(6px, 2vw, 12px);
+    text-align: center;
+  }
+  .entry .word {
+    color: var(--ink-strong);
+    font-size: clamp(30px, 8vw, 42px);
+    letter-spacing: 0.35em;
+    text-indent: 0.35em;
+  }
+  .entry .pos { margin-top: 4px; font-size: 13px; color: var(--gold); letter-spacing: 0.2em; }
+  .entry .def {
+    margin-top: 14px;
+    color: var(--ink);
+    font-size: clamp(16px, 4.2vw, 18px);
+  }
+  .entry .eg { margin-top: 10px; color: var(--ink-dim); font-size: 14px; }
+  .entry .eg b { color: var(--ice); font-weight: 500; }
+
+  .copy-row { margin-top: 18px; text-align: center; }
+  button.copy {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 24px;
+    cursor: pointer;
+  }
+  button.copy:hover { border-color: var(--ice); }
+  .copy-note { margin-left: 10px; font-size: 13px; color: var(--ink-dim); }
+
+  .rule {
+    margin-top: clamp(24px, 5vw, 32px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+  .rule em { font-style: normal; color: var(--ink); }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜词典</h1>
+  <p class="sub">正经词典不收的词，这里收。<em>一夜只讲一个</em>，讲完即止——明晚换下一个词。</p>
+
+  <div class="date-line" id="date-line"></div>
+
+  <div class="entry">
+    <div class="word" id="word"></div>
+    <div class="pos" id="pos"></div>
+    <p class="def" id="def"></p>
+    <p class="eg" id="eg"></p>
+  </div>
+
+  <div class="copy-row">
+    <button class="copy" id="copy" type="button">抄走今晚这个词</button><span class="copy-note" id="copy-note"></span>
+  </div>
+
+  <p class="rule">词条按今晚的日期翻开——今晚全世界读到同一个词。<br>释义纯属<em>夜班民间考据</em>，辞书界请勿较真。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var ENTRIES = [
+    { w: '熬', pos: '动词 · 夜班释义', def: '把「再等一下」延长到天亮的民间技艺。火候全凭眼里那点光。', eg: '例句：他熬的不是夜，是白天欠自己的那几个钟头。' },
+    { w: '月亮上班', pos: '短语 · 天文民俗', def: '形容日落后月亮准时出现在天上。它没有周末，也没有加班费。', eg: '例句：抬头一看，月亮上班了，你也不好意思下班。' },
+    { w: '回音', pos: '名词 · 物理兼心理', def: '对山谷喊话会弹回来的声音；对凌晨的自己说话，弹回来的叫心事。', eg: '例句：凌晨三点说的晚安，回音要到中午才到。' },
+    { w: '路灯', pos: '名词 · 城市家具', def: '专门照亮空无一人的街道的灯。它的存在证明：总有人会在深夜路过。', eg: '例句：路灯把影子拉得老长，像替你先走了一步。' },
+    { w: '天花板', pos: '名词 · 建筑兼人生', def: '失眠者一晚上的全部风景，剧情全靠自己在上面放映。', eg: '例句：今晚的天花板演到第三集了，还是睡不着。' },
+    { w: '早睡', pos: '动词 · 传说生物', def: '人人都说见过、但很少有人天天见到的行为。多出没于计划里。', eg: '例句：他今晚打算早睡——这句话他昨晚也说过。' },
+    { w: '夜宵', pos: '名词 · 精神支柱', def: '正餐与早餐之间的正义。它不问热量，只问你这一晚过得好不好。', eg: '例句：一碗热汤面的存在，就是深夜最大的体面。' },
+    { w: '静音', pos: '名词 · 现代礼仪', def: '深夜里把全世界调成最小的音量，好听见自己。', eg: '例句：手机静音之后，才听见冰箱在替你呼吸。' },
+    { w: '失眠', pos: '名词 · 黑夜常客', def: '身体想睡、脑子偏要加班的劳务纠纷，通常判脑子赢。', eg: '例句：他和失眠谈判到三点，最后答应再想五分钟。' },
+    { w: '凌晨四点', pos: '时间词 · 现象级', def: '一夜里最诚实的钟点。世界静得能听见自己到底在想什么。', eg: '例句：凌晨四点的海棠花没开，但窗外的天灰了一点。' },
+    { w: '晚安', pos: '叹词 · 深夜货币', def: '一天里最后一句正经话。说出口不要钱，收到了很值钱。', eg: '例句：今晚的晚安已签收，明早的闹钟请多关照。' },
+    { w: '星星', pos: '名词 · 远方同事', def: '夜里替太阳值班的灯，一盏一盏挂着，谁也不催谁。', eg: '例句：星星今晚出勤率很高，看来不止你一个人睡不着。' },
+    { w: '窗帘', pos: '名词 · 昼夜国境线', def: '家里的昼夜分界。拉上算出国，拉开算入境。', eg: '例句：拉上窗帘的那一刻，世界单方面休战。' },
+    { w: '明天', pos: '名词 · 期货', def: '深夜里最富有的资产，人人都有一份，天亮自动交割。', eg: '例句：所有大事都约在明天，明天是深夜的提款机。' }
+  ];
+
+  function rng(seed) {
+    var s = seed % 2147483647;
+    if (s <= 0) s += 2147483646;
+    return function () {
+      s = s * 16807 % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+  }
+
+  var now = new Date();
+  var tonight = new Date(now);
+  if (now.getHours() < 9) tonight.setDate(tonight.getDate() - 1);
+  var y = tonight.getFullYear(), m = tonight.getMonth() + 1, d = tonight.getDate();
+
+  var rand = rng(y * 10000 + m * 100 + d);
+  var entry = ENTRIES[Math.floor(rand() * ENTRIES.length)];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+
+  var OPENING = new Date(2026, 8, 4);
+  var anchor = new Date(now);
+  if (now.getHours() < 12) anchor.setDate(anchor.getDate() - 1);
+  var nights = Math.max(1, Math.floor((anchor - OPENING) / 86400000) + 1);
+
+  $('date-line').innerHTML =
+    '<span class="num">' + y + '-' + pad(m) + '-' + pad(d) + '</span>' +
+    ' · 开馆第 <span class="num">' + nights + '</span> 夜 · 今晚一词';
+
+  $('word').textContent = entry.w;
+  $('pos').textContent = entry.pos;
+  $('def').textContent = entry.def;
+  $('eg').innerHTML = entry.eg.replace(/^例句：/, '<b>例句</b>：');
+
+  var fullText = '【深夜词典 · ' + y + '-' + pad(m) + '-' + pad(d) + '】\n'
+    + entry.w + '（' + entry.pos + '）\n' + entry.def + '\n' + entry.eg;
+
+  $('copy').addEventListener('click', function () {
+    navigator.clipboard.writeText(fullText).then(function () {
+      $('copy-note').textContent = '已抄走。明晚的词还没编。';
+    }, function () {
+      $('copy-note').textContent = '浏览器没点头，手抄一遍也一样。';
+    });
+  });
+})();
+</script>
+</body>
+</html>

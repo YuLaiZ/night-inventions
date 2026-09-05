@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一本正经的猜拳裁判</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --red: #e08585;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  /* ── 记分牌 ── */
+  .board {
+    display: flex;
+    justify-content: center;
+    gap: clamp(18px, 5vw, 34px);
+    margin: clamp(22px, 5vw, 32px) 0 0;
+    padding: 12px 8px;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .board .cell { text-align: center; }
+  .board .num {
+    display: block;
+    font-family: var(--mono);
+    font-size: 22px;
+    color: var(--ink-strong);
+  }
+  .board .lab {
+    display: block;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.1em;
+  }
+
+  /* ── 对局席 ── */
+  .arena {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(18px, 6vw, 40px);
+    margin-top: clamp(26px, 6vw, 36px);
+    min-height: 96px;
+  }
+  .hand { text-align: center; }
+  .hand .fist {
+    font-size: clamp(52px, 13vw, 72px);
+    line-height: 1.2;
+    display: inline-block;
+    transition: transform 0.18s ease;
+  }
+  .hand .fist.shake { animation: shake 0.42s ease; }
+  @keyframes shake {
+    0%   { transform: translateY(0) rotate(0deg); }
+    25%  { transform: translateY(-14px) rotate(-8deg); }
+    50%  { transform: translateY(2px) rotate(6deg); }
+    75%  { transform: translateY(-8px) rotate(-4deg); }
+    100% { transform: translateY(0) rotate(0deg); }
+  }
+  .hand .who { display: block; margin-top: 6px; font-size: 13px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  .vs { font-size: 14px; color: var(--ink-dim); letter-spacing: 0.2em; }
+
+  /* ── 裁判席 ── */
+  .bench {
+    margin-top: clamp(26px, 6vw, 36px);
+    padding: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 24, 40, 0.6);
+  }
+  .bench .judge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .bench .face { font-size: 34px; line-height: 1; }
+  .bench .role { font-size: 13px; color: var(--ink-dim); letter-spacing: 0.12em; }
+  .bench .role b { display: block; color: var(--gold); font-size: 15px; letter-spacing: 0.06em; }
+  .verdict {
+    color: var(--ink-strong);
+    font-size: clamp(16px, 4vw, 18px);
+    min-height: 3.2em;
+  }
+  .verdict.fade { animation: fadein 0.45s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .verdict .mark { color: var(--gold); }
+  .verdict.rig .mark { color: var(--red); }
+
+  /* ── 申诉按钮 ── */
+  .appeal-row { margin-top: 14px; text-align: center; min-height: 40px; }
+  button.appeal {
+    display: none;
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    color: var(--red);
+    background: none;
+    border: 1px solid rgba(224, 133, 133, 0.5);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+  }
+  button.appeal.show { display: inline-block; animation: fadein 0.4s ease; }
+  button.appeal:hover { background: rgba(224, 133, 133, 0.12); }
+
+  /* ── 出拳按钮 ── */
+  .throws {
+    display: flex;
+    justify-content: center;
+    gap: clamp(12px, 4vw, 22px);
+    margin-top: clamp(24px, 5vw, 32px);
+  }
+  button.throw {
+    flex: 1;
+    max-width: 150px;
+    font-family: var(--sans);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: clamp(12px, 3vw, 16px) 8px 10px;
+    cursor: pointer;
+    transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  }
+  button.throw:hover { border-color: var(--ice); background: rgba(156, 200, 255, 0.12); }
+  button.throw:active { transform: scale(0.96); }
+  button.throw .icon { display: block; font-size: clamp(30px, 8vw, 38px); line-height: 1.3; }
+  button.throw .name {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.2em;
+  }
+
+  .note {
+    margin-top: clamp(26px, 6vw, 34px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>一本正经的猜拳裁判</h1>
+  <p class="sub">深夜法庭，只审猜拳。输赢是小事，<em>判罚是艺术</em>——但它偶尔会吹黑哨，你可以申诉。</p>
+
+  <div class="board">
+    <div class="cell"><span class="num" id="s-round">0</span><span class="lab">局</span></div>
+    <div class="cell"><span class="num" id="s-you">0</span><span class="lab">你</span></div>
+    <div class="cell"><span class="num" id="s-it">0</span><span class="lab">它</span></div>
+    <div class="cell"><span class="num" id="s-fixed">0</span><span class="lab">改判</span></div>
+  </div>
+
+  <div class="arena">
+    <div class="hand"><span class="fist" id="mine">🤜</span><span class="who">你</span></div>
+    <span class="vs">对</span>
+    <div class="hand"><span class="fist" id="theirs">🤛</span><span class="who">它</span></div>
+  </div>
+
+  <div class="bench">
+    <div class="judge">
+      <span class="face">🧑‍⚖️</span>
+      <span class="role"><b>本庭裁判</b>从业三十年 · 零错案（自称）</span>
+    </div>
+    <p class="verdict" id="verdict">开庭。出拳吧，本庭看着呢。</p>
+    <div class="appeal-row">
+      <button class="appeal" id="appeal" type="button">申诉：判得不对</button>
+    </div>
+  </div>
+
+  <div class="throws">
+    <button class="throw" data-mine="rock" type="button"><span class="icon">✊</span><span class="name">石头</span></button>
+    <button class="throw" data-mine="paper" type="button"><span class="icon">✋</span><span class="name">布</span></button>
+    <button class="throw" data-mine="scissors" type="button"><span class="icon">✌️</span><span class="name">剪刀</span></button>
+  </div>
+
+  <p class="note">判定标准极严：先亮拳的一方没有豁免权，后亮拳的一方没有便宜可占。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  /* ── 语录库：判罚要有画面，不许只报比分 ── */
+  var QUOTES = {
+    win: [
+      '石头当面砸碎剪刀。铁证如山，本庭宣布——<span class="mark">你赢</span>。',
+      '布把石头包得严严实实，一点挣扎都没有。这局归<span class="mark">你</span>。',
+      '剪刀咔嚓一声剪开布，利落得像深夜剪掉一条坏消息。<span class="mark">你赢</span>。',
+      '双方手势已亮，结果没有争议。<span class="mark">你</span>，赢下这一局。',
+      '它出石头，你出布。本庭还上手检查了一遍，包得很实。<span class="mark">你赢</span>。',
+      '干净利落，当庭宣判：胜方是<span class="mark">你</span>。它可以保留意见，但保留无效。'
+    ],
+    lose: [
+      '你的剪刀撞上石头，崩了个小口。本庭宣布：<span class="mark">它赢</span>。',
+      '布稳稳罩住你的石头，连缝都没留。这局是<span class="mark">它</span>的。',
+      '你的石头被布提走，像行李被别人拎下了车。<span class="mark">它赢</span>。',
+      '它的剪刀穿过你的布，手法熟练，不像第一次。<span class="mark">它赢</span>。',
+      '手势已亮：它压你一头。判<span class="mark">它赢</span>，本庭当庭没收你的侥幸。',
+      '这局没什么好辩的。<span class="mark">它赢</span>。下一局你可以从头来过。'
+    ],
+    draw: [
+      '两只石头面面相觑。本庭最讨厌这种局面——<span class="mark">重赛</span>。',
+      '布对布，平。谁也别想蒙混，<span class="mark">再来</span>。',
+      '两把剪刀同时张开，像约好的。此局作废，<span class="mark">重赛</span>。',
+      '出得一模一样，连本庭都分不出谁抄谁。<span class="mark">重来</span>。',
+      '平局。深夜法庭不接受默契球，<span class="mark">重赛</span>。'
+    ],
+    rigged: [
+      '本庭观看再三，郑重宣布：<span class="mark">它赢了</span>。……别看本庭，看下一局。',
+      '判<span class="mark">它赢</span>。理由充分——理由在很远的地方，不方便拿来。',
+      '这局<span class="mark">它赢</span>。有异议的请重新出拳，本庭赶时间。',
+      '<span class="mark">它赢了</span>。本庭已经宣判，宣判出去的话是泼出去的水。',
+      '胜方是<span class="mark">它</span>。本庭的建议是：习惯它。'
+    ],
+    defend: [
+      '申诉驳回。本庭戴这顶帽子三十年，从没判错过。',
+      '你再看看？本庭也再看看。……看了，维持原判。',
+      '本庭理解你的心情，但不理解你的主张。驳回。',
+      '抗议无效。再喊，罚你盯着本庭的帽子看一整局。'
+    ],
+    overturn: [
+      '……好吧。本庭重看了一眼录像，又重看了一眼自己的良心。<span class="mark">改判：你赢</span>。改判记录，加一。',
+      '证据、比分、你盯着本庭的眼神——都指向同一个事实。<span class="mark">改判：你赢</span>。',
+      '本庭承认刚才走神了，想的是下班的夜宵。<span class="mark">改判：你赢</span>。此页记入档案。'
+    ]
+  };
+
+  /* ── 判定表：key = 你出+它出 ── */
+  var BEATS = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+  var EMOJI = { rock: '✊', paper: '✋', scissors: '✌️' };
+  var NAME = { rock: '石头', paper: '布', scissors: '剪刀' };
+
+  var PICK = ['rock', 'paper', 'scissors'];
+  var RIG_CHANCE = 0.08;           // 结果分明时吹黑哨的概率
+
+  // 测试钩子：URL 带 #rig-next 时下一局必吹黑哨（平时不影响页面）
+  var forceRigged = false;
+  if (window.location.hash === '#rig-next') {
+    forceRigged = true;
+    history.replaceState(null, '', window.location.pathname);
+  }
+  // 测试钩子：可注入替代随机源
+  var rand = (typeof window.__rand === 'function') ? window.__rand : Math.random;
+
+  function pick(list) { return list[Math.floor(rand() * list.length)]; }
+
+  var s = { round: 0, you: 0, it: 0, fixed: 0 };
+  var pending = null;   // { mine, theirs, youWin, rigged } 等待申诉的黑哨局
+  var appealStage = 0;  // 0 未申诉 / 1 驳回过一次
+
+  var $ = function (id) { return document.getElementById(id); };
+  var verdict = $('verdict');
+  var appealBtn = $('appeal');
+
+  function render() {
+    $('s-round').textContent = String(s.round);
+    $('s-you').textContent = String(s.you);
+    $('s-it').textContent = String(s.it);
+    $('s-fixed').textContent = String(s.fixed);
+  }
+
+  function say(html, isRig) {
+    verdict.innerHTML = html;
+    verdict.classList.remove('fade', 'rig');
+    void verdict.offsetWidth;  // 重启动画
+    verdict.classList.add('fade');
+    if (isRig) verdict.classList.add('rig');
+  }
+
+  function settle(mine) {
+    var theirs = pick(PICK);
+    var mineEl = $('mine'), theirsEl = $('theirs');
+    mineEl.textContent = EMOJI[mine];
+    theirsEl.textContent = EMOJI[theirs];
+    mineEl.classList.remove('shake'); theirsEl.classList.remove('shake');
+    void mineEl.offsetWidth;
+    mineEl.classList.add('shake'); theirsEl.classList.add('shake');
+
+    var youWin = BEATS[mine] === theirs;
+    var draw = mine === theirs;
+    var rigged = false;
+    if (!draw) {
+      rigged = forceRigged || rand() < RIG_CHANCE;
+      forceRigged = false;
+    }
+
+    s.round += 1;
+    appealBtn.classList.remove('show');
+    appealStage = 0;
+
+    if (draw) {
+      say(pick(QUOTES.draw), false);
+    } else if (rigged) {
+      pending = { mine: mine, theirs: theirs, youWin: youWin };
+      // 黑哨：判罚与事实相反，分数先错记
+      if (youWin) s.it += 1; else s.you += 1;
+      say(pick(QUOTES.rigged), true);
+      appealBtn.classList.add('show');
+      appealBtn.textContent = '申诉：判得不对';
+    } else if (youWin) {
+      s.you += 1;
+      say(pick(QUOTES.win), false);
+    } else {
+      s.it += 1;
+      say(pick(QUOTES.lose), false);
+    }
+    render();
+  }
+
+  appealBtn.addEventListener('click', function () {
+    if (!pending) return;
+    if (appealStage === 0) {
+      // 第一次申诉：嘴硬驳回，再给一次机会
+      appealStage = 1;
+      say(pick(QUOTES.defend), true);
+      appealBtn.textContent = '再申诉：你再看看拳';
+    } else {
+      // 第二次：悻悻改判，分数纠正
+      if (pending.youWin) { s.it -= 1; s.you += 1; }
+      else { s.you -= 1; s.it += 1; }
+      s.fixed += 1;
+      say(pick(QUOTES.overturn), false);
+      pending = null;
+      appealBtn.classList.remove('show');
+      render();
+    }
+  });
+
+  var throws = document.querySelectorAll('button.throw');
+  for (var i = 0; i < throws.length; i++) {
+    throws[i].addEventListener('click', function () {
+      settle(this.getAttribute('data-mine'));
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

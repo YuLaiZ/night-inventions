@@ -117,6 +117,7 @@
     <div class="btn-row">
       <button type="button" id="btn-fast">岁月加速</button>
       <button type="button" id="btn-reset">重新出生</button>
+      <button type="button" id="btn-save">收下这幅</button>
     </div>
   </div>
 
@@ -266,6 +267,14 @@
     stage = stageOf(age);
     $('stage-line').textContent = stage;
     draw();
+  });
+
+  // 收下这幅：导出此刻的像素居民（含当前岁数命名）
+  $('btn-save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'pixel-resident-' + Math.floor(age) + 'yo.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
   });
 
   setInterval(tick, 250);

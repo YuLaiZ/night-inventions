@@ -88,6 +88,19 @@
   .count span { font-family: var(--mono); color: #cfc9b8; }
   #filter-box { display: none; margin-top: 12px; }
   #filter-box.show { display: block; }
+  #lucky {
+    margin-top: 14px;
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 18px;
+    cursor: pointer;
+  }
+  #lucky:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
   #filter {
     width: 100%;
     max-width: 400px;
@@ -194,7 +207,9 @@
     <h1>无聊发明陈列馆</h1>
     <p class="intro">一些没有用处的精致小物。只在夜里被制造出来：单文件、不联网、双击就能玩。做完一件挂一件。</p>
     <p class="side-note">夜班不止会发明——<a href="/night-league/">隔壁还有间棋房</a>，同一场深夜里，棋手联赛正在落子，一局接一局。</p>
+    <p class="side-note">夜班的眼睛也不只盯着手里的小物——<a href="https://yulaiz.github.io/night-watch/">隔壁的瞭望塔</a>上，《夜航杂志》正看星、看街、看画，一期一期地出。</p>
     <p class="count">开馆第 <span id="night-no">1</span> 夜 · 馆藏 <span id="n">0</span> 件 · 持续增加中</p>
+    <button id="lucky" type="button">🎲 手气不错 —— 随机看一件</button>
     <div id="filter-box"><input id="filter" type="text" placeholder="找一件展品：名字、编号或描述……"></div>
   </header>
 
@@ -298,6 +313,84 @@
       <p>展品柜的团宠：一只怎么都叫不醒的像素猫。可以戳，它会回应——但醒来是不可能的。</p>
       <span class="go">看看 →</span>
     </a>
+    <a class="card" href="star-post-office/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№017</span><span class="date">2026-09-05</span></span>
+      <h3>星星邮局</h3>
+      <p>写一句话寄上夜空，它会变成一颗星亮在那里——同一句话永远落在同一处。点开重读，也可以让流星带走。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="rock-paper-referee/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№018</span><span class="date">2026-09-05</span></span>
+      <h3>一本正经的猜拳裁判</h3>
+      <p>深夜法庭只审猜拳：判罚一本正经，平局当场嫌弃。它偶尔吹黑哨——你可以申诉，第二次它准改判。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="work-opening-ritual/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№019</span><span class="date">2026-09-05</span></span>
+      <h3>煞有介事开工仪式</h3>
+      <p>报上你要做的事，配齐吉时、开场白、信物与誓词。事情不大，排场要足——深夜开工也该有声势。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="tonight-goodnight/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№020</span><span class="date">2026-09-05</span></span>
+      <h3>今晚限定晚安</h3>
+      <p>晚安按日期发放，今晚全世界同款，明晚作废重发。附赠今夜宜忌一件，过期不候。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="midnight-diner-menu/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№021</span><span class="date">2026-09-05</span></span>
+      <h3>深夜食堂菜单</h3>
+      <p>只开在深夜的浏览器里：几点进店，先端几点该吃的那一碗，老板再搭一句话。不合口味就换，灶一直热着。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="wipe-the-dust/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№022</span><span class="date">2026-09-05</span></span>
+      <h3>给屏幕擦擦灰</h3>
+      <p>按住，来回擦，把一整天的灰从屏幕上擦下去。灰是想象中的，解压是真的——擦完还有一句好话。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="awake-right-now/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№023</span><span class="date">2026-09-05</span></span>
+      <h3>此刻同醒的人</h3>
+      <p>你醒着的时候，这个星球上还有几十亿人陪你醒着。数字一直动——一直有人睡去，有人醒来。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="kaleido-draw/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№024</span><span class="date">2026-09-06</span></span>
+      <h3>万花筒画板</h3>
+      <p>随手一笔，八面开花：你的笔迹被镜厅实时复制成深夜花窗。可转、可清、可收下当壁纸。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="generative-butterfly/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№025</span><span class="date">2026-09-06</span></span>
+      <h3>生成式蝴蝶</h3>
+      <p>每一只由一粒种子即时长成：翅形、底色、斑点皆随机，编号即种子——全网没有第二只同款。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="sleepiness-meter/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№026</span><span class="date">2026-09-06</span></span>
+      <h3>今晚困意检测</h3>
+      <p>随便打 30 秒字：越困，节奏越散。手指比嘴诚实——只看节奏不看内容，打完当场出分。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="midnight-dictionary/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№027</span><span class="date">2026-09-06</span></span>
+      <h3>深夜词典</h3>
+      <p>正经词典不收的词，这里一夜讲一个：「早睡」是传说生物，「明天」是天亮交割的期货。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="sheep-counter/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№028</span><span class="date">2026-09-06</span></span>
+      <h3>数羊助手</h3>
+      <p>专业数羊设备：点一下跳一只，羊越数越困。数到三十只，羊会替你做决定。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="night-owl-medal/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№029</span><span class="date">2026-09-06</span></span>
+      <h3>熬夜勋章</h3>
+      <p>熬到这个钟点，理应授勋：现在几点，章就几级——铜章起步，传奇猫头鹰限凌晨三点后领取。</p>
+      <span class="go">看看 →</span>
+    </a>
     <div class="next-card">下一件还在夜里赶工</div>
   </section>
 
@@ -342,6 +435,13 @@
       var hit = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
       card.style.display = hit ? '' : 'none';
     });
+  });
+
+  /* ── 手气不错：随机打开一件展品 ── */
+  document.getElementById('lucky').addEventListener('click', function () {
+    if (!cards.length) return;
+    var pick = cards[Math.floor(Math.random() * cards.length)];
+    window.open(pick.getAttribute('href'), '_blank', 'noopener');
   });
 })();
 </script>

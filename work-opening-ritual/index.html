@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>煞有介事开工仪式</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .ask { margin-top: clamp(24px, 5vw, 32px); }
+  label { display: block; font-size: 14px; color: var(--ink-dim); letter-spacing: 0.08em; margin-bottom: 8px; }
+  input#task {
+    width: 100%;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    outline: none;
+  }
+  input#task:focus { border-color: var(--ice); }
+  input#task::placeholder { color: rgba(139, 150, 173, 0.7); }
+
+  .go-row { margin-top: 14px; display: flex; gap: 12px; flex-wrap: wrap; }
+  button.main {
+    flex: 1;
+    min-width: 140px;
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 22px;
+    cursor: pointer;
+  }
+  button.main:hover { filter: brightness(1.08); }
+  button.main:active { transform: scale(0.98); }
+  button.ghost {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 11px 22px;
+    cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--ice); }
+  .copy-note { align-self: center; font-size: 13px; color: var(--ink-dim); }
+
+  /* ── 仪式卷轴 ── */
+  .scroll {
+    display: none;
+    margin-top: clamp(26px, 6vw, 36px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+  }
+  .scroll.show { display: block; animation: unroll 0.5s ease; }
+  @keyframes unroll { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .scroll .head {
+    text-align: center;
+    font-size: 13px;
+    color: var(--gold);
+    letter-spacing: 0.4em;
+    margin-bottom: 14px;
+  }
+  .scroll .item { margin-top: 12px; }
+  .scroll .item .tag {
+    display: inline-block;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.2em;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 2px;
+    margin-bottom: 4px;
+  }
+  .scroll .item p { color: var(--ink-strong); font-size: clamp(15px, 4vw, 17px); }
+  .scroll .item .charm { font-size: 26px; margin-right: 8px; }
+  .scroll .oath { color: var(--gold); }
+  .hint { margin-top: 16px; text-align: center; font-size: 13px; color: var(--ink-dim); }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>煞有介事开工仪式</h1>
+  <p class="sub">事情不大，排场要足。报上你要做的事，本仪式为你配齐<em>吉时、开场白、信物与誓词</em>——深夜开工，也该有声势。</p>
+
+  <div class="ask">
+    <label for="task">你深呼吸之后要去做什么？</label>
+    <input id="task" type="text" maxlength="30" placeholder="例如：写周报 / 收拾桌面 / 给一年后的自己写信" autocomplete="off">
+    <div class="go-row">
+      <button class="main" id="go" type="button">择吉开工</button>
+      <button class="ghost" id="again" type="button" style="display:none">再誓一次</button>
+      <button class="ghost" id="copy" type="button" style="display:none">誊抄全文</button>
+      <span class="copy-note" id="copy-note"></span>
+    </div>
+  </div>
+
+  <div class="scroll" id="scroll" aria-live="polite">
+    <div class="head">开工仪式 · 依夜例举办</div>
+    <div class="item"><span class="tag">吉时</span><p id="r-time"></p></div>
+    <div class="item"><span class="tag">开场白</span><p id="r-open"></p></div>
+    <div class="item"><span class="tag">仪式手势</span><p id="r-gesture"></p></div>
+    <div class="item"><span class="tag">开工信物</span><p><span class="charm" id="r-charm-emoji"></span><span id="r-charm"></span></p></div>
+    <div class="item"><span class="tag">誓词</span><p class="oath" id="r-oath"></p></div>
+    <p class="hint">仪式因人而异，因夜而异。重办一场，换一套排场。</p>
+  </div>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var OPENERS = [
+    '天地为证，窗外只剩零星灯火：一位深夜还醒着的人，决意{x}。',
+    '此刻，城市睡了大半。而你，偏要{x}。勇气可嘉，本仪式予以背书。',
+    '历史不会记住这个夜晚，但你会——因为你要{x}了。',
+    '据夜班观察所报告：{x}的动静，即将出现在这张桌子上。',
+    '鼓声（想象中的）已停，各方安静。那位要{x}的人，请就位。',
+    '夜深了，万物的借口都已用完。轮到你了：{x}。'
+  ];
+  var GESTURES = [
+    '双手悬空三秒，像给键盘暖场，顺便把瞌睡按回枕头里。',
+    '挺直背，深吸一口气，吐气时把杂念一并吹到明天。',
+    '用拇指与食指虚捏，把刚才的犹豫从空气里摘走，丢掉。',
+    '转一下手腕，权当拧亮一盏只有你自己看得见的灯。',
+    '坐正，双肩下沉两厘米——把「等会儿再说」从肩上卸下来。',
+    '把手机翻个面，屏幕朝下。这是今晚最大的一场法事。'
+  ];
+  var CHARMS = [
+    ['🦉', '值夜的猫头鹰已就位，负责替你盯着困意。'],
+    ['🌙', '月亮做你的台灯，省电，且够亮。'],
+    ['☕', '一杯想象中的热饮，续杯不限次，反正不要钱。'],
+    ['🔦', '这支聚光灯从现在起只照你的桌面。'],
+    ['⚓', '把它抛在任务跟前，今晚这只船漂不到别处去。'],
+    ['🧧', '深夜特供红包，里面装的是「开工大吉」四个字。'],
+    ['🕯️', '一支不存在的蜡烛，火苗朝你做事的方向偏。']
+  ];
+  var OATHS = [
+    '自此刻起专心{x}，不刷手机——刷了就刷了，回头再誓一次。',
+    '{x}途中若遇困难，允许叹气，不允许关页。',
+    '做完{x}之前，谁也别想让我承认困。困也不承认。',
+    '{x}这件事，今晚必须有个交代；交代可以是「做完了」。',
+    '此夜过此关。若中途躺下，愿枕头略硬，好让我睡不安稳，起来继续{x}。',
+    '{x}期间天塌下来，先记在便签上，做完再看是哪片天。'
+  ];
+
+  // 吉时按本地时段给评语
+  function timeSlot(h) {
+    if (h >= 23) return '夜的正席。此时开工，天亮前必有小成。';
+    if (h < 6) return '夜的最深处。此刻开工的人，连困意都要礼让三分。';
+    if (h < 9) return '早班的先头部队。你比太阳还先到岗。';
+    if (h < 12) return '上午的黄金档。此刻的排场，白天一样作数。';
+    if (h < 18) return '午后懒散档，正需要一场仪式提气。';
+    return '黄昏到夜晚的交界，最适合一次郑重其事的开工。';
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var lastRitual = '';
+
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+  function fill(tpl, x) { return tpl.split('{x}').join(x); }
+
+  function hold() {
+    var x = $('task').value.trim();
+    if (!x) {
+      $('copy-note').textContent = '先报上要做的事，仪式才好办。';
+      $('task').focus();
+      return;
+    }
+    var now = new Date();
+    var t = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    var charm = pick(CHARMS);
+
+    $('r-time').textContent = t + '——' + timeSlot(now.getHours());
+    $('r-open').textContent = fill(pick(OPENERS), x);
+    $('r-gesture').textContent = pick(GESTURES);
+    $('r-charm-emoji').textContent = charm[0];
+    $('r-charm').textContent = charm[1];
+    $('r-oath').textContent = '誓词：' + fill(pick(OATHS), x) + ' 誓毕，礼成。';
+
+    lastRitual = '【开工仪式 · ' + t + '】\n'
+      + '事项：' + x + '\n'
+      + '吉时：' + $('r-time').textContent + '\n'
+      + '开场白：' + $('r-open').textContent + '\n'
+      + '仪式手势：' + $('r-gesture').textContent + '\n'
+      + '开工信物：' + charm[0] + ' ' + charm[1] + '\n'
+      + $('r-oath').textContent;
+
+    $('scroll').classList.remove('show');
+    void $('scroll').offsetWidth;
+    $('scroll').classList.add('show');
+    $('again').style.display = '';
+    $('copy').style.display = '';
+    $('copy-note').textContent = '';
+  }
+
+  $('go').addEventListener('click', hold);
+  $('again').addEventListener('click', hold);
+  $('task').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') hold();
+  });
+  $('copy').addEventListener('click', function () {
+    var self = this;
+    navigator.clipboard.writeText(lastRitual).then(function () {
+      $('copy-note').textContent = '已誊抄，贴给谁看都行。';
+      self.textContent = '再誊一份';
+    }, function () {
+      $('copy-note').textContent = '浏览器没点头，誊抄未成。';
+    });
+  });
+})();
+</script>
+</body>
+</html>

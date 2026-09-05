@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数羊助手</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .count {
+    margin-top: clamp(24px, 5vw, 32px);
+    font-family: var(--mono);
+    font-size: clamp(44px, 12vw, 64px);
+    color: var(--ink-strong);
+    line-height: 1.2;
+  }
+  .count small { font-size: 0.4em; color: var(--ink-dim); }
+
+  .field {
+    margin-top: clamp(16px, 4vw, 22px);
+    height: 130px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(156, 200, 255, 0.04);
+    position: relative;
+    overflow: hidden;
+  }
+  .fence {
+    position: absolute;
+    left: 50%; top: 24px;
+    transform: translateX(-50%);
+    font-size: 42px;
+    opacity: 0.85;
+  }
+  .sheep {
+    position: absolute;
+    top: 34px;
+    font-size: 34px;
+    transition: left 0.9s ease, top 0.9s ease, opacity 0.9s ease;
+    will-change: left, top;
+  }
+  .say {
+    margin-top: 14px;
+    min-height: 3.2em;
+    color: var(--ink-strong);
+    font-size: clamp(16px, 4.2vw, 18px);
+  }
+
+  .go-row { margin-top: 16px; }
+  button.main {
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 30px;
+    cursor: pointer;
+  }
+  button.main:hover { filter: brightness(1.08); }
+  button.main:active { transform: scale(0.98); }
+  button.main:disabled { opacity: 0.45; cursor: default; transform: none; filter: none; }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>数羊助手</h1>
+  <p class="sub">数羊的专业设备：<em>点一下，跳一只</em>。数到三十只，羊会替你做决定。</p>
+
+  <div class="count"><span id="n">0</span><small> 只</small></div>
+
+  <div class="field" id="field">
+    <div class="fence">🪵</div>
+  </div>
+
+  <p class="say" id="say">羊圈里安安静静。点下面，放第一只出来。</p>
+
+  <div class="go-row">
+    <button class="main" id="go" type="button">放一只羊</button>
+  </div>
+
+  <p class="hint">本设备数过的羊总计不会超过三十只——不是羊不够，是没必要。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var MAX = 30;
+  var SAYS = [
+    { until: 0,  t: '羊圈里安安静静。点下面，放第一只出来。' },
+    { until: 3,  t: '一只一只来，别急。今晚的羊都很配合。' },
+    { until: 8,  t: '栅栏有点旧了，羊跳得小心翼翼。' },
+    { until: 14, t: '数到这儿，字都开始排队了。正常现象。' },
+    { until: 20, t: '后面的羊明显慢了——它们也困。' },
+    { until: 26, t: '刚才那只打了个哈欠，后面的队伍开始效仿。' },
+    { until: 29, t: '羊群集体放慢脚步，像在等你先睡着。' }
+  ];
+  var END_T = '三十只，到岗。羊都睡了——名额让给你，别浪费。';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var n = 0;
+
+  function sayFor(k) {
+    var t = SAYS[0].t;
+    for (var i = 0; i < SAYS.length; i++) {
+      if (k > SAYS[i].until) t = SAYS[i].t;
+    }
+    return t;
+  }
+
+  $('go').addEventListener('click', function () {
+    if (n >= MAX) return;
+    n++;
+    $('n').textContent = String(n);
+
+    // 一只羊从左侧跳过栅栏，落到右侧草丛
+    var field = $('field');
+    var w = field.clientWidth;
+    var sheep = document.createElement('div');
+    sheep.className = 'sheep';
+    sheep.textContent = '🐑';
+    sheep.style.left = '6%';
+    sheep.style.top = '34px';
+    field.appendChild(sheep);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        sheep.style.left = (58 + Math.random() * 30) + '%';
+        sheep.style.top = (66 + Math.random() * 14) + '%';
+        sheep.style.opacity = '0.9';
+      });
+    });
+
+    if (n >= MAX) {
+      $('say').textContent = END_T;
+      $('go').disabled = true;
+      $('go').textContent = '今晚的羊用完了';
+    } else {
+      $('say').textContent = sayFor(n);
+    }
+  });
+})();
+</script>
+</body>
+</html>

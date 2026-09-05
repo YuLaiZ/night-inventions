@@ -93,6 +93,19 @@
   footer { margin-top: clamp(36px, 7vw, 52px); }
   .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
   .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+  .save-row { margin-top: 20px; }
+  .save-row button {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  .save-row button:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
 </style>
 </head>
 <body>
@@ -115,6 +128,8 @@
 
   <p class="strip-label">前后十五天的它</p>
   <div id="strip"></div>
+
+  <p class="save-row"><button id="save-moon" type="button">收下今晚的月亮</button></p>
 
   <p class="hint">亮面在北半球视角：右侧先亮，是"盈"；左侧先亮，是"亏"。</p>
 
@@ -223,6 +238,14 @@
 
   renderMain();
   renderStrip();
+
+  // 收下今晚的月亮：导出主月面为 PNG
+  document.getElementById('save-moon').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'tonight-moon.png';
+    a.href = document.getElementById('moonCanvas').toDataURL('image/png');
+    a.click();
+  });
 })();
 </script>
 </body>

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>万花筒画板</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .tools {
+    margin-top: clamp(20px, 5vw, 26px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .swatch {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    padding: 0;
+    background: none;
+  }
+  .swatch.sel { border-color: var(--ink-strong); transform: scale(1.12); }
+  .swatch span { display: none; }
+  .brush {
+    display: flex; align-items: center; gap: 8px;
+    margin-left: auto;
+    font-size: 13px; color: var(--ink-dim);
+  }
+  .brush input[type="range"] { width: 90px; accent-color: var(--gold); }
+  .brush.sym-btns { gap: 6px; margin-left: 0; }
+  button.sym {
+    font-family: var(--sans);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  button.sym:hover { color: var(--ice); border-color: var(--ice); }
+  button.sym.sel-on {
+    color: var(--bg-0);
+    background: var(--gold);
+    border-color: var(--gold);
+  }
+
+  .glass {
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #070a12;
+    touch-action: none;
+  }
+  canvas { display: block; width: 100%; cursor: crosshair; }
+
+  .go-row {
+    margin-top: 14px;
+    display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 22px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+  button.act.primary {
+    color: var(--bg-0);
+    background: var(--gold);
+    border-color: var(--gold);
+  }
+  button.act.primary:hover { filter: brightness(1.08); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>万花筒画板</h1>
+  <p class="sub">随手一笔，<em>八面开花</em>。你负责画，镜厅负责排场——画出来的每一幅都像深夜的花窗。</p>
+
+  <div class="tools" id="tools">
+    <button class="swatch sel" data-c="#f2c76e" style="background:#f2c76e" type="button" aria-label="金色"><span>金</span></button>
+    <button class="swatch" data-c="#9cc8ff" style="background:#9cc8ff" type="button" aria-label="冰蓝"><span>冰蓝</span></button>
+    <button class="swatch" data-c="#edf1fa" style="background:#edf1fa" type="button" aria-label="月白"><span>月白</span></button>
+    <button class="swatch" data-c="#e08585" style="background:#e08585" type="button" aria-label="玫瑰"><span>玫瑰</span></button>
+    <button class="swatch" data-c="#8fd9c5" style="background:#8fd9c5" type="button" aria-label="青玉"><span>青玉</span></button>
+    <span class="brush">笔粗 <input type="range" id="width" min="1" max="6" step="1" value="2"></span>
+    <span class="brush sym-btns">对称
+      <button class="sym" data-s="6" type="button">六重</button>
+      <button class="sym sel-on" data-s="8" type="button">八重</button>
+      <button class="sym" data-s="12" type="button">十二重</button>
+    </span>
+  </div>
+
+  <div class="glass" id="glass">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="go-row">
+    <button class="act" id="spin" type="button">转一下</button>
+    <button class="act" id="clear" type="button">清空重画</button>
+    <button class="act primary" id="save" type="button">收下这幅</button>
+  </div>
+
+  <p class="hint">刚开张那朵是它自己长的，好让你看看这里的规矩。清掉，画你的。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var SYMMETRY = 8;          // 八重对称（可切 6/8/12）
+  var color = '#f2c76e';
+  var lw = 2;
+  var last = null;           // 上一笔触点（画布 CSS 像素坐标）
+  var drawing = false;
+
+  function size() {
+    var w = document.getElementById('glass').clientWidth;
+    var h = Math.max(300, Math.min(480, Math.round(w * 0.72)));
+    var dpr = window.devicePixelRatio || 1;
+    // 保留旧画面：先拷到离屏，扩完再贴回
+    var old = null;
+    if (cv.width > 0 && cv.height > 0) {
+      old = document.createElement('canvas');
+      old.width = cv.width; old.height = cv.height;
+      old.getContext('2d').drawImage(cv, 0, 0);
+    }
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (old) {
+      // 画面按新尺寸居中缩放贴回
+      var s = Math.min(cv.width / old.width, cv.height / old.height);
+      var dw = old.width * s, dh = old.height * s;
+      ctx.drawImage(old, (cv.width - dw) / 2 / dpr, (cv.height - dh) / 2 / dpr, dw / dpr, dh / dpr);
+    }
+  }
+
+  function pt(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  // 一段笔迹按 8 重对称 + 瓣内镜像复制（辉光感 = 粗透明底 + 细实线）
+  function strokeSeg(a, b) {
+    var cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
+    var ax = a.x - cx, ay = a.y - cy, bx = b.x - cx, by = b.y - cy;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (var k = 0; k < SYMMETRY; k++) {
+      var ang = k * 2 * Math.PI / SYMMETRY;
+      var cos = Math.cos(ang), sin = Math.sin(ang);
+      [[1, 0], [-1, 0]].forEach(function (mir) {
+        var m = mir[0];
+        // 旋转 + 镜像
+        var p1 = { x: (ax * cos - ay * sin) * m, y: ax * sin + ay * cos };
+        var p2 = { x: (bx * cos - by * sin) * m, y: bx * sin + by * cos };
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.18;
+        ctx.lineWidth = lw * 3.2;
+        line(p1, p2, cx, cy);
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = lw;
+        line(p1, p2, cx, cy);
+        ctx.globalAlpha = 1;
+      });
+    }
+  }
+
+  function line(p1, p2, cx, cy) {
+    ctx.beginPath();
+    ctx.moveTo(cx + p1.x, cy + p1.y);
+    ctx.lineTo(cx + p2.x, cy + p2.y);
+    ctx.stroke();
+  }
+
+  function dot(p) {
+    strokeSeg(p, { x: p.x + 0.01, y: p.y + 0.01 });
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    drawing = true;
+    last = pt(e);
+    dot(last);
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drawing) return;
+    var p = pt(e);
+    strokeSeg(last, p);
+    last = p;
+    e.preventDefault();
+  });
+  window.addEventListener('pointerup', function () { drawing = false; last = null; });
+
+  /* ── 工具行 ── */
+  var swatches = document.querySelectorAll('.swatch');
+  for (var i = 0; i < swatches.length; i++) {
+    swatches[i].addEventListener('click', function () {
+      for (var j = 0; j < swatches.length; j++) swatches[j].classList.remove('sel');
+      this.classList.add('sel');
+      color = this.getAttribute('data-c');
+    });
+  }
+  document.getElementById('width').addEventListener('input', function () {
+    lw = parseInt(this.value, 10);
+  });
+
+  // 对称数切换：只影响之后的笔画，已画的不动
+  var syms = document.querySelectorAll('button.sym');
+  for (var si = 0; si < syms.length; si++) {
+    syms[si].addEventListener('click', function () {
+      for (var sj = 0; sj < syms.length; sj++) syms[sj].classList.remove('sel-on');
+      this.classList.add('sel-on');
+      SYMMETRY = parseInt(this.getAttribute('data-s'), 10);
+    });
+  }
+
+  // 转一下：把现有画面绕中心转 15°，观感像镜厅换了姿势
+  document.getElementById('spin').addEventListener('click', function () {
+    var dpr = window.devicePixelRatio || 1;
+    var off = document.createElement('canvas');
+    off.width = cv.width; off.height = cv.height;
+    off.getContext('2d').drawImage(cv, 0, 0);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.translate(cv.width / 2, cv.height / 2);
+    ctx.rotate(15 * Math.PI / 180);
+    ctx.drawImage(off, -off.width / 2, -off.height / 2);
+    ctx.restore();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+
+  document.getElementById('clear').addEventListener('click', function () {
+    ctx.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
+  });
+
+  document.getElementById('save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'kaleido-' + Date.now() + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+
+  /* ── 开场示例：它自己长的第一朵（一次性画完，无动画） ── */
+  function sample() {
+    var cx = cv.clientWidth / 2, cy = cv.clientHeight / 2;
+    var R = Math.min(cx, cy) * 0.72;
+    var oldColor = color, oldLw = lw;
+    color = '#f2c76e'; lw = 2;
+    var petalN = 6, per = 14;
+    for (var p = 0; p < petalN; p++) {
+      var base = p * 2 * Math.PI / petalN;
+      for (var s = 1; s <= per; s++) {
+        var t1 = s / per, t0 = (s - 1) / per;
+        var r1 = R * t1, r0 = R * t0;
+        var wob1 = Math.sin(t1 * Math.PI) * R * 0.22;
+        var wob0 = Math.sin(t0 * Math.PI) * R * 0.22;
+        var a1 = { x: cx + Math.cos(base) * r0 + Math.cos(base + Math.PI / 2) * wob0,
+                   y: cy + Math.sin(base) * r0 + Math.sin(base + Math.PI / 2) * wob0 };
+        var a2 = { x: cx + Math.cos(base) * r1 + Math.cos(base + Math.PI / 2) * wob1,
+                   y: cy + Math.sin(base) * r1 + Math.sin(base + Math.PI / 2) * wob1 };
+        strokeSeg(a1, a2);
+      }
+    }
+    color = '#9cc8ff'; lw = 1;
+    for (var d = 0; d < 10; d++) {
+      var rr = R * (0.12 + d * 0.06);
+      var th = d * 2.399963;   // 黄金角，撒一圈点
+      dot({ x: cx + Math.cos(th) * rr, y: cy + Math.sin(th) * rr });
+    }
+    color = oldColor; lw = oldLw;
+  }
+
+  window.addEventListener('resize', function () { size(); });
+
+  size();
+  sample();
+})();
+</script>
+</body>
+</html>

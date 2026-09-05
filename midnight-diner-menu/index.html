@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜食堂菜单</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  /* ── 菜单黑板 ── */
+  .board-menu {
+    margin-top: clamp(24px, 5vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(20px, 5vw, 30px);
+    text-align: center;
+  }
+  .serve-time { font-size: 13px; color: var(--ink-dim); letter-spacing: 0.2em; }
+  .serve-time .num { font-family: var(--mono); letter-spacing: 0.08em; }
+  .dish { margin-top: 14px; }
+  .dish .emoji { font-size: clamp(44px, 11vw, 58px); line-height: 1.3; }
+  .dish h2 {
+    margin-top: 8px;
+    color: var(--gold);
+    font-size: clamp(21px, 5.5vw, 26px);
+    letter-spacing: 0.06em;
+  }
+  .dish .desc { margin-top: 6px; color: var(--ink-strong); font-size: clamp(15px, 4vw, 17px); }
+  .chef {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+    color: var(--ink-dim);
+    font-size: 14px;
+  }
+  .chef .who { color: var(--ice); margin-right: 8px; }
+  .board-menu .fade { animation: fadein 0.4s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  .go-row { margin-top: 18px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  button.main {
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.main:hover { filter: brightness(1.08); }
+  button.main:active { transform: scale(0.98); }
+  .note {
+    margin-top: clamp(24px, 5vw, 30px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜食堂菜单</h1>
+  <p class="sub">本店只开在深夜的浏览器里，锅气管够、<em>一概不花钱</em>。几点进店，就给你上几点该吃的那一碗。</p>
+
+  <div class="board-menu" id="board">
+    <p class="serve-time" id="serve-time"></p>
+    <div class="dish">
+      <div class="emoji" id="dish-emoji"></div>
+      <h2 id="dish-name"></h2>
+      <p class="desc" id="dish-desc"></p>
+    </div>
+    <p class="chef"><span class="who">老板</span><span id="chef-say"></span></p>
+  </div>
+
+  <div class="go-row">
+    <button class="main" id="next" type="button">换一碗</button>
+  </div>
+
+  <p class="note">菜单按钟点排：几点来，就先推荐几点的锅。不合口味就换一碗，反正灶一直热着。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  // 按钟点排的锅：[开始钟点, 结束钟点) 依次认领，其余归「 Any 」
+  var MENU = [
+    { h: [22, 24], emoji: '🍜', name: '头汤泡面（加蛋）', desc: '深夜第一碗，面要略微煮硬——夜还长，别急着软。' },
+    { h: [0, 2], emoji: '🥟', name: '一份煎饺两色', desc: '底脆皮软，一半焦香一半温柔，正好配你一半清醒一半困。' },
+    { h: [2, 4], emoji: '🍲', name: '砂锅小馄饨', desc: '这个钟点还醒着的人，汤要滚烫，皮要薄得能透光。' },
+    { h: [4, 6], emoji: '🥚', name: '茶一碗蛋一枚', desc: '快天亮了，吃点入味的。茶叶蛋在锅里转了一夜，比你先想通。' },
+    { h: [6, 11], emoji: '🥣', name: '白粥配小菜', desc: '夜班的收尾，早班的开工，一碟酱瓜两头都合适。' },
+    { h: [11, 17], emoji: '🍱', name: '过午简餐一份', desc: '白天来也接客。菜色家常，分量实在，不问你几点睡的。' },
+    { h: [17, 22], emoji: '🍢', name: '关东煮一串', desc: '黄昏进店的人最有口福：汤头刚熬开，萝卜最入味。' }
+  ];
+
+  var CHEF_SAYS = [
+    '慢点吃，锅里还有。',
+    '吃碗的工夫，天大的事也先在碗外面等着。',
+    '本店不问来路，只问加不加辣。',
+    '吃完了再想心事，空着胃想不出好结果。',
+    '今天这碗是我看着火候起的，替你尝过咸淡了。',
+    '深夜吃饭不丢人，丢人的是不给自己留这一碗。',
+    '汤免费续，心事打包带走。',
+    '坐会儿再走吧，外头风大。'
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  var lastIdx = -1;
+
+  function dishForHour(h) {
+    for (var i = 0; i < MENU.length; i++) {
+      if (h >= MENU[i].h[0] && h < MENU[i].h[1]) return i;
+    }
+    return Math.floor(Math.random() * MENU.length);
+  }
+
+  function show(idx) {
+    lastIdx = idx;
+    var dish = MENU[idx];
+    var now = new Date();
+    var h = now.getHours();
+    var slot = pad(h) + ':00 – ' + pad((h + 1) % 24) + ':00';
+
+    $('serve-time').innerHTML = '此刻 <span class="num">' + slot + '</span> 的锅';
+    $('dish-emoji').textContent = dish.emoji;
+    $('dish-name').textContent = dish.name;
+    $('dish-desc').textContent = dish.desc;
+    $('chef-say').textContent = '「' + CHEF_SAYS[Math.floor(Math.random() * CHEF_SAYS.length)] + '」';
+
+    var board = $('board');
+    board.classList.remove('fade');
+    void board.offsetWidth;
+    board.classList.add('fade');
+  }
+
+  function serve() { show(dishForHour(new Date().getHours())); }
+
+  function swap() {
+    var idx;
+    do { idx = Math.floor(Math.random() * MENU.length); } while (MENU.length > 1 && idx === lastIdx);
+    show(idx);
+  }
+
+  $('next').addEventListener('click', swap);
+  serve();
+})();
+</script>
+</body>
+</html>

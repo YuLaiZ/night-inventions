@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今晚困意检测</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --red: #e08585;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .lab { margin-top: clamp(22px, 5vw, 28px); }
+  .lab .ask { font-size: 14px; color: var(--ink-dim); letter-spacing: 0.06em; margin-bottom: 8px; }
+  textarea#pad {
+    width: 100%;
+    min-height: 130px;
+    resize: vertical;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    outline: none;
+  }
+  textarea#pad:focus { border-color: var(--ice); }
+  .meter-row {
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .meter-row .num { font-family: var(--mono); color: var(--ice); }
+
+  .verdict {
+    display: none;
+    margin-top: clamp(22px, 5vw, 30px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+    text-align: center;
+  }
+  .verdict.show { display: block; animation: fadein 0.5s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  .verdict .score { font-family: var(--mono); font-size: clamp(40px, 11vw, 58px); color: var(--ink-strong); }
+  .verdict .score small { font-size: 0.45em; color: var(--ink-dim); }
+  .verdict .grade { margin-top: 2px; color: var(--gold); font-size: clamp(17px, 4.5vw, 20px); letter-spacing: 0.15em; }
+  .verdict .words { margin-top: 10px; color: var(--ink); font-size: clamp(15px, 4vw, 17px); }
+  .verdict .detail { margin-top: 12px; color: var(--ink-dim); font-size: 13px; }
+
+  .go-row { margin-top: 16px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 22px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>今晚困意检测</h1>
+  <p class="sub">不用睁眼回答问题——<em>随便打 30 秒字</em>，你的手指比嘴诚实：越困，节奏越散。</p>
+
+  <div class="lab">
+    <p class="ask" id="prompt">在下面随便打点什么：今天的最后一件事、明天的第一件事，或者只敲「哈哈哈哈」。打满 30 秒，机器替你看手。</p>
+    <textarea id="pad" placeholder="从现在开始，想到什么打什么……"></textarea>
+    <div class="meter-row">
+      <span id="state">等待落指</span>
+      <span>已采集 <span class="num" id="hits">0</span> 次键击 · 剩 <span class="num" id="left">30</span> 秒</span>
+    </div>
+  </div>
+
+  <div class="verdict" id="verdict">
+    <div class="score"><span id="score">--</span><small> / 100 困意</small></div>
+    <div class="grade" id="grade"></div>
+    <p class="words" id="words"></p>
+    <p class="detail" id="detail"></p>
+  </div>
+
+  <div class="go-row">
+    <button class="act" id="retry" type="button" style="display:none">换句话再测一次</button>
+  </div>
+
+  <p class="hint">纯本地分析：只看按键的时间间隔和退格频率，不看也不存你打了什么。手速没问题的人，别装困。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var DURATION = 30;         // 采集秒数
+  var MIN_HITS = 8;          // 有效判定的最少键击数
+  // 测试钩子：URL 带 #fast 时缩短采集（平时不影响页面）
+  if (window.location.hash === '#fast') {
+    DURATION = 3;
+    MIN_HITS = 3;
+    history.replaceState(null, '', window.location.pathname);
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = $('pad');
+  var intervals = [];        // 键间隔(ms)
+  var backspaces = 0;
+  var hits = 0;
+  var startedAt = null;      // 墙钟
+  var lastKeyAt = 0;
+  var timer = null;
+  var done = false;
+
+  function fmtTime(s) { return String(Math.max(0, Math.ceil(s))).padStart(2, '0'); }
+
+  function onKey(e) {
+    if (done) return;
+    var now = Date.now();
+    if (e.key === 'Backspace') backspaces++;
+    hits++;
+    $('hits').textContent = String(hits);
+    if (startedAt === null) {
+      startedAt = now;
+      $('state').textContent = '采集中——别停，想到什么打什么';
+      timer = setInterval(tick, 250);
+    } else if (now - lastKeyAt < 4000) {
+      // 间隔 4 秒以内才计入节奏（发呆太久不算手速）
+      intervals.push(now - lastKeyAt);
+    }
+    lastKeyAt = now;
+  }
+
+  function tick() {
+    var elapsed = (Date.now() - startedAt) / 1000;
+    $('left').textContent = fmtTime(DURATION - elapsed);
+    if (elapsed >= DURATION) finish();
+  }
+
+  function finish() {
+    if (done) return;
+    done = true;
+    clearInterval(timer);
+    pad.setAttribute('readonly', '');
+    if (hits < MIN_HITS) {
+      $('state').textContent = '样本太少——手都没热';
+      $('score').textContent = '--';
+      $('grade').textContent = '本次无效';
+      $('words').textContent = '键击不足 ' + MIN_HITS + ' 次，机器看不出来你是困还是懒。再来一次，这次多打几个字。';
+      $('detail').textContent = '';
+    } else {
+      report();
+    }
+    $('verdict').classList.add('show');
+    $('retry').style.display = '';
+  }
+
+  function report() {
+    var sum = 0;
+    for (var i = 0; i < intervals.length; i++) sum += intervals[i];
+    var avg = sum / intervals.length;
+    var variance = 0;
+    for (var j = 0; j < intervals.length; j++) {
+      var d = intervals[j] - avg;
+      variance += d * d;
+    }
+    var cv = Math.sqrt(variance / intervals.length) / avg;   // 节奏离散度
+    var bsRate = backspaces / hits;
+
+    // 困意分：均值越慢越困、抖动越大越困、退格越多越困
+    var score = Math.round(
+      Math.min(55, (avg - 120) / 22) +
+      Math.min(30, cv * 42) +
+      Math.min(15, bsRate * 90)
+    );
+    score = Math.max(1, Math.min(100, score));
+
+    var grade, words;
+    if (score < 25) {
+      grade = '清醒档';
+      words = '手指又快又稳，一点都不困。这个点还这么精神，明天的事就别怪困意了。';
+    } else if (score < 50) {
+      grade = '微困档';
+      words = '节奏还在，偶尔飘一下。再撑一会儿可以，但别撑太狠。';
+    } else if (score < 75) {
+      grade = '很困档';
+      words = '手指已经开始打醉拳：一会儿快一会儿慢。你困不困，机器比你自己清楚。';
+    } else {
+      grade = '该睡了档';
+      words = '这节奏不像在打字，像在梦里捞字。听劝，屏幕的事明天再说。';
+    }
+
+    $('score').textContent = String(score);
+    $('grade').textContent = grade;
+    $('words').textContent = words;
+    $('detail').textContent = '口径：平均键隔 ' + Math.round(avg) + ' ms · 节奏离散 ' +
+      (cv * 100).toFixed(0) + '% · 退格率 ' + (bsRate * 100).toFixed(0) + '%';
+    $('state').textContent = '检测完成';
+  }
+
+  pad.addEventListener('keydown', onKey);
+
+  $('retry').addEventListener('click', function () {
+    intervals = [];
+    backspaces = 0;
+    hits = 0;
+    startedAt = null;
+    lastKeyAt = 0;
+    done = false;
+    clearInterval(timer);
+    pad.value = '';
+    pad.removeAttribute('readonly');
+    $('hits').textContent = '0';
+    $('left').textContent = fmtTime(DURATION);
+    $('state').textContent = '等待落指';
+    $('verdict').classList.remove('show');
+    this.style.display = 'none';
+    pad.focus();
+  });
+})();
+</script>
+</body>
+</html>

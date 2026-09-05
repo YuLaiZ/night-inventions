@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>熬夜勋章</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .medal-case {
+    margin: clamp(22px, 5vw, 30px) auto 0;
+    max-width: 380px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #070a12;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; }
+
+  .grade-line { margin-top: 14px; color: var(--gold); font-size: clamp(19px, 5vw, 23px); letter-spacing: 0.2em; }
+  .cite { margin-top: 8px; color: var(--ink); font-size: clamp(15px, 4vw, 17px); }
+  .stamp { margin-top: 10px; font-size: 13px; color: var(--ink-dim); }
+  .stamp .num { font-family: var(--mono); color: var(--ice); }
+
+  .go-row {
+    margin-top: 18px;
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 22px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>熬夜勋章</h1>
+  <p class="sub">熬到这个钟点，理应授勋。<em>现在几点，章就几级</em>——别谢本馆，谢你自己的生物钟。</p>
+
+  <div class="medal-case">
+    <canvas id="cv"></canvas>
+  </div>
+  <div class="grade-line" id="grade"></div>
+  <p class="cite" id="cite"></p>
+  <p class="stamp">授章时刻 <span class="num" id="stamp-time">--:--</span> · 编号 <span class="num" id="stamp-no">——</span></p>
+
+  <div class="go-row">
+    <button class="act" id="save" type="button">收下勋章</button>
+  </div>
+
+  <p class="hint">勋章按授章时刻定级，刷新不降级、熬夜可升级。本馆不鼓励熬夜，只鼓励有仪式感地熬。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+
+  var GRADES = [
+    { max: 1,  ribbon: '#b97548', metal: '#d99a68', name: '铜质守夜章', cite: '熬过了新闻联播的回放，值得一块铜。' },
+    { max: 3,  ribbon: '#a9b4c9', metal: '#cdd6e6', name: '银质守夜章', cite: '街上已经没什么人了，你是路灯的主要服务对象。' },
+    { max: 5,  ribbon: '#c9a24a', metal: '#f2c76e', name: '金质守夜章', cite: '这个钟点还醒着的，都算夜班的编外同事。' },
+    { max: 24, ribbon: '#7c68c9', metal: '#a894ec', name: '传奇猫头鹰章', cite: '太阳快上班了，你还没下班——今晚你是传奇。' }
+  ];
+
+  function size() {
+    var w = document.querySelector('.medal-case').clientWidth;
+    var h = Math.round(w * 0.72);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function draw(grade) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.width / dpr, h = cv.height / dpr;
+    var cx = w / 2, cy = h * 0.54;
+    var R = Math.min(w, h) * 0.27;
+    ctx.clearRect(0, 0, w, h);
+
+    // 缎带（V 形两条）
+    ctx.fillStyle = grade.ribbon;
+    ctx.beginPath();
+    ctx.moveTo(cx - R * 0.5, h * 0.04);
+    ctx.lineTo(cx - R * 0.08, h * 0.04);
+    ctx.lineTo(cx, cy - R * 0.6);
+    ctx.lineTo(cx - R * 0.42, cy - R * 0.42);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + R * 0.5, h * 0.04);
+    ctx.lineTo(cx + R * 0.08, h * 0.04);
+    ctx.lineTo(cx, cy - R * 0.6);
+    ctx.lineTo(cx + R * 0.42, cy - R * 0.42);
+    ctx.closePath();
+    ctx.fill();
+
+    // 外环（金属色）+ 内盘
+    ctx.fillStyle = grade.metal;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#101828';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.82, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 月牙徽记
+    ctx.fillStyle = grade.metal;
+    ctx.beginPath();
+    ctx.arc(cx, cy - R * 0.06, R * 0.34, Math.PI * 0.25, Math.PI * 1.75);
+    ctx.arc(cx + R * 0.2, cy - R * 0.06, R * 0.27, Math.PI * 1.62, Math.PI * 0.38, true);
+    ctx.closePath();
+    ctx.fill();
+
+    // 一颗小星
+    ctx.beginPath();
+    var sx = cx + R * 0.3, sy = cy + R * 0.32;
+    for (var i = 0; i < 5; i++) {
+      var a = -Math.PI / 2 + i * 2 * Math.PI / 5;
+      var b = a + Math.PI / 5;
+      ctx.lineTo(sx + Math.cos(a) * R * 0.1, sy + Math.sin(a) * R * 0.1);
+      ctx.lineTo(sx + Math.cos(b) * R * 0.045, sy + Math.sin(b) * R * 0.045);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // 珠边
+    ctx.strokeStyle = grade.metal;
+    ctx.lineWidth = Math.max(1, R * 0.045);
+    ctx.setLineDash([2, 5]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.68, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function award() {
+    var now = new Date();
+    var hh = now.getHours();
+    // 授章等级：按当前钟点取档（5–22 点开馆外时间给铜章安慰档）
+    var g;
+    if (hh >= 5 && hh < 22) g = GRADES[0];
+    else if (hh >= 0 && hh < 1) g = GRADES[1];
+    else if (hh >= 1 && hh < 3) g = GRADES[2];
+    else if (hh >= 3 && hh < 5) g = GRADES[3];
+    else g = GRADES[0];
+
+    size();
+    draw(g);
+    document.getElementById('grade').textContent = g.name;
+    document.getElementById('cite').textContent = g.cite;
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    var code = (hh * 100 + now.getMinutes()).toString(36).toUpperCase();
+    document.getElementById('stamp-time').textContent =
+      pad(hh) + ':' + pad(now.getMinutes());
+    document.getElementById('stamp-no').textContent =
+      'YN-' + yyyymmdd() + '-' + code;
+  }
+
+  function yyyymmdd() {
+    var now = new Date();
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return '' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate());
+  }
+
+  document.getElementById('save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'medal-' + yyyymmdd() + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+
+  window.addEventListener('resize', award);
+  award();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今晚限定晚安</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .date-line {
+    margin-top: clamp(26px, 6vw, 36px);
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.3em;
+  }
+  .date-line .num { font-family: var(--mono); letter-spacing: 0.1em; }
+
+  /* ── 签文 ── */
+  .slip {
+    margin: clamp(18px, 4vw, 26px) auto 0;
+    max-width: 520px;
+    padding: clamp(22px, 5vw, 34px) clamp(18px, 5vw, 30px);
+    border-top: 1px solid var(--gold);
+    border-bottom: 1px solid var(--gold);
+    position: relative;
+  }
+  .slip::before, .slip::after {
+    content: '✦';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--gold);
+    font-size: 12px;
+    background: transparent;
+  }
+  .slip::before { top: -7px; background: transparent; }
+  .slip .blessing {
+    color: var(--ink-strong);
+    font-size: clamp(19px, 5vw, 23px);
+    line-height: 1.9;
+  }
+  .fit-row {
+    margin-top: 18px;
+    display: flex;
+    justify-content: center;
+    gap: clamp(18px, 6vw, 40px);
+    font-size: 15px;
+  }
+  .fit-row .tag { color: var(--gold); margin-right: 6px; letter-spacing: 0.1em; }
+  .fit-row .word { color: var(--ink); }
+
+  .copy-row { margin-top: clamp(20px, 5vw, 28px); }
+  button.copy {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 24px;
+    cursor: pointer;
+  }
+  button.copy:hover { border-color: var(--ice); }
+  .copy-note { margin-left: 10px; font-size: 13px; color: var(--ink-dim); }
+
+  .rule {
+    margin-top: clamp(26px, 6vw, 34px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+  .rule em { font-style: normal; color: var(--ink); }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>今晚限定晚安</h1>
+  <p class="sub">晚安按日期发放：<em>今晚全世界同款</em>，明晚作废重发。来的正好，今晚这句是你的。</p>
+
+  <div class="date-line" id="date-line"></div>
+
+  <div class="slip">
+    <p class="blessing" id="blessing"></p>
+    <div class="fit-row">
+      <span><span class="tag">宜</span><span class="word" id="fit-do"></span></span>
+      <span><span class="tag">忌</span><span class="word" id="fit-dont"></span></span>
+    </div>
+  </div>
+
+  <div class="copy-row">
+    <button class="copy" id="copy" type="button">抄下今晚这句</button><span class="copy-note" id="copy-note"></span>
+  </div>
+
+  <p class="rule">签文由今晚的日期生成——同一天来多少次，都是这一句。<br>过了今夜，它就<em>过期</em>了，晚安要趁热。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var BLESSINGS = [
+    '把今天没说完的话存进枕头，利息按梦算。',
+    '今夜灯已交还给月亮，你可以放心睡了。',
+    '白天归世界，此刻归你。晚安。',
+    '把眼睛借给黑夜一会儿，它保证原样还你，还附赠一个梦。',
+    '今天辛苦的部分已经过了保质期，扔掉，只留下睡这一件正事。',
+    '夜是块大海绵，吸走今天所有的响。你只管睡。',
+    '星星在替你值班，你尽管去睡。',
+    '愿你的枕头今晚软硬正好，梦一到就走不了。',
+    '今日已封存。明天拆开，里面又是一个清晨。',
+    '睡前原谅一切吧，反正天一亮它们也得认输。',
+    '夜风把桌面收拾好了，梦随时可以开工。',
+    '今晚的月光免费，睡吧，它明晚还来。'
+  ];
+  var DOS = [
+    '早睡', '关灯发呆', '原谅今天', '把手机放远一点', '想一件小事',
+    '原地深呼吸', '给明天留句话', '听自己的呼吸', '躺平且心安', '做一个无用的梦'
+  ];
+  var DONTS = [
+    '熬夜追剧', '睡前刷手机', '想起尴尬往事', '喝第三杯咖啡', '数羊数到生气',
+    '跟凌晨的自己谈判', '重新查看聊天记录', '突然开始整理人生', '半夜反复看时间', '立太远的志向'
+  ];
+
+  // 日期种子：同一日期永远同一组合
+  function rng(seed) {
+    var s = seed % 2147483647;
+    if (s <= 0) s += 2147483646;
+    return function () {
+      s = s * 16807 % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+  }
+
+  // 「今晚」：早上 9 点前仍算昨夜
+  var now = new Date();
+  var tonight = new Date(now);
+  if (now.getHours() < 9) tonight.setDate(tonight.getDate() - 1);
+
+  var y = tonight.getFullYear(), m = tonight.getMonth() + 1, d = tonight.getDate();
+  var rand = rng(y * 10000 + m * 100 + d);
+  function pick(list) { return list[Math.floor(rand() * list.length)]; }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+
+  // 开馆夜次：以 2026-09-04 晚为第一夜（与馆藏页同口径，中午前算前一日）
+  var OPENING = new Date(2026, 8, 4);
+  var nightAnchor = new Date(now);
+  if (now.getHours() < 12) nightAnchor.setDate(nightAnchor.getDate() - 1);
+  var nights = Math.max(1, Math.floor((nightAnchor - OPENING) / 86400000) + 1);
+
+  var blessing = pick(BLESSINGS);
+  var doWord = pick(DOS), dontWord = pick(DONTS);
+
+  $('date-line').innerHTML =
+    '<span class="num">' + y + '-' + pad(m) + '-' + pad(d) + '</span>' +
+    ' · 开馆第 <span class="num">' + nights + '</span> 夜 · 今晚份';
+
+  $('blessing').textContent = blessing;
+  $('fit-do').textContent = doWord;
+  $('fit-dont').textContent = dontWord;
+
+  var fullText = '【今晚限定晚安 · ' + y + '-' + pad(m) + '-' + pad(d) + '】\n'
+    + blessing + '\n宜：' + doWord + '　忌：' + dontWord;
+
+  $('copy').addEventListener('click', function () {
+    var self = this;
+    navigator.clipboard.writeText(fullText).then(function () {
+      $('copy-note').textContent = '已抄下。过了今夜可就不作数了。';
+    }, function () {
+      $('copy-note').textContent = '浏览器没点头，手抄一遍也一样。';
+    });
+  });
+})();
+</script>
+</body>
+</html>

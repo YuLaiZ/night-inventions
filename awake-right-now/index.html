@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>此刻同醒的人</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .counter-wrap { margin-top: clamp(30px, 7vw, 44px); }
+  .big {
+    font-family: var(--mono);
+    font-size: clamp(38px, 11vw, 64px);
+    color: var(--ink-strong);
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+  }
+  .unit { margin-top: 6px; color: var(--gold); font-size: 15px; letter-spacing: 0.3em; }
+  .you {
+    margin-top: 18px;
+    display: inline-block;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 20px;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .you .num { font-family: var(--mono); color: var(--ice); }
+
+  .fine {
+    margin-top: clamp(26px, 6vw, 34px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>此刻同醒的人</h1>
+  <p class="sub">你醒着的时候，这个星球上还有多少人陪你醒着——<em>数字一直动</em>，因为一直有人睡去、有人醒来。</p>
+
+  <div class="counter-wrap">
+    <div class="big" id="big">……</div>
+    <p class="unit">人 · 此刻醒着</p>
+    <div class="you">你的此刻 <span class="num" id="mytime">--:--</span> · <span id="myzone">—</span></div>
+  </div>
+
+  <p class="fine">按全球人口与时区做的小估算：每个时区按本地钟点估计清醒比例，加总后再随秒流动。图个氛围，不当人口普查。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var POP = 8.1e9;
+
+  // 某本地钟点的清醒比例：分段 smooth，深夜低、白天高、午后最高
+  function awakeRatio(h) {
+    var r;
+    if (h >= 8 && h < 22) r = 0.72 + 0.16 * Math.sin((h - 8) / 14 * Math.PI);
+    else if (h >= 22 && h < 24) r = 0.72 - (h - 22) / 2 * 0.30;
+    else r = 0.30 + (h + 2) / 8 * 0.28;   // 0–7 点回升
+    return Math.max(0.10, Math.min(0.90, r));
+  }
+
+  function globalAwake(date) {
+    var total = 0;
+    for (var off = -11; off <= 12; off++) {
+      var local = new Date(date.getTime() + off * 3600000);
+      var h = local.getUTCHours() + local.getUTCMinutes() / 60;
+      // 时区权重：按现实人口粗估，亚欧非占比高
+      var w = 1;
+      if (off === 8 || off === 7 || off === 5.5 || off === 1 || off === 0 || off === 2) w = 1.6;
+      else if (off === -5 || off === 9 || off === 3 || off === -3) w = 1.1;
+      total += awakeRatio(h) * w;
+    }
+    // 归一化权重总和 → 比例 → 人口
+    return total / 24 / 1.9 * POP;
+  }
+
+  function fmt(n) {
+    return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var current = null;   // 展示值：围绕基准做秒级流动（每秒都有人睡去、有人醒来）
+
+  function tick() {
+    var now = new Date();
+    var base = globalAwake(now);
+    if (current === null) current = base;
+    // 净流动：向基准回拢，再叠加一秒的醒来/睡去扰动（约 ±0.01% 量级）
+    current += (base - current) * 0.25 + (Math.random() - 0.5) * current * 0.00022;
+    $('big').textContent = fmt(current);
+    $('mytime').textContent =
+      String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    var h = now.getHours();
+    var z;
+    if (h >= 23 || h < 5) z = '深夜档 · 谢谢你陪着这个数字';
+    else if (h < 9) z = '清晨档 · 你起得比大多数梦都早';
+    else if (h < 18) z = '日间档 · 醒着的人此刻最多';
+    else z = '入夜档 · 白天的事快交班了';
+    $('myzone').textContent = z;
+  }
+
+  tick();
+  // 墙钟驱动：即使后台标签页把定时器钳到 ≥1s，回前台也按真实时间校正
+  setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>

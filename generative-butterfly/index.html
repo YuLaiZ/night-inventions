@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生成式蝴蝶</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .terrarium {
+    margin: clamp(22px, 5vw, 30px) auto 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #070a12;
+    max-width: 480px;
+  }
+  canvas { display: block; width: 100%; }
+
+  .tag-line {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.1em;
+  }
+  .tag-line .num { font-family: var(--mono); color: var(--ice); }
+
+  .go-row {
+    margin-top: 16px;
+    display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 22px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+  button.act.primary {
+    color: var(--bg-0);
+    background: var(--gold);
+    border-color: var(--gold);
+  }
+  button.act.primary:hover { filter: brightness(1.08); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>生成式蝴蝶</h1>
+  <p class="sub">每一只都由一粒种子即时长成：<em>翅形、底色、斑点皆随机</em>，全网没有第二只同款。不合眼缘，就再孵一只。</p>
+
+  <div class="terrarium">
+    <canvas id="cv"></canvas>
+  </div>
+  <p class="tag-line">本只编号 <span class="num" id="seed-no">——</span> · 正在轻轻扇翅</p>
+
+  <div class="go-row">
+    <button class="act primary" id="hatch" type="button">再孵一只</button>
+    <button class="act" id="save" type="button">收下这只</button>
+  </div>
+
+  <p class="hint">编号就是它的种子。同号的蝴蝶永远长得一样，异号的不会撞脸。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var cur = null;   // 当前蝴蝶参数
+  var curSeed = 0;
+
+  // ── 种子随机（mulberry32）：同种子同蝴蝶 ──
+  function rngOf(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seedNo(seed) {
+    return '#' + seed.toString(16).toUpperCase().padStart(6, '0').slice(-6);
+  }
+
+  var PALETTES = [
+    { wing: '#e08585', deep: '#b95f66', dot: '#f7e6c4' },
+    { wing: '#9cc8ff', deep: '#5f8fd0', dot: '#eaf2ff' },
+    { wing: '#f2c76e', deep: '#c99a3f', dot: '#fff3d6' },
+    { wing: '#8fd9c5', deep: '#57a892', dot: '#e6fff6' },
+    { wing: '#c9a6e8', deep: '#9670bd', dot: '#f5edff' },
+    { wing: '#edf1fa', deep: '#a8b3c9', dot: '#f2c76e' },
+    { wing: '#e88a5a', deep: '#b9623a', dot: '#ffe9d6' },
+    { wing: '#a8d977', deep: '#6fa349', dot: '#f3ffe0' },
+    { wing: '#77b5e0', deep: '#4a7fae', dot: '#e3f3ff' },
+    { wing: '#e87fa8', deep: '#b5527d', dot: '#ffe6f0' },
+    { wing: '#9488e0', deep: '#635ab0', dot: '#ebe7ff' },
+    { wing: '#d9c27a', deep: '#a8904a', dot: '#fffbe6' }
+  ];
+
+  function size() {
+    var w = document.querySelector('.terrarium').clientWidth;
+    var h = Math.round(w * 0.78);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function hatch(seed) {
+    curSeed = seed || Math.floor(Math.random() * 0xFFFFFF);
+    var r = rngOf(curSeed);
+    var pal = PALETTES[Math.floor(r() * PALETTES.length)];
+    cur = {
+      pal: pal,
+      wingR: 0.6 + r() * 0.36,        // 前翅长
+      tailR: 0.32 + r() * 0.32,       // 后翅长
+      tip: r() < 0.35 ? 0.12 + r() * 0.12 : 0,  // 燕尾尖
+      spotN: 1 + Math.floor(r() * 5), // 斑点数
+      spotR: 0.04 + r() * 0.07,
+      spotA: -1.5 + r() * 0.5,        // 斑点起始角
+      band: r() < 0.45,               // 是否有环纹
+      feel: 0.6 + r() * 0.8,          // 触角弯度
+      wobble: 0.5 + r() * 0.8         // 扇翅节奏
+    };
+    document.getElementById('seed-no').textContent = seedNo(curSeed);
+    draw(0);
+  }
+
+  // t = 扇翅相位（0..1），控制翅膀纵向压缩
+  function draw(t) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.width / dpr, h = cv.height / dpr;
+    var cx = w / 2, cy = h * 0.46;
+    var R = Math.min(w, h) * 0.4;
+    ctx.clearRect(0, 0, w, h);
+
+    // 环境枝条（背景层）：从右下伸入的一根枝，给蝴蝶一个落点
+    ctx.strokeStyle = '#3d3226';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2.5, R * 0.09);
+    ctx.beginPath();
+    ctx.moveTo(w * 1.02, h * 0.96);
+    ctx.quadraticCurveTo(w * 0.72, h * 0.74, w * 0.3, h * 0.92);
+    ctx.stroke();
+    // 一根细分叉
+    ctx.lineWidth = Math.max(1.2, R * 0.045);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.72, h * 0.74);
+    ctx.quadraticCurveTo(w * 0.64, h * 0.62, w * 0.52, h * 0.6);
+    ctx.stroke();
+    // 叶子三片
+    function leaf(x, y, ang, len) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      ctx.fillStyle = 'rgba(93, 138, 104, 0.8)';
+      ctx.beginPath();
+      ctx.ellipse(len / 2, 0, len / 2, len / 4.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    leaf(w * 0.8, h * 0.8, -0.45, R * 0.42);
+    leaf(w * 0.58, h * 0.86, 0.6, R * 0.34);
+    leaf(w * 0.46, h * 0.9, -1.05, R * 0.28);
+
+    var squash = 1 - 0.22 * Math.abs(Math.sin(t * Math.PI));
+
+    // 身体（先画，压在翅下）
+    ctx.fillStyle = '#2a3550';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + R * 0.28, R * 0.075, R * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1c2438';
+    ctx.beginPath();
+    ctx.arc(cx, cy - R * 0.22, R * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 触角
+    ctx.strokeStyle = '#2a3550';
+    ctx.lineWidth = Math.max(1.2, R * 0.025);
+    ctx.lineCap = 'round';
+    for (var s = -1; s <= 1; s += 2) {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - R * 0.28);
+      ctx.quadraticCurveTo(cx + s * R * 0.16 * cur.feel, cy - R * 0.62, cx + s * R * 0.34 * cur.feel, cy - R * 0.7);
+      ctx.stroke();
+    }
+
+    // 翅膀：只画右半，镜像出左半
+    for (var mir = -1; mir <= 1; mir += 2) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(mir, 1);
+      ctx.scale(1, squash);
+
+      // 前翅
+      var wr = R * cur.wingR;
+      var grad = ctx.createLinearGradient(0, 0, wr, -R * 0.5);
+      grad.addColorStop(0, cur.pal.deep);
+      grad.addColorStop(1, cur.pal.wing);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(R * 0.06, -R * 0.05);
+      ctx.bezierCurveTo(wr * 0.45, -R * 0.95, wr, -R * 0.72, wr, -R * 0.22);
+      ctx.bezierCurveTo(wr * 0.98, R * 0.12, wr * 0.4, R * 0.2, R * 0.06, R * 0.1);
+      ctx.closePath();
+      ctx.fill();
+
+      // 后翅
+      var tr = R * cur.tailR;
+      var grad2 = ctx.createLinearGradient(0, 0, tr, R * 0.55);
+      grad2.addColorStop(0, cur.pal.deep);
+      grad2.addColorStop(1, cur.pal.wing);
+      ctx.fillStyle = grad2;
+      ctx.beginPath();
+      ctx.moveTo(R * 0.06, R * 0.04);
+      ctx.bezierCurveTo(tr * 0.7, R * 0.08, tr, R * 0.32, tr * 0.86, R * 0.62 + R * cur.tip);
+      ctx.bezierCurveTo(tr * 0.55, R * 0.5, tr * 0.3, R * 0.44, R * 0.06, R * 0.3);
+      ctx.closePath();
+      ctx.fill();
+
+      // 环纹
+      if (cur.band) {
+        ctx.strokeStyle = cur.pal.dot;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = Math.max(1, R * 0.02);
+        ctx.beginPath();
+        ctx.moveTo(R * 0.2, -R * 0.16);
+        ctx.quadraticCurveTo(wr * 0.62, -R * 0.5, wr * 0.88, -R * 0.2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // 斑点
+      ctx.fillStyle = cur.pal.dot;
+      for (var d = 0; d < cur.spotN; d++) {
+        var ang = cur.spotA + d * 0.42;
+        var rr = wr * (0.42 + (d % 2) * 0.22);
+        ctx.beginPath();
+        ctx.arc(Math.cos(ang) * rr, Math.sin(ang) * rr * 0.75, R * cur.spotR * (d % 2 ? 0.7 : 1), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 描金翅缘
+      ctx.strokeStyle = 'rgba(242, 199, 110, 0.5)';
+      ctx.lineWidth = Math.max(1, R * 0.018);
+      ctx.beginPath();
+      ctx.moveTo(R * 0.06, -R * 0.05);
+      ctx.bezierCurveTo(wr * 0.45, -R * 0.95, wr, -R * 0.72, wr, -R * 0.22);
+      ctx.bezierCurveTo(wr * 0.98, R * 0.12, wr * 0.4, R * 0.2, R * 0.06, R * 0.1);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // 扇翅：墙钟推算相位（后台标签页停摆无碍，回前台自然接续）
+  var born = Date.now();
+  function loop() {
+    if (cur) {
+      var t = (Date.now() - born) / 1000 * cur.wobble * 0.9;
+      draw(t % 1);
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  document.getElementById('hatch').addEventListener('click', function () {
+    born = Date.now();
+    hatch();
+  });
+  document.getElementById('save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'butterfly-' + seedNo(curSeed).slice(1) + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+
+  window.addEventListener('resize', function () {
+    size();
+    if (cur) draw((Date.now() - born) / 1000 * cur.wobble * 0.9 % 1);
+  });
+
+  size();
+  hatch();
+})();
+</script>
+</body>
+</html>
