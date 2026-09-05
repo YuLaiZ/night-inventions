@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>只会说"嗯"的聊天窗</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --serif: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 18px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    max-width: 34em;
+  }
+  .chat {
+    margin-top: clamp(24px, 5vw, 34px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    overflow: hidden;
+  }
+  .chat-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .chat-head .avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: rgba(156, 200, 255, 0.14);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif);
+    color: var(--ice);
+    font-size: 16px;
+    flex: none;
+  }
+  .chat-head .who { font-size: 14.5px; color: var(--ink-strong); }
+  #presence { font-size: 12px; color: var(--ink-dim); }
+  #log {
+    height: 320px;
+    overflow-y: auto;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .msg { max-width: 78%; padding: 8px 14px; border-radius: 14px; font-size: 14.5px; }
+  .msg.them {
+    align-self: flex-start;
+    background: rgba(156, 200, 255, 0.10);
+    border-bottom-left-radius: 4px;
+    font-family: var(--serif);
+    color: var(--ink-strong);
+  }
+  .msg.me {
+    align-self: flex-end;
+    background: rgba(242, 199, 110, 0.12);
+    border-bottom-right-radius: 4px;
+    color: var(--ink-strong);
+  }
+  .msg.typing { color: var(--ink-dim); font-size: 13px; }
+  .composer {
+    display: flex;
+    gap: 10px;
+    padding: 12px;
+    border-top: 1px solid var(--line);
+  }
+  #input {
+    flex: 1;
+    background: rgba(10, 13, 23, 0.6);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink-strong);
+    font-family: var(--sans);
+    font-size: 14.5px;
+    padding: 10px 18px;
+    outline: none;
+  }
+  #input:focus { border-color: rgba(156, 200, 255, 0.4); }
+  #send {
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    padding: 9px 22px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: var(--sans);
+  }
+  #send:hover { background: rgba(242, 199, 110, 0.2); }
+  #stats {
+    margin-top: 14px;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    min-height: 1.6em;
+  }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(40px, 8vw, 60px); }
+  .motto {
+    font-family: var(--serif);
+    font-size: 15px;
+    color: #a8b3c9;
+    letter-spacing: 0.06em;
+  }
+  .sig {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>只会说"嗯"的聊天窗</h1>
+    <p class="intro">他不是不想理你。他只是把千言万语，都过成了同一个字。你说什么都行——他都有安排好的"嗯"。</p>
+  </header>
+
+  <div class="chat">
+    <div class="chat-head">
+      <span class="avatar">嗯</span>
+      <div>
+        <div class="who">阿嗯</div>
+        <div id="presence">在线</div>
+      </div>
+    </div>
+    <div id="log">
+      <div class="msg them">嗯。</div>
+    </div>
+    <div class="composer">
+      <input id="input" type="text" maxlength="200" placeholder="说点什么……说什么都行">
+      <button type="button" id="send">发送</button>
+    </div>
+  </div>
+
+  <p id="stats"></p>
+  <p class="hint">他回得慢，不是在打字，是在斟酌用哪个"嗯"。</p>
+
+  <footer>
+    <p class="motto">有些人的全部深情，藏在一个字的声调里。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var log = $('log');
+  var input = $('input');
+  var sentChars = 0;
+  var enCount = 0;
+  var saidGoodnight = false;
+
+  function addMsg(text, who) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + who;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  function renderStats() {
+    var ratio = enCount > 0 ? Math.max(1, Math.round(sentChars / enCount)) : 0;
+    $('stats').textContent = enCount === 0
+      ? ''
+      : '你已发送 ' + sentChars + ' 字，收到 ' + enCount + ' 个"嗯"。字数比 ' + ratio + ' : 1。';
+  }
+
+  /* 他唯一的词汇，与挑选它的心思 */
+  function decideEn(text) {
+    var t = text.trim();
+    if (t === '嗯' || t === '嗯嗯' || t === '嗯。') return '……你学我？';
+    if (/晚安|睡了|拜拜|再见/.test(t)) return { t: '嗯。', bye: true };
+    if (/对不起|抱歉|我错了/.test(t)) return '嗯……';
+    if (/爱你|喜欢你|想你/.test(t)) return '嗯嗯。';
+    if (/[?？]$/.test(t)) return '嗯？';
+    if (t.length > 40) return '嗯。';
+    if (t.length <= 4) return '嗯嗯';
+    var pool = ['嗯。', '嗯嗯', '嗯——', '嗯……', '嗯。'];
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function reply(text) {
+    var thinking = addMsg('对方正在输入……', 'them typing');
+    var big = text.length > 40;
+    var delay = big ? 2600 : (800 + Math.random() * 1400);
+    setTimeout(function () {
+      thinking.textContent = '\u200b';
+      thinking.remove();
+      var out = decideEn(text);
+      var isBye = typeof out === 'object';
+      var en = isBye ? out.t : out;
+      addMsg(en, 'them');
+      enCount++;
+      renderStats();
+      if (isBye && !saidGoodnight) {
+        saidGoodnight = true;
+        $('presence').textContent = '已下线';
+        setTimeout(function () {
+          $('presence').textContent = '在线';
+          saidGoodnight = false;
+        }, 6000);
+      }
+    }, delay);
+  }
+
+  function send() {
+    var t = input.value.trim();
+    if (!t) return;
+    addMsg(t, 'me');
+    sentChars += t.length;
+    input.value = '';
+    renderStats();
+    reply(t);
+    armIdle();
+  }
+
+  $('send').addEventListener('click', send);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') send();
+  });
+
+  /* 沉默太久，他会先开口——用他唯一会的方式 */
+  var idleTimer = null;
+  function armIdle() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () {
+      addMsg('嗯？', 'them');
+      enCount++;
+      renderStats();
+    }, 25000);
+  }
+  armIdle();
+})();
+</script>
+</body>
+</html>

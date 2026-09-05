@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>反效率番茄钟</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .clocks {
+    margin-top: clamp(22px, 5vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(22px, 5vw, 34px);
+    text-align: center;
+  }
+  #phase-name {
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+    color: var(--ice);
+  }
+  #phase-name.focus { color: var(--ice); }
+  #phase-name.break { color: var(--gold); }
+  #tomato {
+    font-family: var(--mono);
+    font-size: clamp(48px, 13vw, 84px);
+    font-weight: 300;
+    color: var(--ink-strong);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    margin-top: 6px;
+  }
+  .bar {
+    margin-top: 16px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.12);
+    overflow: hidden;
+  }
+  #fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: var(--ice);
+    transition: width 0.15s linear, background 0.4s ease;
+  }
+  #quote {
+    margin-top: 14px;
+    min-height: 1.8em;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+  }
+  .real-row {
+    margin-top: 16px;
+    display: flex;
+    justify-content: center;
+    gap: 22px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+  .real-row b { color: var(--ink); font-weight: 500; }
+  .btn-row {
+    margin-top: 22px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  .btn-row button {
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.16em;
+    text-indent: 0.16em;
+    padding: 10px 28px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .btn-row button:hover { background: rgba(242, 199, 110, 0.2); }
+  .btn-row button:disabled { opacity: 0.4; cursor: default; }
+  #done {
+    margin-top: 18px;
+    font-size: 14.5px;
+    color: var(--gold);
+    line-height: 1.9;
+  }
+  #done[hidden] { display: none; }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>反效率番茄钟</h1>
+    <p class="intro">打工人的相对论：专注的时候，时间变慢；休息的时候，时间飞逝。它不帮你提高效率，只帮你承认现实。</p>
+  </header>
+
+  <div class="clocks">
+    <div id="phase-name">准备摸鱼</div>
+    <div id="tomato">1:30</div>
+    <div class="bar"><div id="fill"></div></div>
+    <p id="quote">按「开始」，体验时间的弹性力学。</p>
+    <div class="real-row">
+      <span>番茄钟 <b id="t-tomato">0:00</b></span>
+      <span>现实已过 <b id="t-real">0:00</b></span>
+      <span>轮次 <b id="t-round">0/3</b></span>
+    </div>
+    <div class="btn-row">
+      <button type="button" id="btn-start">开 始</button>
+      <button type="button" id="btn-reset" disabled>重 来</button>
+    </div>
+    <p id="done" hidden></p>
+  </div>
+
+  <p class="hint">本钟对效率不负任何责任。慢下来的每一秒，都是你自己的。</p>
+
+  <footer>
+    <p class="motto">时间没有变快，是你长大以后没有好好用它。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var FAST = /#fast/.test(window.location.hash);
+
+  var FOCUS_SEC = 90;    // 摸鱼专注期（显示秒）
+  var BREAK_SEC = 60;    // 揉眼睛休息期（显示秒）
+  var ROUNDS = 3;
+  var FOCUS_RATE = 1 / 1.6;   // 显示秒/真实秒：专注时时间变慢
+  var BREAK_RATE = 2.0;       // 休息时时间飞逝
+
+  var QUOTES = {
+    focus: [
+      '专注的一秒，有一秒半那么长。',
+      '时间在摸鱼时粘稠如糖浆。',
+      '表针走一步，心走半步。',
+      '盯紧它，它就会走得越来越慢。'
+    ],
+    break: [
+      '快乐的一秒，只有半秒长。',
+      '休息时，表针踩了风火轮。',
+      '眨眼之间，休息过半。',
+      '别眨眼——好吧，你已经眨了。'
+    ]
+  };
+
+  var running = false;
+  var phase = 'focus';
+  var display = FOCUS_SEC;
+  var round = 1;
+  var lastNow = 0;
+  var realElapsed = 0;
+  var timer = null;
+  var quoteIdx = 0;
+
+  function fmt(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60);
+  }
+
+  function rate() {
+    return (phase === 'focus' ? FOCUS_RATE : BREAK_RATE) * (FAST ? 20 : 1);
+  }
+
+  function renderPhase() {
+    var focus = phase === 'focus';
+    var pn = $('phase-name');
+    pn.textContent = focus ? '摸鱼专注期' : '揉眼睛休息期';
+    pn.className = focus ? 'focus' : 'break';
+    $('fill').style.background = focus ? 'var(--ice)' : 'var(--gold)';
+  }
+
+  function render() {
+    var total = phase === 'focus' ? FOCUS_SEC : BREAK_SEC;
+    $('tomato').textContent = fmt(display);
+    $('fill').style.width = ((1 - display / total) * 100) + '%';
+    $('t-tomato').textContent = fmt(total - display);
+    $('t-real').textContent = fmt(realElapsed);
+    $('t-round').textContent = round + '/' + ROUNDS;
+  }
+
+  function rotateQuote() {
+    var pool = QUOTES[phase];
+    $('quote').textContent = pool[quoteIdx % pool.length];
+    quoteIdx++;
+  }
+
+  function tick() {
+    if (!running) return;
+    var now = Date.now();
+    var dt = (now - lastNow) / 1000;
+    lastNow = now;
+    realElapsed += dt;
+    display -= dt * rate();
+
+    if (Math.floor(display) !== Math.floor(display + dt * rate()) || Math.random() < 0.02) {
+      if (Math.random() < 0.3) rotateQuote();
+    }
+
+    if (display <= 0) {
+      if (phase === 'focus') {
+        phase = 'break';
+        display = BREAK_SEC;
+        renderPhase();
+      } else if (round < ROUNDS) {
+        round++;
+        phase = 'focus';
+        display = FOCUS_SEC;
+        renderPhase();
+      } else {
+        finish();
+        return;
+      }
+      rotateQuote();
+    }
+    render();
+    timer = setTimeout(tick, 100);
+  }
+
+  function finish() {
+    running = false;
+    $('btn-reset').disabled = false;
+    $('phase-name').textContent = '下班';
+    $('phase-name').className = 'break';
+    $('tomato').textContent = '0:00';
+    $('quote').textContent = '';
+    $('done').hidden = false;
+    $('done').textContent = '下班。今天你「专注」了 ' + fmt(FOCUS_SEC * ROUNDS) +
+      '——感觉像过了一年。这就是反效率的浪漫。';
+  }
+
+  function start() {
+    running = true;
+    phase = 'focus';
+    display = FOCUS_SEC;
+    round = 1;
+    realElapsed = 0;
+    $('btn-start').disabled = true;
+    $('btn-reset').disabled = false;
+    $('done').hidden = true;
+    renderPhase();
+    rotateQuote();
+    lastNow = Date.now();
+    render();
+    timer = setTimeout(tick, 100);
+  }
+
+  function reset() {
+    running = false;
+    if (timer) clearTimeout(timer);
+    phase = 'focus';
+    display = FOCUS_SEC;
+    round = 1;
+    realElapsed = 0;
+    $('btn-start').disabled = false;
+    $('btn-reset').disabled = true;
+    $('done').hidden = true;
+    $('phase-name').textContent = '准备摸鱼';
+    $('phase-name').className = '';
+    $('tomato').textContent = fmt(FOCUS_SEC);
+    $('fill').style.width = '0%';
+    $('t-tomato').textContent = fmt(FOCUS_SEC);
+    $('t-real').textContent = '0:00';
+    $('t-round').textContent = '0/3';
+    $('quote').textContent = '按「开始」，体验时间的弹性力学。';
+  }
+
+  $('btn-start').addEventListener('click', start);
+  $('btn-reset').addEventListener('click', reset);
+
+  reset();
+})();
+</script>
+</body>
+</html>

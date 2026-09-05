@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>生成式山水</title>
+<style>
+  :root {
+    --paper: #f1ebdf;
+    --paper-deep: #e9e1d1;
+    --ink: #2b2e33;
+    --ink-dim: #6f6a5f;
+    --seal: #a33327;
+    --bg-0: #14120e;
+    --bg-1: #1c1913;
+    --line: rgba(241, 235, 223, 0.16);
+    --serif: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: #d8d2c4;
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 56px) 20px 40px;
+  }
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: #efe9db;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: #97917f;
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: #c9a86a; }
+  .intro {
+    margin-top: 10px;
+    color: #97917f;
+    font-size: 14.5px;
+    max-width: 34em;
+  }
+  .scroll-frame {
+    margin-top: clamp(24px, 5vw, 36px);
+    background: var(--paper);
+    border-radius: 4px;
+    padding: clamp(10px, 2vw, 18px);
+    box-shadow: 0 0 0 1px var(--line), 0 0 0 6px rgba(241, 235, 223, 0.05), 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+  #paint {
+    display: block;
+    width: 100%;
+    border-radius: 2px;
+    cursor: crosshair;
+  }
+  .toolbar {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+  .toolbar button {
+    background: none;
+    border: 1px solid var(--line);
+    color: #d8d2c4;
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    text-indent: 0.14em;
+    padding: 9px 22px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 0.25s ease, color 0.25s ease;
+  }
+  .toolbar button:hover { border-color: #c9a86a; color: #efe9db; }
+  .seed-box {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  .seed-box b { color: #c9a86a; font-weight: 500; font-family: var(--mono); }
+  .hint {
+    margin-top: 14px;
+    font-size: 13px;
+    color: #7d776a;
+  }
+  footer { margin-top: clamp(44px, 9vw, 64px); }
+  .motto {
+    font-family: var(--serif);
+    font-size: 15px;
+    color: #a89f8c;
+    letter-spacing: 0.06em;
+  }
+  .sig {
+    margin-top: 14px;
+    font-size: 12px;
+    color: #7d776a;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <a class="back-home" href="../">← 陈列馆</a>
+    <h1>生成式山水</h1>
+    <p class="intro">每一幅都由一粒随机种子即时生成：远山、雾、月、水面，前所未见，也后不再来。可以收下它，也可以记住种子，凭种子重访同一座山。</p>
+  </header>
+
+  <div class="scroll-frame">
+    <canvas id="paint"></canvas>
+  </div>
+
+  <div class="toolbar">
+    <button type="button" id="btn-new">再画一幅</button>
+    <button type="button" id="btn-save">收下这幅</button>
+    <span class="seed-box">种子 <b id="seed-label"></b></span>
+  </div>
+  <p class="hint">点击画中任意一处，会惊起一群飞鸟。</p>
+
+  <footer>
+    <p class="motto">山不曾见过同一片雾。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('paint');
+  var ctx = canvas.getContext('2d');
+
+  /* ── 可复现的随机数 ── */
+  function mulberry32(seed) {
+    var t = seed >>> 0;
+    return function () {
+      t += 0x6D2B79F5;
+      var r = Math.imul(t ^ (t >>> 15), t | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  var seed = 0;
+  var scene = null;      // 由种子一次性生成的静态布局
+  var birds = [];        // 点击惊起的飞鸟
+
+  function makeScene(s) {
+    var rnd = mulberry32(s);
+    var W = 1000, H = 700;                 // 逻辑画布，绘制时按比例缩放
+    var waterTop = H * (0.78 + rnd() * 0.06);
+    var layers = [];
+    var n = 4 + Math.floor(rnd() * 2);     // 4~5 层远山
+    for (var i = 0; i < n; i++) {
+      var depth = i / (n - 1);             // 0 最远 → 1 最近
+      var pts = [];
+      var segs = 6 + Math.floor(rnd() * 4);
+      var baseY = H * 0.30 + depth * (waterTop - H * 0.30) * (0.52 + 0.4 * depth);
+      var amp = H * (0.16 - 0.09 * depth) * (0.7 + rnd() * 0.6);
+      for (var k = 0; k <= segs; k++) {
+        pts.push(baseY - rnd() * amp * (k === 0 || k === segs ? 0.4 : 1));
+      }
+      /* 峰项：远山允许高峰，近山多为缓丘 */
+      var peaks = [];
+      var pk = depth < 0.5 ? 1 + Math.floor(rnd() * 3) : Math.floor(rnd() * 2);
+      for (var p = 0; p < pk; p++) {
+        peaks.push({ px: 0.12 + rnd() * 0.76, h: 0.5 + rnd() * 0.9, w: 0.05 + rnd() * 0.08 });
+      }
+      layers.push({ pts: pts, depth: depth, segs: segs, drift: 10 + 26 * rnd(), amp: amp, peaks: peaks });
+    }
+    var skyBirds = rnd() < 0.6 ? (function () {
+      var arr = [];
+      var bn = 3 + Math.floor(rnd() * 3);
+      var bx = 0.15 + rnd() * 0.6, by = 0.08 + rnd() * 0.2;
+      for (var b = 0; b < bn; b++) {
+        arr.push({ x: bx + (rnd() - 0.5) * 0.12, y: by + (rnd() - 0.5) * 0.1, s: 0.8 + rnd() * 0.7, ph: rnd() * 6 });
+      }
+      return arr;
+    })() : null;
+    return {
+      W: W, H: H, waterTop: waterTop, layers: layers, skyBirds: skyBirds,
+      moonX: W * (0.18 + rnd() * 0.64),
+      moonY: H * (0.10 + rnd() * 0.14),
+      moonR: 26 + rnd() * 16,
+      boat: rnd() < 0.55 ? {
+        x: W * (0.2 + rnd() * 0.6),
+        y: waterTop + (H - waterTop) * (0.3 + rnd() * 0.4),
+        s: 0.7 + rnd() * 0.5, flip: rnd() < 0.5
+      } : null,
+      ripples: (function () {
+        var rs = [];
+        for (var j = 0; j < 26; j++) {
+          rs.push({
+            x: rnd() * W, y: waterTop + (H - waterTop) * (0.08 + rnd() * 0.9),
+            len: 30 + rnd() * 130, a: 0.05 + rnd() * 0.12
+          });
+        }
+        return rs;
+      })()
+    };
+  }
+
+  function ridgeY(layer, x, W, time) {
+    var t = x / W * layer.segs;
+    var i = Math.floor(t);
+    if (i >= layer.segs) i = layer.segs - 1;
+    var f = t - i;
+    var c = (1 - Math.cos(f * Math.PI)) / 2;
+    var y = layer.pts[i] * (1 - c) + layer.pts[i + 1] * c;
+    /* 峰项：左右不对称，山脊右坡更陡 */
+    for (var p = 0; p < layer.peaks.length; p++) {
+      var pk = layer.peaks[p];
+      var dx = (x / W - pk.px) / pk.w;
+      if (dx > -2.2 && dx < 2.2) {
+        var sigma = dx < 0 ? 1 : 1.5;
+        y -= layer.amp * pk.h * Math.exp(-dx * dx * sigma);
+      }
+    }
+    y += Math.sin(x * 0.045 + layer.drift * 7) * 4;                       // 细碎起伏
+    y += Math.sin(x * 0.006 + layer.drift) * 6;                           // 大势缓变
+    y += Math.sin(time * 0.00006 + layer.drift) * layer.drift * 0.14;     // 雾中缓移
+    return y;
+  }
+
+  function drawPainting(time) {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var cssW = canvas.clientWidth || canvas.offsetWidth;
+    if (cssW < 10) cssW = 600;
+    var cssH = cssW * scene.H / scene.W;
+    if (canvas.width !== Math.round(cssW * dpr)) {
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+      canvas.style.height = cssH + 'px';
+    }
+    var W = canvas.width, H = canvas.height;
+    var sx = W / scene.W;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    /* 宣纸底 */
+    var paper = ctx.createLinearGradient(0, 0, 0, H);
+    paper.addColorStop(0, '#f2ecdf');
+    paper.addColorStop(1, '#eae2d0');
+    ctx.fillStyle = paper;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 皓月与晕 */
+    var mg = ctx.createRadialGradient(scene.moonX * sx, scene.moonY * sx, scene.moonR * sx * 0.4,
+      scene.moonX * sx, scene.moonY * sx, scene.moonR * sx * 3.2);
+    mg.addColorStop(0, 'rgba(240, 225, 180, 0.55)');
+    mg.addColorStop(1, 'rgba(240, 225, 180, 0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.beginPath();
+    ctx.arc(scene.moonX * sx, scene.moonY * sx, scene.moonR * sx, 0, Math.PI * 2);
+    ctx.fillStyle = '#f6efdd';
+    ctx.fill();
+
+    /* 远山：由淡至浓；山脚止于水面，留倒影于水下 */
+    var bottomY = (scene.waterTop + 14) * sx;
+    scene.layers.forEach(function (layer) {
+      var depth = layer.depth;
+      var inkA = 0.14 + 0.5 * depth * depth;
+      var top = ridgeY(layer, 0, scene.W, time) * sx;
+      var grad = ctx.createLinearGradient(0, top, 0, bottomY);
+      grad.addColorStop(0, 'rgba(45, 50, 58, ' + inkA + ')');
+      grad.addColorStop(1, 'rgba(45, 50, 58, ' + (inkA * 0.35) + ')');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(0, bottomY);
+      for (var x = 0; x <= W; x += 4) {
+        ctx.lineTo(x, ridgeY(layer, x / sx, scene.W, time) * sx);
+      }
+      ctx.lineTo(W, bottomY);
+      ctx.closePath();
+      ctx.fill();
+      /* 山脚雾带：宽而柔 */
+      var mist = ctx.createLinearGradient(0, (scene.waterTop - 210) * sx, 0, scene.waterTop * sx);
+      mist.addColorStop(0, 'rgba(241, 235, 223, 0)');
+      mist.addColorStop(1, 'rgba(241, 235, 223, 0.72)');
+      ctx.fillStyle = mist;
+      ctx.fillRect(0, (scene.waterTop - 210) * sx, W, 210 * sx);
+    });
+
+    /* 水面：上薄下实，山影微微透出成倒影 */
+    var water = ctx.createLinearGradient(0, scene.waterTop * sx, 0, H);
+    water.addColorStop(0, 'rgba(234, 226, 209, 0.72)');
+    water.addColorStop(0.35, 'rgba(232, 224, 206, 0.94)');
+    water.addColorStop(1, 'rgba(228, 219, 200, 1)');
+    ctx.fillStyle = water;
+    ctx.fillRect(0, scene.waterTop * sx, W, H - scene.waterTop * sx);
+
+    /* 涟漪 */
+    scene.ripples.forEach(function (r) {
+      ctx.beginPath();
+      ctx.moveTo((r.x - r.len / 2) * sx, r.y * sx);
+      ctx.lineTo((r.x + r.len / 2) * sx, r.y * sx);
+      ctx.strokeStyle = 'rgba(60, 62, 66, ' + r.a + ')';
+      ctx.lineWidth = Math.max(1, sx * 1.1);
+      ctx.stroke();
+    });
+
+    /* 月的碎影 */
+    var refX = scene.moonX * sx;
+    ctx.strokeStyle = 'rgba(214, 190, 130, 0.5)';
+    for (var seg = 0; seg < 5; seg++) {
+      var ry = (scene.waterTop + 8 + seg * 16) * sx;
+      var half = (34 - seg * 5) * sx * (1 + 0.15 * Math.sin(time * 0.001 + seg));
+      if (half <= 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(refX - half, ry);
+      ctx.lineTo(refX + half, ry);
+      ctx.lineWidth = Math.max(1, sx * 1.6);
+      ctx.stroke();
+    }
+
+    /* 小舟 */
+    if (scene.boat) {
+      var b = scene.boat;
+      ctx.save();
+      ctx.translate(b.x * sx, b.y * sx);
+      ctx.scale((b.flip ? -1 : 1) * b.s * sx, b.s * sx);
+      ctx.strokeStyle = 'rgba(40, 42, 46, 0.78)';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-34, 0);
+      ctx.quadraticCurveTo(0, 9, 34, 0);
+      ctx.lineTo(26, -6);
+      ctx.lineTo(-26, -6);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(4, -6);
+      ctx.lineTo(4, -22);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(4, -25, 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(40, 42, 46, 0.78)';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* 天空点景：远处的鸟群 */
+    if (scene.skyBirds) {
+      ctx.strokeStyle = 'rgba(45, 48, 54, 0.5)';
+      scene.skyBirds.forEach(function (sb, idx) {
+        var wing = (Math.sin(time * 0.004 + sb.ph) * 2.2 + 4) * sb.s;
+        var bx2 = sb.x * scene.W * sx, by2 = sb.y * scene.H * sx;
+        ctx.lineWidth = Math.max(1, 1.3 * sb.s * sx);
+        ctx.beginPath();
+        ctx.moveTo(bx2 - 5 * sb.s * sx, by2 + wing * 0.4 * sx);
+        ctx.quadraticCurveTo(bx2, by2 - wing * sx, bx2 + 5 * sb.s * sx, by2 + wing * 0.4 * sx);
+        ctx.stroke();
+      });
+    }
+
+    /* 惊起的飞鸟 */
+    birds = birds.filter(function (bird) { return bird.t < 1; });
+    birds.forEach(function (bird) {
+      bird.t += 0.008;
+      var bx = (bird.x + bird.t * bird.vx) * sx;
+      var by = (bird.y - bird.t * bird.vy) * sx;
+      var alpha = bird.t < 0.7 ? 0.62 : 0.62 * (1 - (bird.t - 0.7) / 0.3);
+      ctx.strokeStyle = 'rgba(45, 48, 54, ' + alpha + ')';
+      var wing = Math.sin(time * 0.02 + bird.phase) * 4 + 6;
+      bird.flock.forEach(function (off) {
+        var ox = bx + off[0] * sx * bird.t * 3;
+        var oy = by + off[1] * sx * bird.t * 2;
+        ctx.lineWidth = Math.max(1, 1.6 * sx);
+        ctx.beginPath();
+        ctx.moveTo(ox - 5 * sx, oy + wing * 0.4 * sx);
+        ctx.quadraticCurveTo(ox, oy - wing * sx, ox + 5 * sx, oy + wing * 0.4 * sx);
+        ctx.stroke();
+      });
+    });
+
+    /* 印章 */
+    var sealS = 30 * sx;
+    ctx.fillStyle = 'rgba(163, 51, 39, 0.88)';
+    var sxs = W - sealS - 16 * sx, sys = H - sealS - 14 * sx;
+    roundRect(ctx, sxs, sys, sealS, sealS, 3 * sx);
+    ctx.fill();
+    ctx.fillStyle = '#f4eede';
+    ctx.font = (13 * sx) + 'px "Songti SC", "STSong", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('夜', sxs + sealS / 2, sys + sealS * 0.30);
+    ctx.fillText('班', sxs + sealS / 2, sys + sealS * 0.72);
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function seedFromHash() {
+    var m = /seed=(\d+)/.exec(window.location.hash || '');
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function newPainting(s) {
+    seed = (typeof s === 'number' && isFinite(s)) ? s >>> 0 : Math.floor(Math.random() * 0xffffffff) >>> 0;
+    scene = makeScene(seed);
+    birds = [];
+    document.getElementById('seed-label').textContent = String(seed);
+    try {
+      var cleaned = window.location.pathname + '#seed=' + seed;
+      window.history.replaceState(null, '', cleaned);
+    } catch (e) { /* file:// 等环境可能限制 history，安静跳过 */ }
+  }
+
+  document.getElementById('btn-new').addEventListener('click', function () { newPainting(); });
+
+  document.getElementById('btn-save').addEventListener('click', function () {
+    try {
+      var a = document.createElement('a');
+      a.download = 'landscape-' + seed + '.png';
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    } catch (e) { /* 个别环境限制下载，安静跳过 */ }
+  });
+
+  canvas.addEventListener('click', function (ev) {
+    var rect = canvas.getBoundingClientRect();
+    var x = (ev.clientX - rect.left) / rect.width * scene.W;
+    var y = (ev.clientY - rect.top) / rect.height * scene.H;
+    if (y > scene.waterTop) y = scene.waterTop - 20;
+    var flock = [];
+    var n = 3 + Math.floor(Math.random() * 4);
+    for (var i = 0; i < n; i++) {
+      flock.push([(Math.random() - 0.5) * 46, (Math.random() - 0.5) * 26]);
+    }
+    birds.push({ x: x, y: y, vx: 40 + Math.random() * 40, vy: 60 + Math.random() * 50, t: 0, phase: Math.random() * 6, flock: flock });
+  });
+
+  window.addEventListener('resize', function () { drawPainting(performance.now()); });
+
+  newPainting(seedFromHash());
+  (function loop(t) {
+    drawPainting(t);
+    window.requestAnimationFrame(loop);
+  })(0);
+})();
+</script>
+</body>
+</html>

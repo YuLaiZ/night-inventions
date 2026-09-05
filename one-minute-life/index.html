@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一分钟人生</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .machine {
+    margin-top: clamp(26px, 5vw, 36px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(22px, 5vw, 34px);
+    min-height: 260px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  #age {
+    font-family: var(--mono);
+    font-size: clamp(44px, 12vw, 76px);
+    font-weight: 300;
+    color: var(--ink-strong);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  #age .sui { font-family: var(--sans); font-size: 0.4em; color: var(--ink-dim); }
+  #phase {
+    margin-top: 8px;
+    font-size: 14px;
+    color: var(--ice);
+    letter-spacing: 0.1em;
+  }
+  #phase .pd { color: var(--ink-dim); }
+  #event {
+    margin-top: 14px;
+    min-height: 2.6em;
+    font-size: 14px;
+    color: var(--ink);
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  #event.show { opacity: 1; }
+  .bar {
+    margin-top: 18px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.12);
+    overflow: hidden;
+  }
+  #fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--ice), var(--gold));
+    transition: width 0.2s linear;
+  }
+  .btn-row { margin-top: 22px; }
+  .btn-main {
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.24em;
+    text-indent: 0.24em;
+    padding: 11px 34px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .btn-main:hover { background: rgba(242, 199, 110, 0.2); }
+  #epitaph {
+    font-size: 15px;
+    color: var(--ink-strong);
+    line-height: 1.9;
+  }
+  #epitaph .big { font-family: var(--mono); font-size: 22px; color: var(--gold); }
+  #summary { margin-top: 10px; font-size: 13.5px; color: var(--ink-dim); }
+  .hint {
+    margin-top: 24px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  .hint a {
+    color: var(--ice);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(156, 200, 255, 0.4);
+  }
+  .hint a:hover { color: #c6e0ff; border-bottom-color: rgba(198, 224, 255, 0.75); }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto {
+    font-size: 15px;
+    color: #a8b3c9;
+    letter-spacing: 0.04em;
+  }
+  .sig {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>一分钟人生</h1>
+    <p class="intro">这里的一生只有一分钟：一秒一岁，越过越快——和真实的手感一致。期间会发生一些小事，最后给你一句墓志铭。</p>
+  </header>
+
+  <div class="machine">
+    <div id="idle-view">
+      <p style="color:var(--ink-dim);font-size:14.5px;margin-bottom:18px">出生于按下按钮的那一秒。寿命随机，童年很慢，暮年飞快。</p>
+      <div class="btn-row" style="margin-top:0">
+        <button type="button" class="btn-main" id="btn-start">开 始 一 生</button>
+      </div>
+    </div>
+    <div id="live-view" hidden>
+      <div id="age">0<span class="sui"> 岁</span></div>
+      <p id="phase"></p>
+      <p id="event"></p>
+      <div class="bar"><div id="fill"></div></div>
+    </div>
+    <div id="dead-view" hidden>
+      <p id="epitaph"></p>
+      <p id="summary"></p>
+      <div class="btn-row">
+        <button type="button" class="btn-main" id="btn-again">再 来 一 生</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="hint">快速预览模式：地址末尾加 <a href="#fast" id="fast-link">#fast</a>，六秒过完一生。</p>
+
+  <footer>
+    <p class="motto">重来很容易，所以这里不算数。真正的那个，只有一次。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var FAST = /#fast/.test(window.location.hash);
+
+  var PHASES = [
+    { max: 6,   name: '童年', desc: '所有的第一次都挤在这里' },
+    { max: 22,  name: '求学', desc: '时间以学期计算' },
+    { max: 30,  name: '青年', desc: '以为时间是无限的' },
+    { max: 45,  name: '中年', desc: '开始按季度计算' },
+    { max: 59,  name: '知命', desc: '时间悄悄换了档' },
+    { max: 74,  name: '闲年', desc: '一年真的比一年短' },
+    { max: 200, name: '暮年', desc: '越来越快，越来越轻' }
+  ];
+
+  var EVENTS = {
+    child: [
+      '学会了走路，代价是无数次摔倒。',
+      '第一次叫出"妈妈"，全家沸腾。',
+      '把钥匙塞进了花盆，至今没人找到。'
+    ],
+    teen: [
+      '学会了游泳。',
+      '第一次考了满分，飘了整整一周。',
+      '暗恋过一个人，写在日记最后一页。',
+      '毕业那天，把校服叠得整整齐齐。'
+    ],
+    young: [
+      '换了一座城市，全部行李两个箱子。',
+      '第一份工资到账，请自己吃了顿好的。',
+      '加班到凌晨，看全了这个城市的日出。',
+      '恋爱了，又分手了，都会好的。'
+    ],
+    mid: [
+      '买了房子，月亮开始比人先睡。',
+      '孩子出生，人生换了个操作系统。',
+      '体检报告上多了两个箭头。',
+      '同学会上，大家都在聊孩子和房贷。'
+    ],
+    elder: [
+      '终于听懂了父母的唠叨，并学会了同样的话。',
+      '老花镜的度数又深了五十度。',
+      '存款终于追上了欲望，两者一起减速。',
+      '升职了，或者躺平了，反正都接受了。'
+    ],
+    late: [
+      '学会了用手机买菜，孙子是老师。',
+      '每天散步五公里，风雨无阻。',
+      '老朋友走了一个，通讯录开始做减法。',
+      '开始喜欢早起，比鸟还早。'
+    ],
+    final: [
+      '每天晒太阳，像当年的猫。',
+      '记不清昨天，记得清五十年前。',
+      '孙辈绕膝，叫不出名字但都可爱。',
+      '把一生讲成故事，只要十分钟。'
+    ]
+  };
+  var BAND = function (age) {
+    if (age <= 6) return 'child';
+    if (age <= 22) return 'teen';
+    if (age <= 30) return 'young';
+    if (age <= 45) return 'mid';
+    if (age <= 59) return 'elder';
+    if (age <= 74) return 'late';
+    return 'final';
+  };
+
+  var timer = null;
+
+  function reset() {
+    $('idle-view').hidden = true;
+    $('dead-view').hidden = true;
+    $('live-view').hidden = false;
+  }
+
+  function phaseOf(age) {
+    for (var i = 0; i < PHASES.length; i++) {
+      if (age <= PHASES[i].max) return PHASES[i];
+    }
+    return PHASES[PHASES.length - 1];
+  }
+
+  function stepInterval(age) {
+    var base = 1500 * Math.pow(0.78, Math.floor(age / 10));
+    return Math.max(70, base) * (FAST ? 0.1 : 1);
+  }
+
+  function live() {
+    var lifespan = 62 + Math.floor(Math.pow(Math.random(), 1.4) * 39);
+    var age = 0;
+    var story = [];
+    var usedEvents = {};
+    var lastBand = '';
+
+    function oneYear() {
+      age++;
+      var ph = phaseOf(age);
+      $('age').innerHTML = age + '<span class="sui"> 岁</span>';
+      $('phase').innerHTML = ph.name + '<span class="pd"> · ' + ph.desc + '</span>';
+      $('fill').style.width = (age / lifespan * 100) + '%';
+
+      var band = BAND(age);
+      if (band !== lastBand) {
+        usedEvents[band] = [];
+        lastBand = band;
+      }
+      if (Math.random() < 0.38) {
+        var pool = EVENTS[band];
+        var unused = pool.filter(function (e) { return usedEvents[band].indexOf(e) === -1; });
+        if (unused.length) {
+          var ev = unused[Math.floor(Math.random() * unused.length)];
+          usedEvents[band].push(ev);
+          story.push(age + ' 岁，' + ev);
+          var evEl = $('event');
+          evEl.textContent = age + ' 岁：' + ev;
+          evEl.classList.add('show');
+        }
+      }
+
+      if (age >= lifespan) {
+        die(lifespan, story);
+        return;
+      }
+      timer = setTimeout(oneYear, stepInterval(age));
+    }
+
+    oneYear();
+  }
+
+  function die(lifespan, story) {
+    $('live-view').hidden = true;
+    $('dead-view').hidden = false;
+    $('epitaph').innerHTML = '享年 <span class="big">' + lifespan + '</span> 岁。';
+    var pick = story.slice(-4);
+    $('summary').textContent = pick.length
+      ? '这一生：' + pick.join(' ')
+      : '这一生风平浪静，什么都没发生。也是一种活法。';
+  }
+
+  function start() {
+    if (timer) clearTimeout(timer);
+    reset();
+    live();
+  }
+
+  $('btn-start').addEventListener('click', start);
+  $('btn-again').addEventListener('click', start);
+
+  /* 快进链接：点击即切 #fast，对当前一生立即生效 */
+  $('fast-link').addEventListener('click', function (e) {
+    e.preventDefault();
+    FAST = true;
+    try {
+      window.history.replaceState(null, '', window.location.pathname + '#fast');
+    } catch (err) { /* 个别环境限制 history，安静跳过 */ }
+    this.textContent = '已启用快进';
+  });
+})();
+</script>
+</body>
+</html>

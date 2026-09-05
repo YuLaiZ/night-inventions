@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会跑的按钮</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  #arena {
+    position: relative;
+    margin-top: clamp(22px, 5vw, 32px);
+    height: 340px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+  #runaway {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.1em;
+    padding: 12px 30px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: left 0.18s ease-out, top 0.18s ease-out;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #taunt {
+    margin-top: 16px;
+    min-height: 1.7em;
+    font-size: 14px;
+    color: var(--ice);
+  }
+  #score {
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  #cert {
+    margin-top: 18px;
+    border: 1px dashed rgba(242, 199, 110, 0.45);
+    border-radius: 14px;
+    padding: 18px 20px;
+    font-size: 14.5px;
+    color: var(--ink-strong);
+    line-height: 1.9;
+    display: none;
+  }
+  #cert.show { display: block; }
+  #cert .stamp { color: var(--gold); font-family: var(--mono); }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>会跑的按钮</h1>
+    <p class="intro">它只做一件事：不被你点到。桌面版会躲你的鼠标，手机版会躲你的手指。逃够七次，它累了自己投降。</p>
+  </header>
+
+  <div id="arena">
+    <button type="button" id="runaway">点我呀</button>
+  </div>
+  <p id="taunt"></p>
+  <p id="score">逃逸次数：0 / 7</p>
+
+  <div id="cert">
+    <span class="stamp">—— 手速证明 ——</span><br>
+    抓到一只会跑的按钮：用时 <span class="stamp" id="c-time"></span>，尝试
+    <span class="stamp" id="c-try"></span> 次。<br>
+    本页面可证明你的手速在线。它输了，但没有不服。
+  </div>
+
+  <p class="hint">放心，它不记仇，只是有点社恐。</p>
+
+  <footer>
+    <p class="motto">有些按钮一辈子只想做一件事：待在原地，除了它自己。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var arena = $('arena');
+  var btn = $('runaway');
+  var dodges = 0;
+  var MAX = 7;
+  var startTime = 0;
+  var caught = false;
+
+  var TAUNTS = [
+    '就这？',
+    '慢半拍。',
+    '再练练。',
+    '我还没认真跑。',
+    '你的鼠标在思考人生。',
+    '差不多了，我快累了……',
+    '行吧，算你赢。点我领奖。'
+  ];
+
+  function jump(mx, my) {
+    if (caught) return;
+    var rect = arena.getBoundingClientRect();
+    var bw = btn.offsetWidth, bh = btn.offsetHeight;
+    var pad = 8;
+    var nx, ny;
+    if (typeof mx === 'number') {
+      /* 往远离鼠标的方向跳 */
+      var cx = rect.left + bw / 2, cy = rect.top + bh / 2;
+      var dx = cx - mx, dy = cy - my;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      nx = cx + (dx / len) * 190;
+      ny = cy + (dy / len) * 190;
+    } else {
+      nx = rect.left + Math.random() * rect.width;
+      ny = rect.top + Math.random() * rect.height;
+    }
+    nx = Math.max(rect.left + pad + bw / 2, Math.min(rect.right - pad - bw / 2, nx));
+    ny = Math.max(rect.top + pad + bh / 2, Math.min(rect.bottom - pad - bh / 2, ny));
+    btn.style.left = (nx - rect.left) + 'px';
+    btn.style.top = (ny - rect.top) + 'px';
+  }
+
+  function dodge() {
+    if (caught) return;
+    if (!startTime) startTime = Date.now();
+    dodges++;
+    $('taunt').textContent = TAUNTS[Math.min(dodges - 1, TAUNTS.length - 1)];
+    $('score').textContent = '逃逸次数：' + dodges + ' / ' + MAX;
+    jump();
+    if (dodges >= MAX) surrender();
+  }
+
+  function surrender() {
+    caught = true;
+    btn.textContent = '点我领奖';
+    btn.style.left = '50%';
+    btn.style.top = '50%';
+    btn.style.transform = 'translate(-50%, -50%)';
+    $('score').textContent = '它投降了。';
+  }
+
+  /* 桌面：鼠标靠近就跑 */
+  arena.addEventListener('mousemove', function (e) {
+    if (caught || e.pointerType === 'touch') return;
+    var r = btn.getBoundingClientRect();
+    var bx = r.left + r.width / 2, by = r.top + r.height / 2;
+    var dist = Math.sqrt(Math.pow(e.clientX - bx, 2) + Math.pow(e.clientY - by, 2));
+    if (dist < 90) {
+      dodge();
+      jump(e.clientX, e.clientY);
+    }
+  });
+
+  /* 手机：点了就跑 */
+  btn.addEventListener('click', function (e) {
+    if (caught) {
+      var secs = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+      $('c-time').textContent = secs + ' 秒';
+      $('c-try').textContent = String(dodges);
+      $('cert').classList.add('show');
+      $('cert').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      btn.textContent = '已领奖';
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      return;
+    }
+    dodge();
+    jump(e.clientX, e.clientY);
+  });
+})();
+</script>
+</body>
+</html>

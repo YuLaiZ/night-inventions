@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>无限走廊</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  #corridor {
+    display: block;
+    width: 100%;
+    margin-top: clamp(20px, 4vw, 30px);
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: #05070d;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .hud {
+    margin-top: 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--gold);
+  }
+  .hint {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>无限走廊</h1>
+    <p class="intro">这条走廊挂在陈列馆的深处，走不到头——墙上的小画框，隔一段就换一件馆藏。按住画面可以走快点。</p>
+  </header>
+
+  <canvas id="corridor"></canvas>
+  <div class="hud">
+    <span id="dist">已走 0 米</span>
+    <span id="speed">步速 ×1.0</span>
+  </div>
+
+  <p class="hint">按住走廊，就是快走。墙上的展品都是真的，点得出去。</p>
+
+  <footer>
+    <p class="motto">走廊没有尽头，但每一盏灯都数得清。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('corridor');
+  var ctx = canvas.getContext('2d');
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  var W = 0, H = 0, CX = 0, CY = 0;
+  function resize() {
+    W = canvas.clientWidth || 600;
+    H = Math.round(W * 0.66);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.height = H + 'px';
+    CX = canvas.width / 2;
+    CY = canvas.height / 2;
+  }
+  window.addEventListener('resize', function () { resize(); draw(); });
+  resize();
+
+  /* ── 走廊参数 ── */
+  var LOOP = 2400;          // 一个循环的深度（单位）
+  var SEG = 120;            // 每段长度
+  var NSEG = LOOP / SEG;    // 段数
+  var z = 0;                // 已走深度
+  var speed = 130;          // 基础速度
+  var boost = 1;
+  var EXHIBITS = ['№001 罕见时刻钟', '№002 生成式山水', '№003 借口生成器', '№004 永远99%', '№005 嗯聊天窗', '№006 一分钟人生', '№007 灵魂色卡', '№008 汉字折纸', '№009 会跑按钮', '№010 今日月亮'];
+
+  function proj(d) {
+    /* 深度 → 屏幕半宽（透视） */
+    return 46000 / (d + 60);
+  }
+
+  function draw() {
+    try { drawInner(); } catch (e) {
+      (window.__drawErrs = window.__drawErrs || []).push(String(e && e.message || e));
+    }
+  }
+
+  function drawInner() {
+    var boostNow = boost;
+    z += speed * boostNow * 0.016;
+    var hwBase = proj(0) * 0.9;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#04060c';
+    ctx.fillRect(0, 0, W, H);
+
+    /* 由远及近画各段墙面：走廊按 ±一个循环双趟绘制，身后的墙也能包住镜头 */
+    for (var pass = 1; pass >= 0; pass--) {
+    var off = pass === 0 ? 0 : -LOOP;
+    for (var i = NSEG - 1; i >= 0; i--) {
+      var rd = i * SEG - z + off;
+      if (rd + SEG < 5) continue;    // 已在身后
+      if (rd > 900) continue;        // 还很远
+      var dn = Math.max(rd, 5);
+      var dfar = rd + SEG;
+      var s0 = 120 / (dn + 25);
+      var s1 = 120 / (dfar + 25);
+      var hw0 = 130 * s0, hh0 = 88 * s0;
+      var hw1 = 130 * s1, hh1 = 88 * s1;
+
+      var df = Math.max(0, 1 - dn / 900);   // 越近越亮
+      /* 地板与天花 */
+      ctx.fillStyle = 'rgba(30, 40, 68,' + (0.18 + 0.35 * df) + ')';
+      ctx.beginPath();
+      ctx.moveTo(CX - hw0, CY + hh0); ctx.lineTo(CX - hw1, CY + hh1);
+      ctx.lineTo(CX + hw1, CY + hh1); ctx.lineTo(CX + hw0, CY + hh0);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(12, 17, 32,' + (0.25 + 0.4 * df) + ')';
+      ctx.beginPath();
+      ctx.moveTo(CX - hw0, CY - hh0); ctx.lineTo(CX - hw1, CY - hh1);
+      ctx.lineTo(CX + hw1, CY - hh1); ctx.lineTo(CX + hw0, CY - hh0);
+      ctx.closePath(); ctx.fill();
+      /* 左右墙 */
+      ctx.fillStyle = 'rgba(38, 50, 82,' + (0.22 + 0.42 * df) + ')';
+      ctx.beginPath();
+      ctx.moveTo(CX - hw0, CY - hh0); ctx.lineTo(CX - hw1, CY - hh1);
+      ctx.lineTo(CX - hw1, CY + hh1); ctx.lineTo(CX - hw0, CY + hh0);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(CX + hw0, CY - hh0); ctx.lineTo(CX + hw1, CY - hh1);
+      ctx.lineTo(CX + hw1, CY + hh1); ctx.lineTo(CX + hw0, CY + hh0);
+      ctx.closePath(); ctx.fill();
+      /* 段末端门框 */
+      ctx.strokeStyle = 'rgba(242, 199, 110,' + (0.15 + 0.55 * df) + ')';
+      ctx.lineWidth = Math.max(0.6, 2.4 * s0);
+      ctx.strokeRect(CX - hw1, CY - hh1, hw1 * 2, hh1 * 2);
+
+      /* 顶灯：每段一盏 */
+      var lampY = CY - hh1 * 0.72;
+      var lampR = Math.max(1.2, 6 * s1);
+      if (lampR > 1.5) {
+        var g = ctx.createRadialGradient(CX, lampY, 0, CX, lampY, lampR * 3.6);
+        g.addColorStop(0, 'rgba(242, 199, 110, 0.85)');
+        g.addColorStop(1, 'rgba(242, 199, 110, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(CX, lampY, lampR * 3.6, 0, Math.PI * 2); ctx.fill();
+      }
+
+      /* 墙上展品小画框：每 4 段一件，左右交替 */
+      if (pass === 1 && i % 4 === 0 && rd > 100 && rd < 700) {
+        var side = (i / 4) % 2 === 0 ? -1 : 1;
+        var fx0 = CX + side * (hw0 * 0.86 - 9 * s0);
+        var fw = 26 * s0, fh = 32 * s0;
+        var fy0 = CY - 8 * s0;
+        ctx.fillStyle = 'rgba(16, 22, 40, 0.95)';
+        ctx.fillRect(fx0 - fw / 2, fy0 - fh / 2, fw, fh);
+        ctx.strokeStyle = 'rgba(242, 199, 110, 0.55)';
+        ctx.lineWidth = Math.max(0.5, 1.6 * s0);
+        ctx.strokeRect(fx0 - fw / 2, fy0 - fh / 2, fw, fh);
+        if (s0 > 1.6) {
+          ctx.fillStyle = 'rgba(156, 200, 255, 0.8)';
+          ctx.font = Math.max(4, 5.5 * s0) + 'px ' + getComputedStyle(document.body).fontFamily;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(EXHIBITS[(i / 4) % EXHIBITS.length].split(' ')[0].replace('№', ''), fx0, fy0);
+        }
+      }
+    }
+    }
+
+    /* 尽头的微光 */
+    var endR = Math.min(W, H) * 0.14;
+    var endGlow = ctx.createRadialGradient(CX, CY, 0, CX, CY, endR);
+    endGlow.addColorStop(0, 'rgba(242, 199, 110, 0.16)');
+    endGlow.addColorStop(1, 'rgba(242, 199, 110, 0)');
+    ctx.fillStyle = endGlow;
+    ctx.fillRect(CX - endR, CY - endR, endR * 2, endR * 2);
+
+    var meters = Math.round(z / 12);
+    $('dist').textContent = '已走 ' + meters + ' 米';
+    $('speed').textContent = '步速 ×' + boostNow.toFixed(1);
+  }
+
+  /* 按住加速 */
+  function setBoost(on) { boost = on ? 2.6 : 1; }
+  canvas.addEventListener('pointerdown', function () { setBoost(true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (ev) {
+    canvas.addEventListener(ev, function () { setBoost(false); });
+  });
+
+  /* rAF 停了也没关系：用 setInterval 兜底推进（后台会慢，前台丝滑） */
+  var raf = 0;
+  function loop() {
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+  setInterval(function () {
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    loop();
+  }, 500);
+  loop();
+})();
+</script>
+</body>
+</html>

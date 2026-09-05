@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日月亮圆缺</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .sky {
+    margin-top: clamp(22px, 5vw, 32px);
+    display: flex;
+    align-items: center;
+    gap: clamp(20px, 5vw, 36px);
+  }
+  #moonCanvas { flex: none; }
+  .info { flex: 1; min-width: 0; }
+  #phase-name {
+    font-size: clamp(24px, 6vw, 32px);
+    font-weight: 600;
+    color: var(--ink-strong);
+    letter-spacing: 0.04em;
+  }
+  .info .row {
+    margin-top: 8px;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+  }
+  .info .row b { color: var(--ink-strong); font-weight: 500; }
+  .strip-label {
+    margin-top: clamp(26px, 5vw, 36px);
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    color: var(--ink-dim);
+  }
+  #strip {
+    margin-top: 12px;
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+  }
+  #strip canvas { flex: 1; height: auto; }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>今日月亮圆缺</h1>
+    <p class="intro">不用出门，不用等天晴。今晚的月亮按真实的天历，长在这里了。</p>
+  </header>
+
+  <div class="sky">
+    <canvas id="moonCanvas" width="220" height="220"></canvas>
+    <div class="info">
+      <div id="phase-name">……</div>
+      <div class="row">月龄 <b id="age">--</b> 天 · 亮面 <b id="lit">--</b>%</div>
+      <div class="row" id="next-full"></div>
+      <div class="row" id="next-new"></div>
+    </div>
+  </div>
+
+  <p class="strip-label">前后十五天的它</p>
+  <div id="strip"></div>
+
+  <p class="hint">亮面在北半球视角：右侧先亮，是"盈"；左侧先亮，是"亏"。</p>
+
+  <footer>
+    <p class="motto">月亮不营业的时候，也在天上按点上班。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var SYNODIC = 29.53058867;                  // 朔望月（天）
+  var EPOCH = Date.UTC(2000, 0, 6, 18, 14, 0); // 2000-01-06 18:14 UTC 新月
+
+  function moonAge(date) {
+    var days = (date.getTime() - EPOCH) / 86400000;
+    var a = days % SYNODIC;
+    if (a < 0) a += SYNODIC;
+    return a;
+  }
+
+  /* 相名 */
+  function phaseName(age) {
+    var p = age / SYNODIC;
+    if (p < 0.02 || p >= 0.98) return '新月（朔）';
+    if (p < 0.23) return '娥眉月';
+    if (p < 0.27) return '上弦月';
+    if (p < 0.48) return '盈凸月';
+    if (p < 0.52) return '满月（望）';
+    if (p < 0.73) return '亏凸月';
+    if (p < 0.77) return '下弦月';
+    return '残月';
+  }
+
+  function litFraction(age) {
+    return Math.round((1 - Math.cos(2 * Math.PI * age / SYNODIC)) / 2 * 100);
+  }
+
+  /* 画月亮：暗盘 + 逐行扫描亮面（统一公式，盈亏对称） */
+  function drawMoon(c, x, y, r, age) {
+    var p = age / SYNODIC;
+    c.save();
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI * 2);
+    c.fillStyle = '#232b40';
+    c.fill();
+
+    var e = Math.cos(2 * Math.PI * p); // 界线椭圆系数（带号）
+    var waxing = p <= 0.5;             // 盈：右半先亮
+    c.fillStyle = '#e9e4d3';
+    var steps = Math.max(24, Math.ceil(r));
+    for (var i = 0; i < steps; i++) {
+      var dy = -r + (2 * r) * (i + 0.5) / steps;
+      var w = Math.sqrt(Math.max(0, r * r - dy * dy));
+      if (w < 0.4) continue;
+      var x0 = waxing ? x + e * w : x - w;
+      var wd = w * (1 - e);
+      c.fillRect(x0, y + dy, wd, (2 * r) / steps + 0.8);
+    }
+    c.restore();
+  }
+
+  function daysUntil(targetPhase, date) {
+    var a = moonAge(date);
+    var d = targetPhase * SYNODIC - a;
+    if (d < 0) d += SYNODIC;
+    return Math.round(d);
+  }
+
+  function renderMain() {
+    var now = new Date();
+    var a = moonAge(now);
+    drawMoon(document.getElementById('moonCanvas').getContext('2d'), 110, 110, 100, a);
+    document.getElementById('phase-name').textContent = phaseName(a);
+    document.getElementById('age').textContent = a.toFixed(1);
+    document.getElementById('lit').textContent = String(litFraction(a));
+    var full = daysUntil(0.5, now);
+    var neo = daysUntil(0, now);
+    document.getElementById('next-full').innerHTML = '距下次满月还有 <b>' + full + '</b> 天';
+    document.getElementById('next-new').innerHTML = '距下次新月还有 <b>' + neo + '</b> 天';
+  }
+
+  function renderStrip() {
+    var strip = document.getElementById('strip');
+    var today = new Date();
+    for (var i = -7; i <= 7; i++) {
+      (function (off) {
+        var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        var a = moonAge(d);
+        var cv = document.createElement('canvas');
+        cv.width = 60; cv.height = 60;
+        var label = document.createElement('div');
+        drawMoon(cv.getContext('2d'), 30, 30, 24, a);
+        cv.title = (off === 0 ? '今天' : (off > 0 ? '+' : '') + off + ' 天') + ' · ' + phaseName(a);
+        if (off === 0) cv.style.opacity = '1';
+        else cv.style.opacity = '0.45';
+        var wrap = document.createElement('div');
+        wrap.style.flex = '1';
+        wrap.appendChild(cv);
+        strip.appendChild(wrap);
+      })(i);
+    }
+  }
+
+  renderMain();
+  renderStrip();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>汉字折纸</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --paper: #f1ebdf;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+    --kai: "Kaiti SC", "STKaiti", "KaiTi", "PingFang SC", serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .paper-frame {
+    margin-top: clamp(22px, 5vw, 32px);
+    background: var(--paper);
+    border-radius: 4px;
+    padding: clamp(8px, 1.6vw, 14px);
+    box-shadow: 0 0 0 1px var(--line), 0 0 0 6px rgba(241, 235, 223, 0.05), 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+  #paper { display: block; width: 100%; border-radius: 2px; }
+  .toolbar {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .toolbar button {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.12em;
+    padding: 8px 20px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .toolbar button:hover { border-color: rgba(242, 199, 110, 0.5); color: var(--gold); }
+  #fold-count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+  #fold-count b { color: var(--gold); font-weight: 500; }
+  .hint {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>汉字折纸</h1>
+    <p class="intro">选一个字，折几折。剪纸的道理，折纸的手艺——纸上的汉字会自己长出对称的花样。</p>
+  </header>
+
+  <div class="paper-frame">
+    <canvas id="paper"></canvas>
+  </div>
+
+  <div class="toolbar">
+    <button type="button" id="btn-char">换个字</button>
+    <button type="button" id="btn-fold">再折一折</button>
+    <button type="button" id="btn-flat">全部展开</button>
+    <span id="fold-count">折了 <b>0</b> 折</span>
+  </div>
+  <p class="hint">对折两次、再走一次对角线，最普通的字也会开出花纹。</p>
+
+  <footer>
+    <p class="motto">每个方块字，都是一张还没折的纸。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('paper');
+  var ctx = canvas.getContext('2d');
+  var S = 640;                       // 逻辑边长
+
+  var CHARS = ['人', '山', '水', '木', '月', '心', '田', '吉', '春', '喜'];
+  var RED = '#c7402e';
+
+  var state = { ch: '人', folds: 0, seed: 1, anim: null };
+
+  function mulberry32(seed) {
+    var t = seed >>> 0;
+    return function () {
+      t += 0x6D2B79F5;
+      var r = Math.imul(t ^ (t >>> 15), t | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* 基础一笔：把字画进左上象限（带随机偏移、旋转、缩放） */
+  function drawBase(c) {
+    var rnd = mulberry32(state.seed);
+    var half = S / 2;
+    var cx = half * (0.42 + rnd() * 0.3);
+    var cy = half * (0.42 + rnd() * 0.3);
+    var size = half * (0.62 + rnd() * 0.22);
+    c.save();
+    c.translate(cx, cy);
+    c.rotate((rnd() * 24 - 12) * Math.PI / 180);
+    c.font = '300 ' + size + 'px "Kaiti SC", "STKaiti", "KaiTi", "PingFang SC", serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = RED;
+    c.fillText(state.ch, 0, 0);
+    c.restore();
+  }
+
+  /* folds: bit0=左右折 bit1=上下折 bit2=对角折
+     anim: 正在展开的最新一折 { axis, p }  p: 0→1 */
+  function render() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var cssW = canvas.clientWidth || 600;
+    if (canvas.width !== Math.round(cssW * dpr)) {
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssW * dpr);
+    }
+    var px = canvas.width / S;         // 每逻辑单位像素
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    /* 宣纸 */
+    var paper = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    paper.addColorStop(0, '#f2ecdf');
+    paper.addColorStop(1, '#eae2d0');
+    ctx.fillStyle = paper;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    /* 过期的动画自动结算（后台标签页 rAF 可能长时间暂停） */
+    if (state.anim && Date.now() - state.anim.startedAt >= 450) state.anim = null;
+    var anim = state.anim;
+    var animP = anim ? 1 - Math.pow(1 - Math.min(1, (Date.now() - anim.startedAt) / 450), 3) : 1;
+
+    var half = S / 2 * px;
+    var v = state.folds & 1, h = state.folds & 2, d = state.folds & 4;
+
+    /* 象限变换：基础画在左上；各折把副本镜像到对应象限 */
+    var quads = [{ m: function (c) {} }];
+    if (v) quads.push({ m: function (c) { c.translate(S, 0); c.scale(-1, 1); } });
+    if (h) quads.push({ m: function (c) { c.translate(0, S); c.scale(1, -1); } });
+    if (v && h) quads.push({ m: function (c) { c.translate(S, S); c.scale(-1, -1); } });
+
+    var copies = [];
+    quads.forEach(function (q) {
+      copies.push({ m: q.m });
+      if (d) copies.push({
+        diag: true,
+        m: function (c) {
+          c.translate(S, S);
+          c.transform(0, -1, -1, 0, 0, 0);
+          q.m(c);
+        }
+      });
+    });
+
+    copies.forEach(function (cp, idx) {
+      var newCount = anim ? anim.newCount : 0;
+      var isNew = anim && idx >= copies.length - newCount;
+      ctx.save();
+      if (isNew) {
+        ctx.beginPath();
+        if (anim.axis === 'v') ctx.rect(half, 0, half * animP + 1, canvas.height);
+        else if (anim.axis === 'h') ctx.rect(0, half, canvas.width, half * animP + 1);
+        ctx.clip();
+        if (anim.axis === 'd') ctx.globalAlpha = animP;
+      }
+      ctx.scale(px, px);
+      cp.m(ctx);
+      drawBase(ctx);
+      ctx.restore();
+    });
+
+    /* 折缝虚线 */
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120, 110, 90, 0.4)';
+    ctx.lineWidth = Math.max(1, px * 1.2);
+    ctx.setLineDash([6 * px, 6 * px]);
+    ctx.beginPath();
+    if (v) { ctx.moveTo(half, 0); ctx.lineTo(half, canvas.height); }
+    if (h) { ctx.moveTo(0, half); ctx.lineTo(canvas.width, half); }
+    if (d) { ctx.moveTo(0, 0); ctx.lineTo(canvas.width, canvas.height); }
+    ctx.stroke();
+    ctx.restore();
+
+    /* 红印 */
+    var sealS = 30 * px;
+    ctx.fillStyle = 'rgba(163, 51, 39, 0.88)';
+    var sxs = canvas.width - sealS - 14 * px, sys = canvas.height - sealS - 12 * px;
+    ctx.beginPath();
+    ctx.moveTo(sxs + 3 * px, sys);
+    ctx.arcTo(sxs + sealS, sys, sxs + sealS, sys + sealS, 3 * px);
+    ctx.arcTo(sxs + sealS, sys + sealS, sxs, sys + sealS, 3 * px);
+    ctx.arcTo(sxs, sys + sealS, sxs, sys, 3 * px);
+    ctx.arcTo(sxs, sys, sxs + sealS, sys, 3 * px);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#f4eede';
+    ctx.font = (12 * px) + 'px "Songti SC", "STSong", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('折', sxs + sealS / 2, sys + sealS / 2);
+  }
+
+  function fold() {
+    if (state.folds >= 7) {
+      /* 已是满折，重摆一个字 */
+      state.seed = Math.floor(Math.random() * 0xffffffff) >>> 0;
+      state.folds = 0;
+      state.anim = null;
+      $('fold-count').innerHTML = '折了 <b>0</b> 折';
+      render();
+      return;
+    }
+    var axes = ['v', 'h', 'd'];
+    var axis = axes[state.folds];
+    var newCount = axis === 'd' ? 4 : Math.pow(2, state.folds);
+    state.folds++;
+    $('fold-count').innerHTML = '折了 <b>' + state.folds + '</b> 折';
+    /* 进度由墙钟推算：任何一次重绘都会正确结算，后台暂停也不会卡住 */
+    state.anim = { axis: axis, newCount: newCount, startedAt: Date.now(), raf: 0 };
+    renderFromAnim();
+    /* 兜底：即使 rAF 被节流，这个定时器也会把动画结算成完整状态 */
+    setTimeout(function () {
+      if (state.anim && state.anim.axis === axis && state.anim.newCount === newCount) {
+        state.anim = null;
+        render();
+      }
+    }, 600);
+  }
+
+  function renderFromAnim() {
+    render();
+    if (state.anim) {
+      if (state.anim.raf) cancelAnimationFrame(state.anim.raf);
+      state.anim.raf = requestAnimationFrame(renderFromAnim);
+    }
+  }
+
+  $('btn-char').addEventListener('click', function () {
+    var next = CHARS[Math.floor(Math.random() * CHARS.length)];
+    if (next === state.ch && CHARS.length > 1) {
+      next = CHARS[(CHARS.indexOf(next) + 1) % CHARS.length];
+    }
+    state.ch = next;
+    state.seed = Math.floor(Math.random() * 0xffffffff) >>> 0;
+    render();
+  });
+
+  $('btn-fold').addEventListener('click', fold);
+
+  $('btn-flat').addEventListener('click', function () {
+    state.folds = 0;
+    state.anim = null;
+    $('fold-count').innerHTML = '折了 <b>0</b> 折';
+    render();
+  });
+
+  window.addEventListener('resize', function () { render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

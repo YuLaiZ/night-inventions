@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>无聊发明陈列馆</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 48px) 20px 36px;
+  }
+  .lamp {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    letter-spacing: 0.22em;
+    color: var(--ink-dim);
+  }
+  .lamp .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #3a4358;
+    flex: none;
+  }
+  .lamp.on .dot {
+    background: var(--gold);
+    box-shadow: 0 0 8px rgba(242, 199, 110, 0.8);
+    animation: breathe 2.6s ease-in-out infinite;
+  }
+  .lamp.on { color: var(--gold); }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  header h1 {
+    font-size: clamp(26px, 6vw, 30px);
+    line-height: 1.3;
+    letter-spacing: 0.02em;
+    color: #f0ead9;
+    margin: 10px 0 8px;
+  }
+  .intro {
+    margin: 0 0 8px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 38em;
+  }
+  .side-note {
+    font-size: 13.5px;
+    color: var(--ink-dim);
+  }
+  .side-note a {
+    color: var(--ice);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(156, 200, 255, 0.4);
+  }
+  .side-note a:hover { color: #c6e0ff; border-bottom-color: rgba(198, 224, 255, 0.75); }
+  .count {
+    margin-top: 9px;
+    font-family: var(--sans);
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.05em;
+  }
+  .count span { font-family: var(--mono); color: #cfc9b8; }
+  #filter-box { display: none; margin-top: 12px; }
+  #filter-box.show { display: block; }
+  #filter {
+    width: 100%;
+    max-width: 400px;
+    background: rgba(10, 13, 23, 0.6);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink-strong);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    padding: 8px 18px;
+    outline: none;
+  }
+  #filter:focus { border-color: rgba(156, 200, 255, 0.4); }
+  #filter::placeholder { color: var(--ink-dim); }
+  .wall {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  a.card {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px 14px;
+    background: rgba(16, 22, 40, 0.55);
+    color: inherit;
+    transition: transform 0.25s ease, border-color 0.25s ease;
+  }
+  a.card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(242, 199, 110, 0.45);
+    text-decoration: none;
+  }
+  .card .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .card .no {
+    font-size: 12px;
+    color: var(--gold);
+    letter-spacing: 0.28em;
+  }
+  .card .date {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-dim);
+  }
+  .card h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f0ead9;
+    letter-spacing: 0.02em;
+  }
+  .card p {
+    margin-top: 4px;
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--ink-dim);
+    flex: 1;
+  }
+  .card .go {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--gold);
+  }
+  .next-card {
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: 118px;
+  }
+  footer {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+  }
+  .sig {
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+  @media (max-width: 480px) {
+    .wall { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="lamp" id="lamp"><span class="dot"></span><span id="lamp-text">正在看灯……</span></p>
+    <h1>无聊发明陈列馆</h1>
+    <p class="intro">一些没有用处的精致小物。只在夜里被制造出来：单文件、不联网、双击就能玩。做完一件挂一件。</p>
+    <p class="side-note">夜班不止会发明——<a href="/night-league/">隔壁还有间棋房</a>，同一场深夜里，棋手联赛正在落子，一局接一局。</p>
+    <p class="count">开馆第 <span id="night-no">1</span> 夜 · 馆藏 <span id="n">0</span> 件 · 持续增加中</p>
+    <div id="filter-box"><input id="filter" type="text" placeholder="找一件展品：名字、编号或描述……"></div>
+  </header>
+
+  <!-- 馆藏墙：全部平铺，按入藏先后排列（新卡加在占位卡之前）。
+       展品编号顺延，入藏日期写死在卡上；满 10 件筛选框自动出现。 -->
+
+  <section class="wall">
+    <a class="card" href="rare-moment-clock/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№001</span><span class="date">2026-09-04</span></span>
+      <h3>罕见时刻钟</h3>
+      <p>一天 86400 秒里的少数派：顺子、全同、三重奏。碰上它们，整口钟为你亮灯庆祝。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="generative-landscape/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№002</span><span class="date">2026-09-04</span></span>
+      <h3>生成式山水</h3>
+      <p>每一幅由一粒种子即时生成：远山、雾、月与水面，前所未见也后不再来，可凭种子重访。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="excuse-generator/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№003</span><span class="date">2026-09-05</span></span>
+      <h3>借口生成器</h3>
+      <p>深夜失约者的公关部门：三段式借口与可信度评分。编得越多，分数越低。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="progress-forever-99/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№004</span><span class="date">2026-09-05</span></span>
+      <h3>永远 99% 的进度条</h3>
+      <p>不装死不闪退，一直在动——只是对"完成"有自己的理解。加速不快，跳过不掉。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="en-chat/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№005</span><span class="date">2026-09-05</span></span>
+      <h3>只会说"嗯"的聊天窗</h3>
+      <p>他不是不想理你，只是把千言万语过成了同一个字。说什么都有安排好的"嗯"。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="one-minute-life/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№006</span><span class="date">2026-09-05</span></span>
+      <h3>一分钟人生</h3>
+      <p>一秒一岁，越过越快。童年很慢，暮年飞快，期间发生一些小事，最后给你一句只属于这次的墓志铭。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="soul-color-card/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№007</span><span class="date">2026-09-05</span></span>
+      <h3>灵魂色卡</h3>
+      <p>拨动电量、天气、脑内弹幕三根滑杆，炼出你此刻的灵魂色。同答案同色，它比你诚实。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="hanzi-origami/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№008</span><span class="date">2026-09-05</span></span>
+      <h3>汉字折纸</h3>
+      <p>选一个字，折几折——剪纸的道理，折纸的手艺。对折两次再走对角线，普通字也开花。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="runaway-button/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№009</span><span class="date">2026-09-05</span></span>
+      <h3>会跑的按钮</h3>
+      <p>它只做一件事：不被你点到。逃够七次自己投降，还给你开一张手速证明。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="today-moon/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№010</span><span class="date">2026-09-05</span></span>
+      <h3>今日月亮圆缺</h3>
+      <p>不用出门等天晴——今晚的月亮按真实天历长在这里，月龄、亮面和前后十五天都在。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="infinite-corridor/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№011</span><span class="date">2026-09-05</span></span>
+      <h3>无限走廊</h3>
+      <p>陈列馆深处走不到头的走廊，墙上的小画框隔一段换一件馆藏。按住它，走得快点。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="stubborn-paperclip/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№012</span><span class="date">2026-09-05</span></span>
+      <h3>拖不动的回形针</h3>
+      <p>展品柜里最倔的一件。试着拖走它——惹急了，它会反过来求你钉一句想留下的话。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="white-noise-music-box/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№013</span><span class="date">2026-09-05</span></span>
+      <h3>白噪音八音盒</h3>
+      <p>雨、浪、风三种合成白噪音打底，机芯即兴敲五声音阶的叮咚。全部现场合成，不出设备。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="anti-pomodoro/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№014</span><span class="date">2026-09-05</span></span>
+      <h3>反效率番茄钟</h3>
+      <p>打工人的相对论：专注时时间变慢，休息时时间飞逝。它不提高效率，只帮你承认现实。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="pixel-aging/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№015</span><span class="date">2026-09-05</span></span>
+      <h3>慢慢变老的像素画</h3>
+      <p>一位像素居民和你共享同一秒钟。看它看得越久，它老得越快——白发、皱纹、老花，都会准时长出来。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <a class="card" href="sleepy-pixel-pet/" target="_blank" rel="noopener">
+      <span class="meta"><span class="no">№016</span><span class="date">2026-09-05</span></span>
+      <h3>只睡觉的像素动物</h3>
+      <p>展品柜的团宠：一只怎么都叫不醒的像素猫。可以戳，它会回应——但醒来是不可能的。</p>
+      <span class="go">看看 →</span>
+    </a>
+    <div class="next-card">下一件还在夜里赶工</div>
+  </section>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  /* ── 馆藏计数 ── */
+  var cards = document.querySelectorAll('a.card');
+  document.getElementById('n').textContent = String(cards.length);
+
+  /* ── 开馆夜次：以 2026-09-04 晚为第一夜；凌晨属于前一天的夜 ── */
+  var OPENING = new Date(2026, 8, 4);
+  var now = new Date();
+  var nightDate = new Date(now);
+  if (now.getHours() < 12) nightDate.setDate(nightDate.getDate() - 1);
+  var nights = Math.floor((nightDate - OPENING) / 86400000) + 1;
+  if (nights < 1) nights = 1;
+  document.getElementById('night-no').textContent = String(nights);
+
+  /* ── 状态灯：夜班 23:05–次日 08:45 亮灯 ── */
+  var minutes = now.getHours() * 60 + now.getMinutes();
+  var lamp = document.getElementById('lamp');
+  if (minutes >= 23 * 60 + 5 || minutes < 8 * 60 + 45) {
+    lamp.classList.add('on');
+    document.getElementById('lamp-text').textContent = '夜间开工中';
+  } else {
+    document.getElementById('lamp-text').textContent = '白天闭馆中 · 今晚 23:05 再开灯';
+  }
+
+  /* ── 馆藏满 10 件，出现筛选框 ── */
+  var filterBox = document.getElementById('filter-box');
+  if (cards.length >= 10) filterBox.classList.add('show');
+  var filter = document.getElementById('filter');
+  filter.addEventListener('input', function () {
+    var q = filter.value.trim().toLowerCase();
+    cards.forEach(function (card) {
+      var hit = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
+      card.style.display = hit ? '' : 'none';
+    });
+  });
+})();
+</script>
+</body>
+</html>

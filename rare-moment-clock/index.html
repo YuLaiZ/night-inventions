@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>罕见时刻钟</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --soft: #a8b3c9;
+    --line: rgba(156, 200, 255, 0.14);
+    --serif: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  #sky {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .star {
+    position: absolute;
+    border-radius: 50%;
+    background: #dfe7f5;
+    animation: twinkle var(--dur, 4s) ease-in-out var(--delay, 0s) infinite;
+  }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.08; }
+    50% { opacity: 0.7; }
+  }
+  #glow {
+    position: fixed;
+    top: 22vh; left: 50%;
+    width: 78vmin; height: 78vmin;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(122, 144, 200, 0.12) 0%, transparent 68%);
+    transition: background 1.2s ease;
+    pointer-events: none;
+    z-index: 0;
+  }
+  body.excited #glow {
+    background: radial-gradient(circle, rgba(242, 199, 110, 0.20) 0%, transparent 70%);
+  }
+  main {
+    position: relative;
+    z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: clamp(28px, 6vw, 56px) 22px 40px;
+  }
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    max-width: 34em;
+  }
+  /* ── 此刻 ─────────────────────────── */
+  #now {
+    text-align: center;
+    margin-top: clamp(30px, 7vw, 52px);
+  }
+  .now-label {
+    font-size: 12px;
+    letter-spacing: 0.55em;
+    text-indent: 0.55em;
+    color: var(--ink-dim);
+  }
+  #clock {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(58px, 16.5vw, 118px);
+    font-weight: 300;
+    letter-spacing: 0.04em;
+    color: var(--ink-strong);
+    line-height: 1.15;
+  }
+  #clock .sec { color: var(--gold); font-size: 0.62em; }
+  #clock .sep { animation: blink 2s steps(1) infinite; color: var(--ink-dim); }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  #status {
+    margin-top: 18px;
+    min-height: 1.8em;
+    font-size: 15px;
+    color: var(--soft);
+    transition: color 0.6s ease;
+  }
+  #status .lit { color: var(--gold); }
+  #witness-chip {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 5px 16px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  #witness-chip b { color: var(--ink-strong); font-weight: 600; }
+  /* ── 图鉴 ─────────────────────────── */
+  section h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: 0.2em;
+    color: var(--ink-strong);
+    margin: clamp(44px, 9vw, 64px) 0 16px;
+  }
+  section h2 small {
+    font-family: var(--sans);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: var(--ink-dim);
+    margin-left: 10px;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(288px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 15px;
+    background: rgba(16, 22, 40, 0.55);
+  }
+  .card .tier {
+    display: inline-block;
+    font-size: 11.5px;
+    letter-spacing: 0.25em;
+    text-indent: 0.25em;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+  }
+  .card.t3 .tier { color: var(--gold); }
+  .card.t2 .tier { color: var(--ice); }
+  .card.t1 .tier { color: var(--soft); }
+  .card h3 {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--ink-strong);
+    margin-top: 10px;
+    letter-spacing: 0.08em;
+  }
+  .card p {
+    font-size: 13.5px;
+    color: var(--ink-dim);
+    margin-top: 6px;
+  }
+  .card ul { list-style: none; margin-top: 10px; }
+  .card li {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13.5px;
+    padding: 4px 0;
+    border-top: 1px dashed rgba(156, 200, 255, 0.10);
+  }
+  .card li .t { font-family: var(--mono); color: var(--ink-strong); }
+  .card li .s { color: var(--ink-dim); }
+  .card li.hit .t, .card li.hit .s { color: var(--gold); }
+  .card li.soon .t { color: var(--ice); }
+  /* ── 见证记录 ─────────────────────── */
+  #witness-list { list-style: none; }
+  #witness-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 9px 2px;
+    border-bottom: 1px solid rgba(156, 200, 255, 0.08);
+    font-size: 14px;
+  }
+  #witness-list .wt { font-family: var(--mono); color: var(--ink-strong); }
+  #witness-list .wn { color: var(--ink); }
+  #witness-list .wd { color: var(--ink-dim); font-size: 12.5px; margin-left: auto; text-align: right; }
+  #witness-list .empty { color: var(--ink-dim); border-bottom: none; font-size: 13.5px; }
+  #lifetime { margin-top: 14px; font-size: 13px; color: var(--ink-dim); }
+  /* ── 尾部 ─────────────────────────── */
+  footer { margin-top: clamp(52px, 10vw, 76px); }
+  .motto {
+    font-family: var(--serif);
+    font-size: 15px;
+    color: var(--soft);
+    letter-spacing: 0.06em;
+  }
+  .sig {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+  /* ── 提示浮层 ─────────────────────── */
+  #toast {
+    position: fixed;
+    top: max(18px, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    background: rgba(22, 29, 50, 0.92);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    font-size: 13.5px;
+    color: var(--ice);
+    z-index: 30;
+    opacity: 0;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    max-width: 88vw;
+    text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #overlay {
+    position: fixed; inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(6, 8, 16, 0.82);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+  #overlay.show { opacity: 1; pointer-events: auto; }
+  #overlay .panel { text-align: center; padding: 24px; max-width: 92vw; }
+  #overlay .otime {
+    font-family: var(--mono);
+    font-size: clamp(44px, 13vw, 96px);
+    color: var(--gold);
+    font-weight: 300;
+  }
+  #overlay .oname {
+    font-family: var(--serif);
+    font-size: clamp(22px, 5.5vw, 30px);
+    letter-spacing: 0.08em;
+    color: var(--ink-strong);
+    margin-top: 8px;
+  }
+  #overlay .odesc { color: var(--soft); margin-top: 14px; font-size: 15px; }
+  #overlay button {
+    margin-top: 30px;
+    background: none;
+    border: 1px solid rgba(242, 199, 110, 0.5);
+    color: var(--gold);
+    font-size: 14px;
+    letter-spacing: 0.2em;
+    text-indent: 0.2em;
+    padding: 9px 26px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: var(--sans);
+  }
+  #overlay button:hover { background: rgba(242, 199, 110, 0.1); }
+  .flake {
+    position: fixed;
+    top: -6vh;
+    font-family: var(--mono);
+    font-size: 18px;
+    z-index: 35;
+    pointer-events: none;
+    animation: fall var(--fdur, 3.2s) linear forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(112vh) rotate(var(--frot, 180deg)); opacity: 0; }
+  }
+  @media (max-width: 480px) {
+    .cards { grid-template-columns: 1fr; }
+    #witness-list .wd { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="sky"></div>
+<div id="glow"></div>
+<main>
+  <header>
+    <a class="back-home" href="../">← 陈列馆</a>
+    <h1>罕见时刻钟</h1>
+    <p class="intro">一天有 86400 秒，大多数只是路过。只有一百多秒例外：数字排成一列，或者干脆变成同一个数字。这口钟只为它们亮灯。</p>
+  </header>
+
+  <section id="now">
+    <p class="now-label">此刻</p>
+    <div id="clock" aria-live="off">
+      <span id="t-h">--</span><span class="sep">:</span><span id="t-m">--</span><span class="sep">:</span><span class="sec" id="t-s">--</span>
+    </div>
+    <p id="status">正在对时……</p>
+    <div id="witness-chip">本次到访，你已亲眼见证 <b id="w-count">0</b> 个罕见时刻</div>
+  </section>
+
+  <section>
+    <h2>今日图鉴<small>它们每天都会来，只是不等谁</small></h2>
+    <div class="cards">
+      <div class="card t3">
+        <span class="tier">神话</span>
+        <h3>顺子时刻</h3>
+        <p>六个数字手拉手，一个比一大一步。一天只来两次。</p>
+        <ul id="list-shunzi"></ul>
+      </div>
+      <div class="card t3">
+        <span class="tier">神话</span>
+        <h3>全同时刻</h3>
+        <p>六个数字是同一个数字，像时间打了六个相同的结。一天只有三次。</p>
+        <ul id="list-quantong"></ul>
+      </div>
+      <div class="card t2">
+        <span class="tier">珍稀</span>
+        <h3>三重奏时刻</h3>
+        <p>时、分、秒唱同一个音。每小时准时报到一次，从不缺席。</p>
+        <ul id="list-trio"></ul>
+      </div>
+      <div class="card t1">
+        <span class="tier">寻常</span>
+        <h3>回文时刻</h3>
+        <p>正着读、倒着读，都是同一句时间。一天路过九十多次，平均一刻钟一次。</p>
+        <ul id="list-pal"></ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>本班见证<small>关掉页面就清零，罕见本来也不留人</small></h2>
+    <ul id="witness-list">
+      <li class="empty">还没有。罕见时刻来的时候，你正好在这里，就会被记下一笔。</li>
+    </ul>
+    <p id="lifetime"></p>
+  </section>
+
+  <footer>
+    <p class="motto">钟不会为谁多走一秒。但你可以为某一秒停下来。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<div id="toast"></div>
+<div id="overlay">
+  <div class="panel">
+    <div class="otime" id="o-time"></div>
+    <div class="oname" id="o-name"></div>
+    <p class="odesc" id="o-desc"></p>
+    <button type="button" id="o-close">继续看钟</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var MOMENTS = {
+    shunzi:  { tier: 3, name: '顺子时刻',   desc: '0、1、2、3、4、5 手拉手——时间排成了一列小队伍。' },
+    quantong:{ tier: 3, name: '全同时刻',   desc: '六个数字是同一个数字。一天只有三次，正在发生一次。' },
+    trio:    { tier: 2, name: '三重奏时刻', desc: '时、分、秒唱同一个音。' },
+    pal:     { tier: 1, name: '回文时刻',   desc: '正读倒读都一样，时间打了个小小的盹。' }
+  };
+  var TIER_LABEL = { 3: '神话', 2: '珍稀', 1: '寻常' };
+
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function classify(h, m, s) {
+    var d = pad2(h) + pad2(m) + pad2(s);
+    if (d[0] === d[1] && d[1] === d[2] && d[2] === d[3] && d[3] === d[4] && d[4] === d[5]) return 'quantong';
+    if ((h === 1 && m === 23 && s === 45) || (h === 12 && m === 34 && s === 56)) return 'shunzi';
+    if (h === m && m === s) return 'trio';
+    if (d[0] === d[5] && d[1] === d[4] && d[2] === d[3]) return 'pal';
+    return null;
+  }
+
+  function fmtCountdown(ms) {
+    if (ms < 0) ms = 0;
+    var total = Math.round(ms / 1000);
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    if (h > 0) return h + ' 小时 ' + m + ' 分 ' + s + ' 秒';
+    if (m > 0) return m + ' 分 ' + s + ' 秒';
+    return s + ' 秒';
+  }
+
+  /* ── 星空 ── */
+  (function makeSky() {
+    var sky = $('sky');
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < 60; i++) {
+      var st = document.createElement('div');
+      st.className = 'star';
+      var size = Math.random() < 0.8 ? 1 : 2;
+      st.style.width = size + 'px';
+      st.style.height = size + 'px';
+      st.style.left = (Math.random() * 100).toFixed(2) + '%';
+      st.style.top = (Math.random() * 100).toFixed(2) + '%';
+      st.style.setProperty('--dur', (3 + Math.random() * 5).toFixed(2) + 's');
+      st.style.setProperty('--delay', (Math.random() * 6).toFixed(2) + 's');
+      frag.appendChild(st);
+    }
+    sky.appendChild(frag);
+  })();
+
+  /* ── 一生计数（仅本机，不联网） ── */
+  var lifetime = 0;
+  try {
+    lifetime = parseInt(window.localStorage.getItem('rare-clock-lifetime') || '0', 10) || 0;
+  } catch (e) { lifetime = 0; }
+  function saveLifetime() {
+    try { window.localStorage.setItem('rare-clock-lifetime', String(lifetime)); } catch (e) { /* 某些环境禁用存储，安静跳过 */ }
+  }
+  function renderLifetime() {
+    $('lifetime').textContent = lifetime > 0
+      ? '自首夜以来，这口钟已陪你见证 ' + lifetime + ' 个罕见时刻（计数只存在你自己的设备里）。'
+      : '见证过的时刻会记在这里——计数只存在你自己的设备里。';
+  }
+  renderLifetime();
+
+  /* ── 状态 ── */
+  var nextLit = null;          // 下一盏灯 { at: Date, key: string }
+  var lastSecondKey = '';      // 已处理过的秒，避免重复记录
+  var bannerUntil = 0;         // 亮灯横幅保留到何时
+  var bannerKey = null;
+  var sessionCount = 0;
+  var overlayTimer = null;
+
+  function findNextLit(from) {
+    for (var i = 1; i <= 86400; i++) {
+      var t = new Date(from.getTime() + i * 1000);
+      var key = classify(t.getHours(), t.getMinutes(), t.getSeconds());
+      if (key && MOMENTS[key].tier >= 2) return { at: t, key: key };
+    }
+    return null;
+  }
+
+  function showOverlay(at, key) {
+    var m = MOMENTS[key];
+    $('o-time').textContent = pad2(at.getHours()) + ':' + pad2(at.getMinutes()) + ':' + pad2(at.getSeconds());
+    $('o-name').textContent = m.name;
+    $('o-desc').textContent = m.desc;
+    var ov = $('overlay');
+    ov.classList.add('show');
+    if (overlayTimer) clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(hideOverlay, 8000);
+  }
+  function hideOverlay() {
+    $('overlay').classList.remove('show');
+    if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
+  }
+  $('o-close').addEventListener('click', hideOverlay);
+
+  function showToast(text) {
+    var t = $('toast');
+    t.textContent = text;
+    t.classList.add('show');
+    setTimeout(function () { t.classList.remove('show'); }, 4200);
+  }
+
+  function confetti(digits, key) {
+    if (!digits) digits = '112211';
+    var color = key === 'pal' ? '#a8b3c9' : (MOMENTS[key].tier === 2 ? '#9cc8ff' : '#f2c76e');
+    for (var i = 0; i < 14; i++) {
+      var f = document.createElement('span');
+      f.className = 'flake';
+      f.textContent = digits.charAt(i % digits.length);
+      f.style.left = (4 + Math.random() * 92) + 'vw';
+      f.style.color = color;
+      f.style.setProperty('--fdur', (2.6 + Math.random() * 1.8).toFixed(2) + 's');
+      f.style.setProperty('--frot', Math.round(Math.random() * 340 - 170) + 'deg');
+      document.body.appendChild(f);
+      setTimeout(function (node) { return function () { node.remove(); }; }(f), 4800);
+    }
+  }
+
+  function witness(at, key) {
+    sessionCount++;
+    $('w-count').textContent = String(sessionCount);
+    lifetime++;
+    saveLifetime();
+    renderLifetime();
+    var m = MOMENTS[key];
+    var list = $('witness-list');
+    var empty = list.querySelector('.empty');
+    if (empty) empty.remove();
+    var li = document.createElement('li');
+    var t = document.createElement('span'); t.className = 'wt';
+    t.textContent = pad2(at.getHours()) + ':' + pad2(at.getMinutes()) + ':' + pad2(at.getSeconds());
+    var n = document.createElement('span'); n.className = 'wn';
+    n.textContent = m.name;
+    var d = document.createElement('span'); d.className = 'wd';
+    d.textContent = TIER_LABEL[m.tier];
+    li.appendChild(t); li.appendChild(n); li.appendChild(d);
+    list.insertBefore(li, list.firstChild);
+    while (list.children.length > 8) list.removeChild(list.lastChild);
+  }
+
+  function renderClock(now) {
+    $('t-h').textContent = pad2(now.getHours());
+    $('t-m').textContent = pad2(now.getMinutes());
+    $('t-s').textContent = pad2(now.getSeconds());
+  }
+
+  function renderStatus(now) {
+    var el = $('status');
+    if (now.getTime() < bannerUntil && bannerKey) {
+      var m = MOMENTS[bannerKey];
+      el.innerHTML = '此刻是<span class="lit">「' + m.name + '」</span>' + m.desc;
+      return;
+    }
+    if (!nextLit) { nextLit = findNextLit(now); }
+    if (nextLit && now.getTime() > nextLit.at.getTime() + 1500) {
+      nextLit = findNextLit(now);
+    }
+    if (nextLit) {
+      var target = nextLit.at;
+      var left = target.getTime() - now.getTime();
+      el.innerHTML = '下一盏灯：<span class="lit">' + pad2(target.getHours()) + ':' + pad2(target.getMinutes()) + ':' + pad2(target.getSeconds()) +
+        '（' + MOMENTS[nextLit.key].name + '）</span>· 还有 ' + fmtCountdown(left);
+    } else {
+      el.textContent = '正在寻找下一盏灯……';
+    }
+  }
+
+  /* ── 图鉴 ── */
+  function occurrencesOf(key, from, limit) {
+    var found = [];
+    for (var i = 0; i <= 86400 && found.length < limit; i++) {
+      var t = new Date(from.getTime() + i * 1000);
+      if (classify(t.getHours(), t.getMinutes(), t.getSeconds()) === key) found.push(t);
+    }
+    return found;
+  }
+
+  function fillCard(listId, key, limit) {
+    var now = new Date();
+    var ul = $(listId);
+    ul.textContent = '';
+    var items = occurrencesOf(key, now, limit);
+    items.forEach(function (t) {
+      var li = document.createElement('li');
+      var diff = t.getTime() - now.getTime();
+      var isNow = Math.abs(diff) < 1000;
+      if (isNow) li.className = 'hit';
+      else if (diff > 0 && diff < 60000) li.className = 'soon';
+      var tt = document.createElement('span'); tt.className = 't';
+      tt.textContent = pad2(t.getHours()) + ':' + pad2(t.getMinutes()) + ':' + pad2(t.getSeconds());
+      var ss = document.createElement('span'); ss.className = 's';
+      if (isNow) ss.textContent = '就是此刻';
+      else if (diff < 0) ss.textContent = '已错过';
+      else ss.textContent = '还有 ' + fmtCountdown(diff);
+      li.appendChild(tt); li.appendChild(ss);
+      ul.appendChild(li);
+    });
+  }
+
+  function renderCodex() {
+    fillCard('list-shunzi', 'shunzi', 2);
+    fillCard('list-quantong', 'quantong', 3);
+    fillCard('list-trio', 'trio', 3);
+    fillCard('list-pal', 'pal', 1);
+  }
+
+  /* ── 心跳 ── */
+  function tick() {
+    if (document.visibilityState !== 'visible') return;
+    var now = new Date();
+    renderClock(now);
+    renderStatus(now);
+
+    var key = classify(now.getHours(), now.getMinutes(), now.getSeconds());
+    var secKey = pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds());
+    if (key && secKey !== lastSecondKey) {
+      lastSecondKey = secKey;
+      witness(now, key);
+      bannerUntil = now.getTime() + 1000 + 5000;
+      bannerKey = key;
+      var m = MOMENTS[key];
+      if (m.tier === 3) {
+        document.body.classList.add('excited');
+        setTimeout(function () { document.body.classList.remove('excited'); }, 6000);
+        showOverlay(now, key);
+        confetti(secKey, key);
+      } else if (m.tier === 2) {
+        document.body.classList.add('excited');
+        setTimeout(function () { document.body.classList.remove('excited'); }, 4000);
+        confetti(secKey, key);
+      } else {
+        showToast('小欢喜 · 此刻是「回文时刻」');
+      }
+      renderCodex();
+    } else if (!key) {
+      lastSecondKey = '';
+    }
+  }
+
+  renderCodex();
+  setInterval(tick, 250);
+  setInterval(renderCodex, 30000);
+  tick();
+})();
+</script>
+</body>
+</html>

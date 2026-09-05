@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>永远 99% 的进度条</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --serif: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    max-width: 34em;
+  }
+  .machine {
+    margin-top: clamp(28px, 6vw, 40px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(22px, 5vw, 34px);
+  }
+  #pct {
+    font-family: var(--mono);
+    font-size: clamp(44px, 12vw, 76px);
+    font-weight: 300;
+    color: var(--ink-strong);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  #pct .fine { color: var(--gold); }
+  .bar {
+    margin-top: 18px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.12);
+    overflow: hidden;
+  }
+  #fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--ice), var(--gold));
+    transition: width 0.25s linear;
+  }
+  #eta {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--gold);
+  }
+  #status {
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--ink-dim);
+    min-height: 1.7em;
+  }
+  .actions {
+    margin-top: 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .actions button {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    text-indent: 0.14em;
+    padding: 9px 24px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .actions button:hover { border-color: rgba(242, 199, 110, 0.5); color: var(--gold); }
+  .hint {
+    margin-top: 24px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(40px, 8vw, 60px); }
+  .motto {
+    font-family: var(--serif);
+    font-size: 15px;
+    color: #a8b3c9;
+    letter-spacing: 0.06em;
+  }
+  .sig {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>永远 99% 的进度条</h1>
+    <p class="intro">一根诚实的进度条：它不装死、不闪退，一直在动——只是它对"完成"有自己偏执的理解。</p>
+  </header>
+
+  <div class="machine">
+    <div id="pct">0%</div>
+    <div class="bar"><div id="fill"></div></div>
+    <p id="eta">预计剩余时间：正在计算……</p>
+    <p id="status">正在启动进度条。</p>
+    <div class="actions">
+      <button type="button" id="btn-fast">加速</button>
+      <button type="button" id="btn-skip">跳过</button>
+      <button type="button" id="btn-reset">重来</button>
+    </div>
+  </div>
+
+  <p class="hint">温馨提示：加速不快，跳过不掉，重来倒是真的。</p>
+
+  <footer>
+    <p class="motto">最后 1% 包含了 90% 的工作量，剩下 10% 包含了其余的一切。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var p = 0;                 // 0–100，永不抵达 100
+  var t0 = Date.now();
+  var freezeUntil = 0;
+
+  var ETAS = [
+    '预计剩余时间：3 秒',
+    '预计剩余时间：重新计算中……',
+    '预计剩余时间：2 分钟（刚才说 3 秒的是另一个进度条）',
+    '预计剩余时间：约 47 年',
+    '预计剩余时间：比你想的久，比宇宙短',
+    '预计剩余时间：本进度条拒绝回答这个问题',
+    '预计剩余时间：等你知道自己在等什么的时候',
+    '预计剩余时间：1 秒。骗你的。'
+  ];
+
+  var STATUSES = [
+    '正在压缩剩余进度……',
+    '最后 1% 包含了 90% 的工作量，正在加班。',
+    '正在等待一个永远不会到来的回调。',
+    '进度已同步至云端，云端表示不知情。',
+    '进度条在 99% 处思考进度条的意义。',
+    '已完成的部分非常完美，所以剩下的部分更得慢工出细活。',
+    '检测到用户焦虑，已将焦虑计入工作量。',
+    '不是卡住了，是在积蓄最后 0.01% 的势能。',
+    '正在向 100 发送好友申请，对方已读不回。',
+    '本进度条由"永远 99% 基金会"友情提供。',
+    '拖慢进度的不是技术，是浪漫。'
+  ];
+
+  function fmtPct(v) {
+    if (v >= 99.99) return '99.<span class="fine">' + v.toFixed(4).slice(3) + '</span>%';
+    if (v >= 99.9) return '99.<span class="fine">' + v.toFixed(3).slice(3) + '</span>%';
+    if (v >= 99) return v.toFixed(1) + '%';
+    return Math.floor(v) + '%';
+  }
+
+  function tick() {
+    if (Date.now() > freezeUntil) {
+      if (p < 99) {
+        p += (99 - p) * 0.028 + 0.02;
+        if (p > 99) p = 99;
+      } else {
+        p += (100 - p) * 0.004 * (0.3 + Math.random());
+        if (p > 99.9995) p = 99.9995;
+      }
+    }
+    $('pct').innerHTML = fmtPct(p);
+    $('fill').style.width = p + '%';
+  }
+
+  function rotate() {
+    $('eta').textContent = ETAS[Math.floor(Math.random() * ETAS.length)];
+    $('status').textContent = STATUSES[Math.floor(Math.random() * STATUSES.length)];
+  }
+
+  $('btn-fast').addEventListener('click', function () {
+    freezeUntil = Date.now() + 3000;
+    $('status').textContent = '加速请求已受理。进度条表示：它比你先动了脑子。';
+  });
+
+  $('btn-skip').addEventListener('click', function () {
+    p = Math.max(0, p - 0.1);
+    $('status').textContent = '跳过失败：跳过也是一种进度，已回退 0.1%。';
+  });
+
+  $('btn-reset').addEventListener('click', function () {
+    p = 0;
+    t0 = Date.now();
+    $('status').textContent = '已重来。这一次它保证——尽量不保证。';
+  });
+
+  setInterval(tick, 120);
+  setInterval(rotate, 4200);
+  rotate();
+})();
+</script>
+</body>
+</html>

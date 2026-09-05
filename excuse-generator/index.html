@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>借口生成器</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --red: #e07a6a;
+    --line: rgba(156, 200, 255, 0.14);
+    --serif: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    max-width: 34em;
+  }
+  .field {
+    margin-top: clamp(24px, 5vw, 34px);
+  }
+  .field .label {
+    font-size: 12px;
+    letter-spacing: 0.4em;
+    text-indent: 0.4em;
+    color: var(--ink-dim);
+  }
+  .chips {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .chip {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14.5px;
+    padding: 8px 22px;
+    border-radius: 999px;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+  }
+  .chip:hover { border-color: rgba(242, 199, 110, 0.5); }
+  .chip.active {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: rgba(242, 199, 110, 0.08);
+  }
+  #stage {
+    margin-top: clamp(26px, 5vw, 36px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(20px, 4vw, 30px);
+    min-height: 180px;
+  }
+  #excuse {
+    font-family: var(--serif);
+    font-size: clamp(16.5px, 3.6vw, 19px);
+    color: var(--ink-strong);
+    line-height: 2;
+    min-height: 3.8em;
+  }
+  #excuse.empty { color: var(--ink-dim); font-size: 15px; font-family: var(--sans); }
+  .meter-row {
+    margin-top: 18px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .meter-row .m-label {
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    color: var(--ink-dim);
+    flex: none;
+  }
+  .meter {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.12);
+    overflow: hidden;
+  }
+  #meter-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: var(--gold);
+    transition: width 0.9s cubic-bezier(0.2, 0.7, 0.3, 1), background 0.4s ease;
+  }
+  #score {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--gold);
+    flex: none;
+    min-width: 3.2em;
+    text-align: right;
+  }
+  #verdict {
+    margin-top: 10px;
+    font-size: 13.5px;
+    color: var(--ice);
+  }
+  #breakdown {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--ink-dim);
+  }
+  .actions {
+    margin-top: 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+  #btn-go {
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.24em;
+    text-indent: 0.24em;
+    padding: 11px 34px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  #btn-go:hover { background: rgba(242, 199, 110, 0.2); }
+  #btn-copy {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-size: 13.5px;
+    letter-spacing: 0.12em;
+    padding: 10px 22px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  #btn-copy:hover { color: var(--ink-strong); border-color: rgba(156, 200, 255, 0.4); }
+  #tally {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--ink-dim);
+    min-height: 1.6em;
+  }
+  #tally .warn { color: var(--red); }
+  .hint {
+    margin-top: 26px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(40px, 8vw, 60px); }
+  .motto {
+    font-family: var(--serif);
+    font-size: 15px;
+    color: var(--soft, #a8b3c9);
+    letter-spacing: 0.06em;
+  }
+  .sig {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>借口生成器</h1>
+    <p class="intro">深夜失约者的公关部门。选好今晚要面对的人，剩下的交给本部门——它只负责编，不负责圆。</p>
+  </header>
+
+  <div class="field">
+    <p class="label">要面对的人</p>
+    <div class="chips" id="chips">
+      <button type="button" class="chip active" data-aud="boss">老板</button>
+      <button type="button" class="chip" data-aud="teacher">老师</button>
+      <button type="button" class="chip" data-aud="friend">朋友</button>
+      <button type="button" class="chip" data-aud="lover">爱的人</button>
+    </div>
+  </div>
+
+  <div id="stage">
+    <p id="excuse" class="empty">选好人，按下面这个钮。本部门连夜为您起草。</p>
+    <div class="meter-row" id="meter-row" hidden>
+      <span class="m-label">可信度</span>
+      <div class="meter"><div id="meter-fill"></div></div>
+      <span id="score">--</span>
+    </div>
+    <p id="verdict" hidden></p>
+    <p id="breakdown" hidden></p>
+  </div>
+
+  <div class="actions">
+    <button type="button" id="btn-go">编 一 个</button>
+    <button type="button" id="btn-copy">复制这句</button>
+  </div>
+  <p id="tally"></p>
+
+  <p class="hint">本部门对借口的后续发展概不负责。可信度是编的，连这个声明也是。</p>
+
+  <footer>
+    <p class="motto">每一个借口，都是没说出口的"对不起，我来不了"。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ── 素材库 ── */
+  var OPENERS = {
+    boss: [
+      '非常抱歉在这个点打扰您。事情的经过是这样的：',
+      '先说结论：责任在我，但过程里确实有不可抗力。',
+      '我明白守时是职业素养的一部分，所以下面的解释我写得格外认真：',
+      '我知道现在发消息不太合适，但这件事拖到明早会说不过去：',
+      '情况有变。以下说明经过本人深夜撰稿、内部三轮审核：',
+      '关于今天的情况，我必须向您如实汇报——当然，是在合理剪裁之后：'
+    ],
+    teacher: [
+      '老师好，抱歉这么晚打扰。今天的情况比较复杂：',
+      '我本来不想解释的，但不想让您误会我的态度：',
+      '关于今天的事，我写了一份简短说明，请您过目：',
+      '老师，先向您道歉，再说原因——原因其实挺像小说的：',
+      '今天没能准时，是我准备不足，但导火索确实不在我这儿：'
+    ],
+    friend: [
+      '行，我坦白。你听个大概就行：',
+      '来了来了，理由正在路上，比我本人快：',
+      '这事说来话长，长话短说，短话说圆：',
+      '我不装了，摊牌了，下面这句你随便信到几成：',
+      '你先别生气，气坏了我还得编第二个借口：',
+      '事情的真相只有三成，但我加了点艺术加工：',
+      '我承认人没到，但命运也有股份：'
+    ],
+    lover: [
+      '对不起，让你等了。今晚怪我，也怪一点点运气：',
+      '我知道你盯着屏幕等了很久。先说对不起，再说原因：',
+      '我不想随便编一个糊弄你，所以我认真编了一个：',
+      '你听我说完，今天的我值得一次心软：',
+      '是我不好。但下面每一句，都是现编的真心话：',
+      '先道个歉，道得晚但诚恳——然后请听今晚的离谱实况：'
+    ]
+  };
+
+  var INCIDENTS = [
+    { t: '小区电梯偏偏在这时检修，我在八楼等了二十分钟。维修师傅态度很好，电梯一动不动。', c: 6 },
+    { t: '地铁在隧道里停了十五分钟，广播说"请稍作等待"，全车人都很平静，只有我不平静。', c: 5 },
+    { t: '我养的猫把钥匙扒进了沙发深处。我掏了半小时，它在旁边看着，一动不动。', c: 3 },
+    { t: '楼下有人连夜搬家，电梯口堆满家具，我绕了三层楼才突围成功。', c: 2 },
+    { t: '我下楼倒个垃圾，遇上一位迷路的老人。送人送到家，抬头天都变了。', c: 8 },
+    { t: '外卖在我开门那一秒准时打来电话——我发誓我听到它在笑。', c: 1 },
+    { t: '家里热水器今晚大侠般地喷了一墙水，处理完它，夜已经深了。', c: 3 },
+    { t: '顺风车在中途换胎。司机说这是常态，我头一回遇见，愿它是最后一回。', c: 4 },
+    { t: '我在等一个红灯，它坏了，绿得毫无诚意。这段视频可以为证。', c: 1 },
+    { t: '我把日期记成了下周。刚才闹钟提醒我的时候，我的心先醒了，人还在被子里。', c: -2 },
+    { t: '我妈突然查房。我以每分钟一个借口的速度应付了半小时，弹药已尽。', c: 2 },
+    { t: '我睡着了。这句没有任何修饰——因为梦太好了，我不忍心编。', c: -6 },
+    { t: '手机在关键时刻只剩 1% 的电，它用最后的光发完求救，光荣退役。', c: 2 },
+    { t: '便利店关了，我借充电宝的唯一办法，是陪老板聊到他重新开店。', c: -3 }
+  ];
+
+  var CLOSERS = {
+    boss: [
+      { t: '后续进展我会随时同步，保证下不为例。', c: 5 },
+      { t: '该我担的责任我担，该补的流程我来补。', c: 4 },
+      { t: '明天一早我当面补充细节，造成的延误我来想办法追回。', c: 5 },
+      { t: '接下来的安排我已重新排过，绝无二次事故。', c: 3 },
+      { t: '这次教训我记下了，记得比 KPI 还牢。', c: 2 }
+    ],
+    teacher: [
+      { t: '落下的内容我自己补，作业一份不少。', c: 5 },
+      { t: '下次我提前一天设三个闹钟，外加请您监督。', c: 4 },
+      { t: '这份说明我写得很诚恳，因为内容确实离谱。', c: 3 },
+      { t: '保证下次准时，以我全部的学分担保。', c: 3 },
+      { t: '如果需要旁证，我可以找到当时在场的整条街。', c: 2 }
+    ],
+    friend: [
+      { t: '宵夜我请，就当给这个离谱夜晚的封口费。', c: 5 },
+      { t: '你要是不信，我可以把事故现场拍给你。', c: 3 },
+      { t: '下次我提前两小时出门，把意外全留在路上。', c: 4 },
+      { t: '这周奶茶你点，我买单，不封顶——封顶吧，一百。', c: 4 },
+      { t: '讲真，这剧本你不帮我圆一下都说不过去。', c: 1 },
+      { t: '下不为例。这句话上周也说过，但这次是真心的。', c: 2 }
+    ],
+    lover: [
+      { t: '补偿方案听你的，从明天开始执行，有效期一辈子。', c: 7 },
+      { t: '你爱吃的还温着——人心和食物都不能凉。', c: 6 },
+      { t: '下次我把闹钟、日历和我妈全叫上，三层保险。', c: 4 },
+      { t: '原谅我这一次，我用接下来一周的早安晚安来还。', c: 5 },
+      { t: '你还气就说两句，我听着，绝不还嘴。', c: 5 },
+      { t: '今晚的月亮已经替我道歉了，我只负责后续行动。', c: 4 }
+    ]
+  };
+
+  var VERDICTS = [
+    { min: 88, t: '天衣无缝。连编的你自己都快信了。' },
+    { min: 72, t: '够用。对方大概率叹口气就放下了。' },
+    { min: 56, t: '五五开。看对方今天的心情，也看你的眼神稳不稳。' },
+    { min: 40, t: '漏洞明显。建议再编一个垫背的。' },
+    { min: 0,  t: '别用了。说实话吧，今晚的运气不在借口上。' }
+  ];
+
+  var AUD_NAME = { boss: '老板', teacher: '老师', friend: '朋友', lover: '爱的人' };
+
+  /* ── 状态 ── */
+  var aud = 'boss';
+  var count = 0;
+  var lastCombo = '';
+
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function generate() {
+    var o = pick(OPENERS[aud]);
+    var inc = pick(INCIDENTS);
+    var cl = pick(CLOSERS[aud]);
+    var combo = inc.t + '|' + cl.t;
+    if (combo === lastCombo) { inc = pick(INCIDENTS); cl = pick(CLOSERS[aud]); }
+    lastCombo = combo;
+    count++;
+
+    var deepBonus = 0;
+    var h = new Date().getHours();
+    if (h >= 0 && h < 5) deepBonus = 5;
+
+    var overuse = count >= 5 ? -12 : (count === 4 ? -8 : (count === 3 ? -5 : 0));
+    var score = 50 + inc.c + cl.c + deepBonus + overuse + Math.floor(Math.random() * 7) - 3;
+    if (score > 96) score = 96;
+    if (score < 8) score = 8;
+
+    var verdict = VERDICTS[0].t;
+    for (var i = 0; i < VERDICTS.length; i++) {
+      if (score >= VERDICTS[i].min) { verdict = VERDICTS[i].t; break; }
+    }
+
+    $('excuse').classList.remove('empty');
+    $('excuse').textContent = o + inc.t + cl.t;
+    $('meter-row').hidden = false;
+    $('verdict').hidden = false;
+    $('breakdown').hidden = false;
+    var fill = $('meter-fill');
+    fill.style.width = '0%';
+    setTimeout(function () {
+      fill.style.width = score + '%';
+      fill.style.background = score >= 56 ? 'var(--gold)' : (score >= 40 ? 'var(--ice)' : 'var(--red)');
+    }, 30);
+    $('score').textContent = score + '%';
+    $('verdict').textContent = verdict;
+    var parts = ['基础 50', '事故 ' + (inc.c >= 0 ? '+' : '') + inc.c, '诚意 ' + (cl.c >= 0 ? '+' : '') + cl.c];
+    if (deepBonus) parts.push('深夜 +' + deepBonus);
+    if (overuse) parts.push('今晚第 ' + count + ' 个 ' + overuse);
+    $('breakdown').textContent = '明细：' + parts.join(' · ');
+
+    var tally = $('tally');
+    if (count === 1) {
+      tally.textContent = '今晚已编 1 个借口。';
+    } else if (count < 3) {
+      tally.textContent = '今晚已编 ' + count + ' 个借口。';
+    } else if (count === 3) {
+      tally.innerHTML = '今晚已编 3 个借口。<span class="warn">第三个了，建议放缓节奏。</span>';
+    } else if (count < 5) {
+      tally.textContent = '今晚已编 ' + count + ' 个借口。';
+    } else if (count === 5) {
+      tally.innerHTML = '今晚已编 5 个借口。<span class="warn">第五个了。有考虑过说实话吗？</span>';
+    } else if (count < 8) {
+      tally.textContent = '今晚已编 ' + count + ' 个借口。';
+    } else {
+      tally.innerHTML = '今晚已编 ' + count + ' 个借口。<span class="warn">本部门正式通知：您的可信度余额已不足。</span>';
+    }
+  }
+
+  $('btn-go').addEventListener('click', generate);
+
+  $('btn-copy').addEventListener('click', function () {
+    var text = $('excuse').textContent;
+    var btn = $('btn-copy');
+    function ok() {
+      btn.textContent = '已复制 ✓';
+      setTimeout(function () { btn.textContent = '复制这句'; }, 1600);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok, function () { fallbackCopy(text); ok(); });
+    } else {
+      fallbackCopy(text);
+      ok();
+    }
+  });
+
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    } catch (e) { /* 本地环境受限时安静跳过 */ }
+  }
+
+  var chips = document.querySelectorAll('.chip');
+  chips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      chips.forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      aud = chip.getAttribute('data-aud');
+      lastCombo = '';
+    });
+  });
+})();
+</script>
+</body>
+</html>

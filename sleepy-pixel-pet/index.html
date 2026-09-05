@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>只睡觉的像素动物</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .bed {
+    margin-top: clamp(22px, 5vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(14px, 3vw, 22px);
+    text-align: center;
+    position: relative;
+  }
+  #cat { image-rendering: pixelated; width: 288px; max-width: 92%; cursor: pointer; }
+  #bubble {
+    position: absolute;
+    top: 26px; right: 30px;
+    background: rgba(233, 228, 211, 0.95);
+    color: #2b2620;
+    font-size: 13px;
+    padding: 5px 12px;
+    border-radius: 10px;
+    border-bottom-right-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+  #bubble.show { opacity: 1; }
+  #pose {
+    margin-top: 12px;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+    min-height: 1.7em;
+  }
+  #pokes { font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); margin-top: 4px; }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>只睡觉的像素动物</h1>
+    <p class="intro">展品柜的团宠：一只只睡觉的像素猫。可以戳，它也会回应——但醒来是不可能的，这辈子都不可能。</p>
+  </header>
+
+  <div class="bed">
+    <canvas id="cat" width="192" height="128"></canvas>
+    <div id="bubble"></div>
+    <p id="pose"></p>
+    <p id="pokes"></p>
+  </div>
+
+  <p class="hint">戳它的手法会影响它的回应质量。也可以什么都不做，陪它待一会儿——它不介意。</p>
+
+  <footer>
+    <p class="motto">它不是在睡觉，它是在认真活着，只是姿势比较省电。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = $('cat');
+  var c = cv.getContext('2d');
+  var CELL = 8;              // 24×16 格
+
+  var poses = ['经典虾米式。', '高难度捂脸式。', '四分之三团子式。', '尾部悬空挑战式。'];
+  var poseIdx = 0;
+  var breath = 0;
+  var pokes = 0;
+  var stirUntil = 0;         // 被戳后的扭动窗口
+  var eyesUntil = 0;         // 睁眼窗口
+  var earTwitch = 0;
+
+  var GRAY = '#8f97ad', DARK = '#6d7490', PINK = '#d99aa0', PAD = '#c9888f';
+  var OUT = '#3a3f55';
+
+  function px(x, y, col) {
+    c.fillStyle = col;
+    c.fillRect(x * CELL, y * CELL, CELL, CELL);
+  }
+
+  function drawCat(t) {
+    c.clearRect(0, 0, cv.width, cv.height);
+    /* 毯子 */
+    for (var by = 10; by < 16; by++) {
+      for (var bx = 1; bx < 23; bx++) {
+        px(bx, by, (bx + by) % 2 === 0 ? '#2a3352' : '#262e4a');
+      }
+    }
+    /* 呼吸：身体微微起伏 */
+    var br = Math.sin(t / 900) > 0 ? 1 : 0;
+
+    /* 尾巴（姿势变化） */
+    var tailBaseY = 10 - br;
+    if (poseIdx % 2 === 0) {
+      px(20, tailBaseY, DARK); px(21, tailBaseY - 1, DARK);
+      px(22, tailBaseY - 1, DARK); px(22, tailBaseY - 2, DARK);
+    } else {
+      px(20, tailBaseY - 1, DARK); px(21, tailBaseY - 2, DARK);
+      px(22, tailBaseY - 2, DARK); px(21, tailBaseY - 3, DARK);
+    }
+
+    /* 身体（蜷成一团） */
+    for (var y = 6; y <= 11 - br; y++) {
+      var halfW = y <= 7 ? 6 : 8;
+      for (var x = 12 - halfW; x <= 12 + halfW - 1; x++) {
+        if (y === 11 - br && (x + y) % 3 === 0) px(x, y, DARK);   // 花纹
+        else px(x, y, GRAY);
+      }
+    }
+    /* 头（叠在身体左上，微微起伏） */
+    var hy = 4 + (stirUntil > t ? 0 : br);
+    for (var yy = hy; yy <= hy + 4; yy++) {
+      for (var xx = 5; xx <= 11; xx++) {
+        if ((yy === hy && (xx === 5 || xx === 11))) continue;
+        px(xx, yy, GRAY);
+      }
+    }
+    /* 耳朵（偶尔抖动） */
+    var earUp = earTwitch > t ? 1 : 0;
+    px(5, hy - 1 - earUp, DARK); px(6, hy - 1 - earUp, DARK);
+    px(10, hy - 1, DARK); px(11, hy - 1 - (earTwitch > t ? 0 : 0), DARK);
+    px(11, hy - 2 + earUp, DARK);
+    px(6, hy, PINK); px(10, hy, PINK);
+
+    /* 脸：闭眼 / 睁眼 */
+    var eyesOpen = eyesUntil > t;
+    if (eyesOpen) {
+      px(7, hy + 2, '#20242e'); px(10, hy + 2, '#20242e');
+      px(7, hy + 1, '#e9e4d3'); px(10, hy + 1, '#e9e4d3');
+    } else {
+      px(7, hy + 2, OUT); px(8, hy + 2, OUT);
+      px(10, hy + 2, OUT); px(11, hy + 2, OUT);
+    }
+    /* 鼻嘴 */
+    px(8, hy + 3, PINK);
+    /* 前爪 */
+    px(11, 9 - br, PAD); px(12, 9 - br, PAD);
+
+    /* Zzz */
+    var zt = Math.floor(t / 700) % 3;
+    c.fillStyle = 'rgba(233, 228, 211, 0.75)';
+    c.font = '10px ' + 'monospace';
+    c.textAlign = 'center';
+    for (var zi = 0; zi <= zt; zi++) {
+      c.fillText('z', 15 * CELL + 6, (5 - zi * 2) * CELL);
+    }
+  }
+
+  function showBubble(text, ms) {
+    var b = $('bubble');
+    b.textContent = text;
+    b.classList.add('show');
+    setTimeout(function () { b.classList.remove('show'); }, ms || 1600);
+  }
+
+  var WAKE_LINES = ['……唔。', '五分钟。就五分钟。', '梦到一半。', '唔唔。', '（尾巴甩了你一下。）'];
+  var MILESTONE = {
+    5: '……你是认真的吗。',
+    10: '好吧，好吧。就看一眼。'
+  };
+
+  cv.addEventListener('pointerdown', function () {
+    pokes++;
+    $('pokes').textContent = '被戳 ' + pokes + ' 次';
+    stirUntil = Date.now() + 900;
+    earTwitch = Date.now() + 700;
+    if (pokes === 10) {
+      eyesUntil = Date.now() + 2200;
+      showBubble('……哦。是你。', 2200);
+    } else if (MILESTONE[pokes]) {
+      showBubble(MILESTONE[pokes], 1800);
+    } else if (pokes > 10) {
+      showBubble(WAKE_LINES[4], 1200);
+    } else {
+      showBubble(WAKE_LINES[(pokes - 1) % 4], 1400);
+    }
+  });
+
+  /* 睡姿解说轮播 */
+  setInterval(function () {
+    if (Date.now() < stirUntil) return;
+    poseIdx = (poseIdx + 1) % poses.length;
+    $('pose').textContent = '当前睡姿：' + poses[poseIdx];
+  }, 9000);
+  $('pose').textContent = '当前睡姿：' + poses[0];
+
+  setInterval(function () { drawCat(Date.now()); }, 120);
+  drawCat(Date.now());
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>慢慢变老的像素画</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .frame {
+    margin-top: clamp(22px, 5vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(18px, 4vw, 28px);
+    text-align: center;
+  }
+  #face { image-rendering: pixelated; width: 240px; max-width: 80%; }
+  #age-line {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--gold);
+  }
+  #stage-line {
+    margin-top: 6px;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+    min-height: 1.7em;
+  }
+  .btn-row {
+    margin-top: 18px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  .btn-row button {
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    text-indent: 0.14em;
+    padding: 9px 26px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .btn-row button:hover { background: rgba(242, 199, 110, 0.2); }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>慢慢变老的像素画</h1>
+    <p class="intro">这有一位像素居民，和你共享同一秒钟。你看它看得越久，它就老得越快——岁月不讲道理，但讲进度条。</p>
+  </header>
+
+  <div class="frame">
+    <canvas id="face" width="160" height="176"></canvas>
+    <div id="age-line">今年 8 岁</div>
+    <div id="stage-line">乳牙刚换完，全世界都可以试吃。</div>
+    <div class="btn-row">
+      <button type="button" id="btn-fast">岁月加速</button>
+      <button type="button" id="btn-reset">重新出生</button>
+    </div>
+  </div>
+
+  <p class="hint">白发、皱纹和老花，都会按岁数一枚一枚长出来。到 100 岁它会想起一生的事，然后从头再来。</p>
+
+  <footer>
+    <p class="motto">变老是慢的，但也是准时的。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = $('face');
+  var c = cv.getContext('2d');
+  var CELL = 10;                 // 16×17.6 → 用 16×17 网格
+  var COLS = 16, ROWS = 16;
+
+  var FAST = /#fast/.test(window.location.hash);
+  var age = 8;                   // 从 8 岁开始
+  var lastTick = Date.now();
+  var stage = '';
+
+  var STAGES = [
+    { max: 12, name: '乳牙刚换完，全世界都可以试吃。' },
+    { max: 22, name: '觉得自己会永远十七岁。' },
+    { max: 35, name: '开始把熬夜称作修行。' },
+    { max: 50, name: '体检报告成了年度悬疑剧。' },
+    { max: 65, name: '开始把"讲究"两个字挂在嘴边。' },
+    { max: 80, name: '广场舞 C 位，无人可撼。' },
+    { max: 200, name: '岁月的进度条走到了彩蛋区。' }
+  ];
+
+  function skinColor() {
+    var t = Math.min(1, Math.max(0, (age - 40) / 55));
+    var r = Math.round(238 - t * 14);
+    var g = Math.round(208 - t * 18);
+    var b = Math.round(184 - t * 20);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+  function hairColor() {
+    if (age < 48) return '#2b2620';
+    if (age < 62) return '#5a5248';
+    if (age < 76) return '#8d877c';
+    return '#d8d3c8';
+  }
+
+  function px(cx, cy, color) {
+    c.fillStyle = color;
+    c.fillRect(cx * CELL, cy * CELL, CELL, CELL);
+  }
+
+  function draw() {
+    c.clearRect(0, 0, cv.width, cv.height);
+    /* 背景 */
+    for (var yy = 0; yy < ROWS; yy++)
+      for (var xx = 0; xx < COLS; xx++)
+        px(xx, yy, (xx + yy) % 2 === 0 ? '#1a2136' : '#182032');
+
+    /* 头部占 3..13 列，2..14 行 */
+    var skin = skinColor();
+    for (var y = 3; y <= 13; y++)
+      for (var x = 4; x <= 11; x++)
+        px(x, y, skin);
+
+    /* 头发：覆盖头顶，年长变白变稀 */
+    var hair = hairColor();
+    var hairTop = 1, hairRows = 4;
+    for (var hy = hairTop; hy < hairTop + hairRows; hy++) {
+      for (var hx = 3; hx <= 12; hx++) {
+        if (hy === hairTop + hairRows - 1 && (hx === 3 || hx === 12 || hx === 4 || hx === 11)) continue;
+        px(hx, hy, hair);
+      }
+    }
+    /* 年老发际线后退 */
+    if (age > 60) {
+      px(5, 5, skin); px(10, 5, skin);
+    }
+    if (age > 72) { px(5, 6, skin); px(6, 5, skin); px(9, 5, skin); px(10, 6, skin); }
+
+    /* 眼睛 */
+    var eyeY = 7;
+    var eyeColor = age > 70 ? '#6b7b8c' : '#20242e';
+    px(6, eyeY, eyeColor); px(9, eyeY, eyeColor);
+    /* 眼睑下垂（年高） */
+    if (age > 78) { px(6, eyeY - 1, hairColor()); px(9, eyeY - 1, hairColor()); }
+
+    /* 腮红（年少） */
+    if (age < 18) { px(5, 9, '#e8a9a0'); px(10, 9, '#e8a9a0'); }
+
+    /* 皱纹：按岁数点亮 */
+    if (age > 34) { px(7, 5, '#c9a882'); px(8, 5, '#c9a882'); }           // 额纹
+    if (age > 46) { px(7, 6, '#c9a882'); }                                 // 抬头纹第二道
+    if (age > 52) { px(5, 8, '#c9a882'); px(10, 8, '#c9a882'); }           // 眼角
+    if (age > 58) { px(6, 11, '#c9a882'); px(9, 11, '#c9a882'); }          // 法令
+    if (age > 70) { px(7, 8, '#c9a882'); px(8, 8, '#c9a882'); }            // 鼻梁纹
+    if (age > 84) { px(6, 12, '#c9a882'); px(9, 12, '#c9a882'); }          // 更深法令
+
+    /* 嘴 */
+    var mouthY = 12;
+    var mouth = age > 60 ? '#8d5a50' : '#b06a5c';
+    px(7, mouthY, mouth); px(8, mouthY, mouth);
+    if (age < 12) { px(6, mouthY, mouth); px(9, mouthY, mouth); }          // 缺牙笑
+
+    /* 老年斑 */
+    if (age > 88) { px(5, 12, '#b89a78'); px(10, 6, '#b89a78'); }
+
+    /* 肩膀 */
+    for (var sx = 2; sx <= 13; sx++) px(sx, 15, '#39456b');
+    px(2, 14, '#39456b'); px(13, 14, '#39456b');
+    /* 驼背（年高肩线上移） */
+    if (age > 66) { px(3, 14, '#39456b'); px(4, 14, '#39456b'); px(11, 14, '#39456b'); px(12, 14, '#39456b'); }
+  }
+
+  function stageOf(a) {
+    for (var i = 0; i < STAGES.length; i++) {
+      if (a <= STAGES[i].max) return STAGES[i].name;
+    }
+    return STAGES[STAGES.length - 1].name;
+  }
+
+  function tick() {
+    var now = Date.now();
+    var dt = (now - lastTick) / 1000;
+    lastTick = now;
+    if (age < 100) {
+      age += dt * (FAST ? 60 : 1.6);      // 每真实秒长约 1.6 岁
+      if (age > 100) age = 100;
+      var newStage = stageOf(age);
+      if (newStage !== stage) { stage = newStage; $('stage-line').textContent = stage; }
+      $('age-line').textContent = '今年 ' + Math.floor(age) + ' 岁';
+      draw();
+    }
+  }
+
+  $('btn-fast').addEventListener('click', function () {
+    FAST = !FAST;
+    this.textContent = FAST ? '岁月正常流速' : '岁月加速';
+  });
+
+  $('btn-reset').addEventListener('click', function () {
+    age = 8;
+    lastTick = Date.now();
+    stage = stageOf(age);
+    $('stage-line').textContent = stage;
+    draw();
+  });
+
+  setInterval(tick, 250);
+  stage = stageOf(age);
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>白噪音八音盒</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(30px, 6vw, 52px) 22px 40px;
+  }
+  .back-home {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .back-home:hover { color: var(--gold); }
+  header h1 {
+    font-weight: 600;
+    font-size: clamp(26px, 6vw, 34px);
+    letter-spacing: 0.02em;
+    color: var(--ink-strong);
+  }
+  .intro {
+    margin-top: 10px;
+    color: var(--ink-dim);
+    font-size: 15px;
+    max-width: 34em;
+  }
+  .box {
+    margin-top: clamp(22px, 5vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(22px, 5vw, 34px);
+  }
+  .start-row { text-align: center; }
+  #btn-power {
+    background: rgba(242, 199, 110, 0.12);
+    border: 1px solid rgba(242, 199, 110, 0.55);
+    color: var(--gold);
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.24em;
+    text-indent: 0.24em;
+    padding: 12px 38px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  #btn-power:hover { background: rgba(242, 199, 110, 0.2); }
+  #btn-power.on { background: rgba(242, 199, 110, 0.25); }
+  .panel { margin-top: 22px; }
+  .panel[hidden] { display: none; }
+  .label {
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+    color: var(--ink-dim);
+    margin-top: 16px;
+  }
+  .label:first-child { margin-top: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .chip {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    padding: 7px 22px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+  }
+  .chip.on {
+    border-color: var(--ice);
+    color: var(--ice);
+    background: rgba(156, 200, 255, 0.08);
+  }
+  .vol-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.18);
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--gold);
+    border: 2px solid var(--bg-1);
+    cursor: pointer;
+  }
+  #vol-val { font-family: var(--mono); font-size: 12.5px; color: var(--gold); min-width: 3em; text-align: right; }
+  .switch-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    font-size: 14px;
+  }
+  .sw {
+    width: 44px; height: 22px;
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.15);
+    border: 1px solid var(--line);
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+  .sw::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--ink-dim);
+    transition: left 0.2s ease, background 0.2s ease;
+  }
+  .sw.on { background: rgba(242, 199, 110, 0.25); }
+  .sw.on::after { left: 24px; background: var(--gold); }
+  .hint {
+    margin-top: 22px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  #uptime { font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); margin-top: 10px; min-height: 1.6em; }
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .motto { font-size: 15px; color: #a8b3c9; letter-spacing: 0.04em; }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+  <header>
+    <h1>白噪音八音盒</h1>
+    <p class="intro">雨、浪、风，三种白噪音打底，机芯会即兴敲一点五声音阶的叮咚。全部现场合成，声音不出你的设备。</p>
+  </header>
+
+  <div class="box">
+    <div class="start-row">
+      <button type="button" id="btn-power">上 发 条</button>
+    </div>
+
+    <div class="panel" id="panel" hidden>
+      <p class="label">铺底白噪音（可多选）</p>
+      <div class="chips">
+        <button type="button" class="chip on" data-tex="rain">雨</button>
+        <button type="button" class="chip on" data-tex="wave">浪</button>
+        <button type="button" class="chip" data-tex="wind">风</button>
+      </div>
+
+      <p class="label">八音盒机芯</p>
+      <div class="switch-row">
+        <span>随机叮咚（五声音阶）</span>
+        <div class="sw on" id="sw-music"></div>
+      </div>
+
+      <p class="label">音量</p>
+      <div class="vol-row">
+        <input type="range" id="r-vol" min="0" max="100" value="45">
+        <span id="vol-val">45%</span>
+      </div>
+      <p id="uptime"></p>
+    </div>
+  </div>
+
+  <p class="hint">戴上耳机更好听。所有的雨和浪都是数学，没有一个样本来自真实的坏天气。</p>
+
+  <footer>
+    <p class="motto">白噪音不白听——它替你把世界关小了一点。</p>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var actx = null;
+  var master = null;
+  var running = false;
+  var startedAt = 0;
+  var texGain = {};        // rain/wave/wind → GainNode
+  var musicOn = true;
+  var musicTimer = null;
+  var upTimer = null;
+
+  var PENTA = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
+
+  function noiseBuffer(ctx2) {
+    var len = 2 * ctx2.sampleRate;
+    var buf = ctx2.createBuffer(1, len, ctx2.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  function lfo(ctx2, target, rate, depth) {
+    var osc = ctx2.createOscillator();
+    osc.frequency.value = rate;
+    var g = ctx2.createGain();
+    g.gain.value = depth;
+    osc.connect(g); g.connect(target);
+    osc.start();
+  }
+
+  function buildTexture(ctx2, kind) {
+    var src = ctx2.createBufferSource();
+    src.buffer = noiseBuffer(ctx2);
+    src.loop = true;
+    var g = ctx2.createGain();
+    g.gain.value = 0;
+    var filt;
+    if (kind === 'rain') {
+      filt = ctx2.createBiquadFilter();
+      filt.type = 'highpass'; filt.frequency.value = 1100;
+      src.connect(filt); filt.connect(g);
+    } else if (kind === 'wave') {
+      filt = ctx2.createBiquadFilter();
+      filt.type = 'lowpass'; filt.frequency.value = 480;
+      src.connect(filt); filt.connect(g);
+      lfo(ctx2, g.gain, 0.08, 0.16);       // 浪：慢涌
+    } else {
+      filt = ctx2.createBiquadFilter();
+      filt.type = 'bandpass'; filt.frequency.value = 380; filt.Q.value = 0.7;
+      src.connect(filt); filt.connect(g);
+      lfo(ctx2, g.gain, 0.05, 0.12);       // 风：更缓
+    }
+    g.connect(master);
+    src.start();
+    return g;
+  }
+
+  function plink() {
+    if (!running || !musicOn) return;
+    var f = PENTA[Math.floor(Math.random() * PENTA.length)];
+    var t = actx.currentTime;
+    var o1 = actx.createOscillator(); o1.type = 'sine'; o1.frequency.value = f;
+    var o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = f * 2.01;
+    var g1 = actx.createGain(); g1.gain.setValueAtTime(0.0001, t);
+    g1.gain.exponentialRampToValueAtTime(0.14, t + 0.012);
+    g1.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+    var g2 = actx.createGain(); g2.gain.value = 0.25;
+    o1.connect(g1); o2.connect(g2); g2.connect(g1);
+    g1.connect(master);
+    var dl = actx.createDelay(); dl.delayTime.value = 0.42;
+    var fb = actx.createGain(); fb.gain.value = 0.22;
+    g1.connect(dl); dl.connect(fb); fb.connect(dl);
+    var dg = actx.createGain(); dg.gain.value = 0.35;
+    dl.connect(dg); dg.connect(master);
+    o1.start(t); o2.start(t);
+    o1.stop(t + 1.5); o2.stop(t + 1.5);
+    musicTimer = setTimeout(plink, 700 + Math.random() * 1600);
+  }
+
+  function uptimeText() {
+    if (!running) { $('uptime').textContent = ''; return; }
+    var s = Math.floor((Date.now() - startedAt) / 1000);
+    var m = Math.floor(s / 60); s = s % 60;
+    $('uptime').textContent = '运行 ' + m + ' 分 ' + (s < 10 ? '0' : '') + s + ' 秒';
+  }
+
+  function power() {
+    if (!running) {
+      try {
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === 'suspended') actx.resume();
+      } catch (e) {
+        $('uptime').textContent = '此环境不支持音频。';
+        return;
+      }
+      master = actx.createGain();
+      master.gain.value = $('r-vol').value / 100 * 0.9;
+      master.connect(actx.destination);
+      texGain = { rain: buildTexture(actx, 'rain'), wave: buildTexture(actx, 'wave'), wind: buildTexture(actx, 'wind') };
+      running = true;
+      startedAt = Date.now();
+      $('btn-power').textContent = '停 一 停';
+      $('btn-power').classList.add('on');
+      $('panel').hidden = false;
+      upTimer = setInterval(uptimeText, 1000);
+      uptimeText();
+      plink();
+    } else {
+      running = false;
+      if (musicTimer) clearTimeout(musicTimer);
+      if (upTimer) clearInterval(upTimer);
+      if (actx) { actx.close(); actx = null; }   // 彻底释放：下次上发条全新构建
+      $('btn-power').textContent = '上 发 条';
+      $('btn-power').classList.remove('on');
+      $('panel').hidden = true;
+      uptimeText();
+    }
+  }
+
+  $('btn-power').addEventListener('click', power);
+
+  document.querySelectorAll('.chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var kind = chip.getAttribute('data-tex');
+      chip.classList.toggle('on');
+      var on = chip.classList.contains('on');
+      if (texGain[kind]) {
+        texGain[kind].gain.setTargetAtTime(on ? 0.22 : 0, actx.currentTime, 0.4);
+      }
+    });
+  });
+
+  $('sw-music').addEventListener('click', function () {
+    this.classList.toggle('on');
+    musicOn = this.classList.contains('on');
+    if (musicOn && running) plink();
+  });
+
+  $('r-vol').addEventListener('input', function () {
+    $('vol-val').textContent = this.value + '%';
+    if (master) master.gain.setTargetAtTime(this.value / 100 * 0.9, actx.currentTime, 0.1);
+  });
+})();
+</script>
+</body>
+</html>
