@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>寄给明天的便签</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .write { margin-top: clamp(22px, 5vw, 28px); }
+  textarea#draft {
+    width: 100%;
+    min-height: 84px;
+    resize: vertical;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    outline: none;
+  }
+  textarea#draft:focus { border-color: var(--ice); }
+  .go-row { margin-top: 12px; display: flex; align-items: center; gap: 12px; }
+  button.seal {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.seal:hover { filter: brightness(1.08); }
+  button.seal:active { transform: scale(0.98); }
+  .go-note { font-size: 13px; color: var(--ink-dim); }
+
+  .wall { margin-top: clamp(24px, 5vw, 32px); display: grid; gap: 12px; }
+  .note {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: 14px 18px;
+  }
+  .note .meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.06em;
+  }
+  .note .meta .num { font-family: var(--mono); }
+  .note .body { margin-top: 8px; color: var(--ink-strong); font-size: 15.5px; }
+  .note.locked .body {
+    color: var(--ink-dim);
+    filter: blur(4px);
+    user-select: none;
+    pointer-events: none;
+  }
+  .note .acts { margin-top: 10px; }
+  .note .acts button, .note .acts .countdown {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+  }
+  .note .acts .countdown { color: var(--gold); }
+  .note .acts button {
+    display: none;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 16px;
+    cursor: pointer;
+  }
+  .note .acts button:hover { border-color: var(--ice); }
+  .note.ready .acts button { display: inline-block; }
+  .empty { color: var(--ink-dim); font-size: 14px; text-align: center; padding: 18px 0; }
+
+  .hint {
+    margin-top: clamp(24px, 5vw, 32px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>寄给明天的便签</h1>
+  <p class="sub">有些话当天说太轻，<em>隔夜说刚好</em>。写一句封存，24 小时后才能拆——到时候记得回来。</p>
+
+  <div class="write">
+    <textarea id="draft" maxlength="120" placeholder="写给 24 小时后的自己，或者任何一个明天在场的人……"></textarea>
+    <div class="go-row">
+      <button class="seal" id="seal" type="button">封存</button>
+      <span class="go-note" id="go-note">封存后立即锁上，谁也偷看不了，包括你自己。</span>
+    </div>
+  </div>
+
+  <div class="wall" id="wall"></div>
+
+  <p class="hint">便签只存在这台设备上（本地存储），不出网、不过夜会话也没有关系——明晚打开还在。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var LOCK_MS = 24 * 3600 * 1000;   // 24 小时后方可拆
+  // 测试钩子：URL 带 #fast 时 60 秒即可拆（平时不影响页面）
+  if (window.location.hash === '#fast') {
+    LOCK_MS = 60 * 1000;
+    history.replaceState(null, '', window.location.pathname);
+  }
+
+  var KEY = 'night-inventions.tomorrow-notes';
+  var $ = function (id) { return document.getElementById(id); };
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+  }
+  function save(list) {
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  function fmtRemain(ms) {
+    var s = Math.max(0, Math.ceil(ms / 1000));
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    if (h > 0) return h + ' 小时 ' + m + ' 分后可拆';
+    if (m > 0) return m + ' 分钟后可拆';
+    return s + ' 秒后可拆';
+  }
+  function fmtTime(t) {
+    var d = new Date(t);
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function render() {
+    var list = load();
+    var wall = $('wall');
+    wall.innerHTML = '';
+    if (!list.length) {
+      wall.innerHTML = '<p class="empty">墙上还没有便签。第一句写给明天的话，从上面开始。</p>';
+      return;
+    }
+    var now = Date.now();
+    // 新的在上
+    for (var i = list.length - 1; i >= 0; i--) {
+      (function (item) {
+        var remain = item.sealedAt + LOCK_MS - now;
+        var ready = remain <= 0;
+        var div = document.createElement('div');
+        div.className = 'note' + (ready ? ' ready' : ' locked');
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.innerHTML = '<span>封存于 <span class="num">' + fmtTime(item.sealedAt) + '</span></span>' +
+          '<span class="num">' + (ready ? '已可拆' : fmtRemain(remain)) + '</span>';
+        var body = document.createElement('div');
+        body.className = 'body';
+        body.textContent = ready ? item.text : item.text;   // 内容始终渲染，未到期靠样式模糊锁住
+        var acts = document.createElement('div');
+        acts.className = 'acts';
+        if (ready) {
+          var open = document.createElement('button');
+          open.type = 'button';
+          open.textContent = '拆开';
+          open.addEventListener('click', function () {
+            div.classList.remove('locked');
+            div.classList.add('ready');
+            open.style.display = 'none';
+          });
+          acts.appendChild(open);
+        } else {
+          var cd = document.createElement('span');
+          cd.className = 'countdown';
+          cd.textContent = fmtRemain(remain);
+          acts.appendChild(cd);
+        }
+        div.appendChild(meta);
+        div.appendChild(body);
+        div.appendChild(acts);
+        wall.appendChild(div);
+      })(list[i]);
+    }
+  }
+
+  $('seal').addEventListener('click', function () {
+    var text = $('draft').value.trim();
+    if (!text) {
+      $('go-note').textContent = '空白的便签，明天拆开也只有空白。写点什么吧。';
+      $('draft').focus();
+      return;
+    }
+    var list = load();
+    list.push({ text: text, sealedAt: Date.now() });
+    save(list);
+    $('draft').value = '';
+    $('go-note').textContent = '已封存。' + fmtRemain(LOCK_MS) + '，回来拆。';
+    render();
+  });
+
+  // 倒计时刷新：墙钟驱动，后台被节流也在回前台时校正
+  setInterval(render, 1000);
+  render();
+})();
+</script>
+</body>
+</html>

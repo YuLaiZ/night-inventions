@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一日一字</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .write { margin-top: clamp(22px, 5vw, 28px); }
+  .write label { display: block; font-size: 14px; color: var(--ink-dim); letter-spacing: 0.08em; margin-bottom: 8px; }
+  .input-row { display: flex; gap: 10px; }
+  input#word {
+    flex: 1;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 14px;
+    outline: none;
+  }
+  input#word:focus { border-color: var(--ice); }
+  button.drop {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 24px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button.drop:hover { filter: brightness(1.08); }
+  button.drop:active { transform: scale(0.98); }
+  .go-note { margin-top: 8px; font-size: 13px; color: var(--ink-dim); min-height: 1.5em; }
+
+  .stats {
+    margin-top: clamp(20px, 4vw, 26px);
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .stats .num { font-family: var(--mono); color: var(--ice); }
+
+  .year {
+    margin-top: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.55);
+    padding: clamp(12px, 3vw, 18px);
+    display: grid;
+    grid-template-columns: repeat(15, 1fr);
+    gap: 4px;
+  }
+  .cell {
+    aspect-ratio: 1;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: rgba(156, 200, 255, 0.05);
+    font-size: clamp(9px, 2.4vw, 13px);
+    color: transparent;
+    position: relative;
+  }
+  .cell.has {
+    background: rgba(242, 199, 110, 0.14);
+    color: var(--ink-strong);
+    font-weight: 500;
+  }
+  .cell.today {
+    outline: 1.5px solid var(--gold);
+    outline-offset: 1px;
+  }
+  .cell.today.has { color: var(--gold); }
+  .cell .tip { display: none; }
+  .legend { margin-top: 8px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.1em; }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>一日一字</h1>
+  <p class="sub">一天记一个字就够了。<em>攒满一年</em>，就是一本只有你读得懂的书。</p>
+
+  <div class="write">
+    <label for="word">今天，用一个字收留这一天：</label>
+    <div class="input-row">
+      <input id="word" maxlength="2" placeholder="例：静 / 忙 / 晴 / 熬" autocomplete="off">
+      <button class="drop" id="drop" type="button">落下今天</button>
+    </div>
+    <p class="go-note" id="go-note"></p>
+  </div>
+
+  <p class="stats">已记 <span class="num" id="count">0</span> 天 · 最近一年：</p>
+  <div class="year" id="year"></div>
+  <p class="legend">描金的一格是今天 · 亮着的是已经收留的日子</p>
+
+  <p class="hint">字只存在这台设备上。哪天忘了写也没关系——空格子也是日记的一部分。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'night-inventions.one-word-diary';
+  var SPAN = 210;   // 展示最近 210 天（15 列 × 14 行）
+  var $ = function (id) { return document.getElementById(id); };
+
+  function dayKey(d) {
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      var obj = raw ? JSON.parse(raw) : {};
+      return (obj && typeof obj === 'object' && !(obj instanceof Array)) ? obj : {};
+    } catch (e) { return {}; }
+  }
+  function save(obj) {
+    try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch (e) {}
+  }
+
+  function render() {
+    var diary = load();
+    var year = $('year');
+    year.innerHTML = '';
+    var today = new Date();
+    var todayKey = dayKey(today);
+    var cells = 0;
+    for (var i = SPAN - 1; i >= 0; i--) {
+      var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+      var k = dayKey(d);
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+      if (diary[k]) {
+        cell.classList.add('has');
+        cell.textContent = diary[k];
+        cell.title = k + ' · ' + diary[k];
+        cells++;
+      } else if (i === 0) {
+        cell.title = k + ' · 还空着';
+      }
+      if (i === 0) cell.classList.add('today');
+      year.appendChild(cell);
+    }
+    $('count').textContent = String(cells);
+  }
+
+  $('drop').addEventListener('click', function () {
+    var w = $('word').value.trim();
+    if (!w) {
+      $('go-note').textContent = '空格子里什么都住不下。写一个字。';
+      $('word').focus();
+      return;
+    }
+    var diary = load();
+    var k = dayKey(new Date());
+    var overwriting = !!diary[k];
+    diary[k] = w;
+    save(diary);
+    $('word').value = '';
+    $('go-note').textContent = overwriting
+      ? '「' + w + '」——今天改主意了，也算数。'
+      : '「' + w + '」收留了今天。';
+    render();
+  });
+
+  $('word').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('drop').click();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

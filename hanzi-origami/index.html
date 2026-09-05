@@ -114,6 +114,7 @@
     <button type="button" id="btn-char">换个字</button>
     <button type="button" id="btn-fold">再折一折</button>
     <button type="button" id="btn-flat">全部展开</button>
+    <button type="button" id="btn-save">收下这幅</button>
     <span id="fold-count">折了 <b>0</b> 折</span>
   </div>
   <p class="hint">对折两次、再走一次对角线，最普通的字也会开出花纹。</p>
@@ -316,6 +317,14 @@
   });
 
   window.addEventListener('resize', function () { render(); });
+
+  // 收下这幅：导出当前折纸成品 PNG
+  $('btn-save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'hanzi-origami-' + state.ch + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  });
 
   render();
 })();

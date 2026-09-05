@@ -83,6 +83,19 @@
     min-height: 1.7em;
   }
   #pokes { font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim); margin-top: 4px; }
+  .save-row { margin-top: 18px; }
+  .save-row button {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    color: var(--ink-dim);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 20px;
+    cursor: pointer;
+  }
+  .save-row button:hover { color: var(--ice); border-color: rgba(156, 200, 255, 0.5); }
   .hint {
     margin-top: 22px;
     font-size: 13px;
@@ -107,6 +120,8 @@
     <p id="pose"></p>
     <p id="pokes"></p>
   </div>
+
+  <p class="save-row"><button id="btn-save" type="button">领一只睡猫回家</button></p>
 
   <p class="hint">戳它的手法会影响它的回应质量。也可以什么都不做，陪它待一会儿——它不介意。</p>
 
@@ -249,6 +264,14 @@
 
   setInterval(function () { drawCat(Date.now()); }, 120);
   drawCat(Date.now());
+
+  // 领一只睡猫回家：导出当前帧（含睡姿）
+  $('btn-save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'sleepy-cat-' + (poseIdx + 1) + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
 })();
 </script>
 </body>

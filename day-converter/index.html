@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日子换算所</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .counter { margin-top: clamp(22px, 5vw, 28px); }
+  .counter label { display: block; font-size: 14px; color: var(--ink-dim); letter-spacing: 0.08em; margin-bottom: 8px; }
+  .input-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type="date"] {
+    flex: 1;
+    min-width: 150px;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 14px;
+    outline: none;
+    color-scheme: dark;
+  }
+  input[type="date"]:focus { border-color: var(--ice); }
+  input#event {
+    flex: 2;
+    min-width: 150px;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 11px 14px;
+    outline: none;
+  }
+  input#event:focus { border-color: var(--ice); }
+  input#event::placeholder { color: rgba(139, 150, 173, 0.7); }
+  .go-row { margin-top: 12px; }
+  button.count {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 28px;
+    cursor: pointer;
+  }
+  button.count:hover { filter: brightness(1.08); }
+  button.count:active { transform: scale(0.98); }
+
+  .result {
+    display: none;
+    margin-top: clamp(24px, 5vw, 32px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+    text-align: center;
+  }
+  .result.show { display: block; animation: fadein 0.4s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  .result .head { font-size: 14px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  .result .big {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: clamp(38px, 11vw, 58px);
+    color: var(--ink-strong);
+  }
+  .result .big small { font-size: 0.4em; color: var(--gold); }
+  .result .table { margin-top: 16px; display: grid; gap: 6px; text-align: left; max-width: 420px; margin-left: auto; margin-right: auto; }
+  .result .row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed var(--line);
+    padding: 4px 2px;
+    font-size: 14.5px;
+  }
+  .result .row .k { color: var(--ink-dim); }
+  .result .row .v { color: var(--ink); }
+  .result .row .v .num { font-family: var(--mono); }
+  .result .tail { margin-top: 14px; color: var(--ink-dim); font-size: 13px; }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>日子换算所</h1>
+  <p class="sub">报一个日子，本所负责把它换算成<em>熬得住的单位</em>：多少个夜班、多少杯咖啡、多少次日落。</p>
+
+  <div class="counter">
+    <label for="date">日子是哪天？</label>
+    <div class="input-row">
+      <input type="date" id="date">
+      <input type="text" id="event" maxlength="20" placeholder="它叫什么？（可选）例如：回家 / 发版日">
+    </div>
+    <div class="go-row">
+      <button class="count" id="go" type="button">换算</button>
+    </div>
+  </div>
+
+  <div class="result" id="result">
+    <div class="head" id="r-head"></div>
+    <div class="big"><span id="r-days">--</span><small> 天</small></div>
+    <div class="table">
+      <div class="row"><span class="k">夜班</span><span class="v"><span class="num" id="r-shift"></span> 个</span></div>
+      <div class="row"><span class="k">咖啡（按夜班一杯）</span><span class="v"><span class="num" id="r-coffee"></span> 杯</span></div>
+      <div class="row"><span class="k">日落</span><span class="v"><span class="num" id="r-sunset"></span> 次</span></div>
+      <div class="row"><span class="k">睡眠（按八小时理想主义）</span><span class="v"><span class="num" id="r-sleep"></span> 晚</span></div>
+    </div>
+    <p class="tail" id="r-tail"></p>
+  </div>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var DAY = 86400000;
+
+  // 以「今晚」为基准：凌晨 5 点前仍算昨夜
+  function tonight() {
+    var now = new Date();
+    if (now.getHours() < 5) now.setDate(now.getDate() - 1);
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }
+
+  function fmt(n) { return String(n); }
+
+  function count() {
+    var v = $('date').value;
+    var name = $('event').value.trim();
+    if (!v) {
+      showHead('先报一个日子，本所好开工。', null);
+      return;
+    }
+    var parts = v.split('-');
+    var target = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+    if (isNaN(target.getTime())) {
+      showHead('这个日子本所看不懂，换一个写法。', null);
+      return;
+    }
+    var base = tonight();
+    var diff = Math.round((target.getTime() - base.getTime()) / DAY);
+    var label = name || '那一天';
+
+    if (diff === 0) {
+      showHead(label + '：就是今天。别换算了，去过它。', null);
+      return;
+    }
+    if (diff < 0) {
+      var gone = -diff;
+      $('r-head').textContent = label + ' · 已收进行李';
+      $('r-days').textContent = fmt(gone);
+      $('r-shift').textContent = fmt(Math.round(gone * 0.8));
+      $('r-coffee').textContent = fmt(Math.round(gone * 0.8));
+      $('r-sunset').textContent = fmt(gone);
+      $('r-sleep').textContent = fmt(gone);
+      $('r-tail').textContent = '过去了 ' + gone + ' 天。日子不回头，但账本替你记着。';
+    } else {
+      $('r-head').textContent = '距「' + label + '」还有';
+      $('r-days').textContent = fmt(diff);
+      $('r-shift').textContent = fmt(Math.round(diff * 0.8));
+      $('r-coffee').textContent = fmt(Math.round(diff * 0.8));
+      $('r-sunset').textContent = fmt(diff);
+      $('r-sleep').textContent = fmt(diff);
+      var tail;
+      if (diff <= 3) tail = '就在眼前了——夜班表上都圈得下。';
+      else if (diff <= 30) tail = '一个月的夜班量级，数得过来，熬得住。';
+      else if (diff <= 180) tail = '半年量级。每个夜班划掉一格，划着划着就到。';
+      else tail = '远期票据。本所建议：先把眼前这个夜班熬好。';
+      $('r-tail').textContent = tail;
+    }
+    var box = $('result');
+    box.classList.remove('show');
+    void box.offsetWidth;
+    box.classList.add('show');
+  }
+
+  function showHead(text, _) {
+    $('r-head').textContent = text;
+    $('result').classList.add('show');
+    if (text.indexOf('先报') !== -1 || text.indexOf('看不懂') !== -1) {
+      $('r-days').textContent = '--';
+      $('r-tail').textContent = '';
+    }
+  }
+
+  $('go').addEventListener('click', count);
+  $('date').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') count();
+  });
+})();
+</script>
+</body>
+</html>
