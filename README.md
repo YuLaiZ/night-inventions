@@ -8,7 +8,7 @@
 
 - 在线逛馆：<https://yulaiz.github.io/night-inventions/>
 - `index.html`：陈列馆门户（卡片墙，满 10 件后自带检索）
-- 其余目录：每件展品一间小屋，双击其中 `index.html` 即玩
+- `pages/`：全部展品，每件一个单文件 `<展品名>.html`，点开即玩
 
 所有页面零外部依赖，克隆后本地打开即可。
 
