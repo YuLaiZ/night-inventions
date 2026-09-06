@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>沙漏</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .glass {
+    margin-top: clamp(20px, 4vw, 26px);
+    display: inline-block;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #070a12;
+    cursor: pointer;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass.flipping { transform: rotate(180deg); }
+  canvas { display: block; }
+
+  .status {
+    margin-top: 14px;
+    font-size: 14px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .status .num { font-family: var(--mono); color: var(--ice); }
+
+  .say { margin-top: 8px; color: var(--ink); font-size: 14.5px; min-height: 1.6em; }
+
+  .go-row { margin-top: 12px; }
+  button.flip {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 28px;
+    cursor: pointer;
+  }
+  button.flip:hover { filter: brightness(1.08); }
+  button.flip:disabled { opacity: 0.45; cursor: default; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>沙漏</h1>
+  <p class="sub">两百粒沙，粒粒可数。<em>点一下翻转</em>，时间就换了个方向继续漏。</p>
+
+  <div class="glass" id="glass">
+    <canvas id="cv" width="280" height="360"></canvas>
+  </div>
+  <p class="status">上室 <span class="num" id="top-n">--</span> 粒 · 下室 <span class="num" id="bot-n">--</span> 粒</p>
+  <p class="say" id="say">沙子不多，刚好够翻着玩一整夜。</p>
+
+  <div class="go-row">
+    <button class="flip" id="flip" type="button">翻转沙漏</button>
+  </div>
+
+  <p class="hint">流完不用等——反正翻转一下，又是满的。时间这东西，在玩具里最慷慨。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var TOTAL = 200;
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var grains = [];   // {x, y, vx, vy, inTop}
+  var flipping = false;
+  var last = Date.now();
+
+  var SAYS = [
+    '漏完一趟大约二十秒。比真实时间好懂多了。',
+    '翻转的时候，沙子其实短暂地失重了一下——像深夜的你。',
+    '上室的沙在等，下室的沙在攒。都挺忙的。',
+    '两百粒沙，每一粒都以为自己是主角。'
+  ];
+
+  function spawn() {
+    grains = [];
+    for (var i = 0; i < TOTAL; i++) {
+      grains.push({ x: 0, y: 0, vx: 0, vy: 0, state: 'settled' });
+    }
+    settleTop(grains);
+  }
+
+  // 把未落下的沙铺在上室
+  function settleTop(list) {
+    var cx = cv.width / 2;
+    var top = 40;
+    list.forEach(function (g, i) {
+      if (g.state !== 'settled' || g.y !== 0) return;
+      var row = Math.floor(i / 12), col = i % 12;
+      g.x = cx - 55 + col * 10 + (Math.random() - 0.5) * 3;
+      g.y = top + row * 3 + Math.random() * 2;
+    });
+  }
+
+  var gateY = 0;   // 漏口 y
+  var flowTimer = null;
+
+  function countTop() {
+    var n = 0;
+    for (var i = 0; i < grains.length; i++) {
+      if (grains[i].y < gateY - 4) n++;
+    }
+    return n;
+  }
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(60, now - last);
+    last = now;
+    var W = cv.width, H = cv.height;
+    gateY = H / 2;
+
+    ctx.clearRect(0, 0, W, H);
+    // 玻璃轮廓：两个三角漏斗
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(40, 8); ctx.lineTo(W - 40, 8);
+    ctx.lineTo(W / 2 + 3, gateY - 3);
+    ctx.lineTo(W - 40, H - 8);
+    ctx.lineTo(40, H - 8);
+    ctx.lineTo(W / 2 - 3, gateY - 3);
+    ctx.closePath();
+    ctx.stroke();
+
+    // 沙粒物理：上室沙向漏口汇聚，过口后自由落体，下室堆积
+    for (var i = 0; i < grains.length; i++) {
+      var g = grains[i];
+      if (g.state === 'done') {
+        // 下室：固定在堆上
+        continue;
+      }
+      var dy = gateY - g.y;
+      if (dy > 4) {
+        // 上室：向漏口缓慢滑落（漏斗壁内）
+        g.vy += 0.05 * dt / 16;
+        g.vx += ((W / 2 - g.x) * 0.004) * dt / 16;
+        g.x += g.vx * dt / 16;
+        g.y += g.vy * dt / 16;
+        if (g.y >= gateY - 3 && Math.abs(g.x - W / 2) < 3) {
+          g.vy = 0.4;   // 开始下落
+        } else if (g.y > gateY - 3) {
+          g.x = W / 2 + (Math.random() - 0.5) * 2;
+        }
+      } else {
+        // 下室：下落直到堆顶
+        g.vy += 0.12 * dt / 16;
+        g.y += g.vy * dt / 16;
+        var floor = H - 10 - Math.floor((g.x - 0) / 0) * 0;
+        // 堆顶高度按已落下数量粗略抬升
+        var doneCount = 0;
+        for (var j = 0; j < grains.length; j++) if (grains[j].state === 'done') doneCount++;
+        floor = H - 10 - doneCount * 0.5;
+        if (g.y >= floor) {
+          g.y = floor;
+          g.state = 'done';
+        }
+        if (g.x < 24) g.x = 24;
+        if (g.x > W - 24) g.x = W - 24;
+      }
+      // 绘制
+      ctx.fillStyle = '#e8d9a8';
+      ctx.fillRect(g.x - 1, g.y - 1, 2, 2);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function flip() {
+    if (flipping) return;
+    flipping = true;
+    var glass = document.getElementById('glass');
+    glass.classList.add('flipping');
+    $('say').textContent = '哗——整个世界倒了个个儿。';
+    updateCount();   // 同步计数（后台冻结环境下也能立即反映）
+    setTimeout(function () {
+      glass.classList.remove('flipping');
+      // 重力方向翻转：把 done/settled 全部重置到「新的上室」
+      grains.forEach(function (g) {
+        g.y = cv.height - g.y;
+        g.x = cv.width - g.x;
+        g.vy = 0; g.vx = 0;
+        g.state = 'settled';
+      });
+      settleTop(grains);
+      flipping = false;
+      updateCount();
+      $('say').textContent = '翻好了。沙子假装什么都没发生，继续漏。';
+    }, 620);
+  }
+
+  function updateCount() {
+    var gy = cv.height / 2;
+    var top = 0, bot = 0;
+    for (var i = 0; i < grains.length; i++) {
+      if (grains[i].y < gy - 4) top++; else bot++;
+    }
+    $('top-n').textContent = String(top);
+    $('bot-n').textContent = String(bot);
+  }
+
+  var glassEl = document.getElementById('glass');
+  glassEl.addEventListener('click', flip);
+  $('flip').addEventListener('click', flip);
+
+  window.addEventListener('resize', function () { /* 尺寸固定 280x360，无需处理 */ });
+
+  spawn();
+  updateCount();
+  tick();
+  // 定时刷新计数
+  setInterval(updateCount, 500);
+  window.__hgReady = true;
+})();
+</script>
+</body>
+</html>

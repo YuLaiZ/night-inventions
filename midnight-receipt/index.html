@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜收据</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .receipt {
+    margin-top: clamp(20px, 4vw, 26px);
+    background: #f5f1e4;
+    color: #3a3630;
+    border-radius: 6px;
+    padding: clamp(16px, 4vw, 26px);
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.9;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    position: relative;
+  }
+  .receipt::before, .receipt::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 10px;
+    background: radial-gradient(circle at 8px 0, transparent 6px, #f5f1e4 6px);
+    background-size: 16px 10px;
+  }
+  .receipt::before { top: -8px; transform: rotate(180deg); }
+  .receipt::after { bottom: -8px; }
+  .r-center { text-align: center; letter-spacing: 0.2em; }
+  .r-head { font-size: 15px; font-weight: 700; color: #3a3630; }
+  .r-line { border-bottom: 1px dashed #b9ae94; margin: 10px 0; }
+  .r-row { display: flex; justify-content: space-between; gap: 12px; }
+  .r-row span:first-child { flex: 1; }
+  .r-total {
+    display: flex;
+    justify-content: space-between;
+    font-size: 15px;
+    font-weight: 700;
+    color: #3a3630;
+    border-top: 1px dashed #b9ae94;
+    margin-top: 10px;
+    padding-top: 8px;
+  }
+  .r-foot { margin-top: 12px; text-align: center; font-size: 11.5px; color: #8a8069; letter-spacing: 0.1em; }
+
+  .go-row { margin-top: 16px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  button.act {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 20px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(18px, 4vw, 24px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜收据</h1>
+  <p class="sub">今晚的支出已经结算完毕。<em>本收据不可报销</em>，仅供纪念——但句句属实。</p>
+
+  <div class="receipt" id="receipt">
+    <div class="r-center r-head">深夜收据<br><span style="font-size:11px;letter-spacing:0.3em">NIGHT RECEIPT</span></div>
+    <div class="r-line"></div>
+    <div id="r-items"></div>
+    <div class="r-total"><span>合计</span><span id="r-total">--</span></div>
+    <div class="r-foot" id="r-foot"></div>
+  </div>
+
+  <div class="go-row">
+    <button class="act" id="next" type="button">重打一张</button>
+  </div>
+
+  <p class="hint">金额均为「睡眠货币」计价，汇率每晚浮动。持本收据可在天亮后兑换一个崭新的白天。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var ITEMS = [
+    { n: '发呆', unit: '分钟', p: 0 },
+    { n: '想了想明天', unit: '次', p: 0 },
+    { n: '翻身的吨位', unit: '吨', p: 0 },
+    { n: '看窗外的次数', unit: '次', p: 0 },
+    { n: '突然的清醒', unit: '阵', p: 0 },
+    { n: '屏幕的蓝光', unit: '小时', p: 0 },
+    { n: '月亮的观光费', unit: '晚', p: 0 },
+    { n: '「再刷五分钟」违约金', unit: '笔', p: 0 },
+    { n: '深度呼吸（赠送）', unit: '次', p: 0 }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+
+  function issue() {
+    var now = new Date();
+    var rows = [];
+    for (var i = 0; i < ITEMS.length; i++) {
+      if (Math.random() < 0.75) rows.push(ITEMS[i]);
+    }
+    // 至少保底三行
+    while (rows.length < 3) {
+      var it = pick(ITEMS);
+      if (rows.indexOf(it) === -1) rows.push(it);
+    }
+    var html = '';
+    rows.forEach(function (it) {
+      var qty = Math.floor(Math.random() * 90) + 3;
+      html += '<div class="r-row"><span>' + it.n + '</span><span>×' + qty + ' ' + it.unit + '</span></div>';
+    });
+    $('r-items').innerHTML = html;
+    $('r-total').textContent = '睡眠 ' + (Math.floor(Math.random() * 4) + 5) + '.' + Math.floor(Math.random() * 9) + ' 小时';
+    $('r-foot').textContent = '开票时间 ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) +
+      ' · 收据编号 NB' + String(now.getTime()).slice(-6) + ' · 持本收据可兑换一个崭新白天';
+  }
+
+  $('next').addEventListener('click', issue);
+  issue();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>月亮电台</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  /* ── 收音机 ── */
+  .radio {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(16, 22, 40, 0.65);
+    padding: clamp(14px, 3vw, 22px);
+  }
+  .dial {
+    position: relative;
+    height: 46px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(156, 200, 255, 0.04);
+    overflow: hidden;
+    cursor: ew-resize;
+    touch-action: none;
+  }
+  .dial .ticks {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 0 10px 4px;
+    pointer-events: none;
+  }
+  .dial .ticks span {
+    width: 1px;
+    height: 10px;
+    background: rgba(199, 208, 226, 0.3);
+  }
+  .dial .needle {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: var(--gold);
+    box-shadow: 0 0 6px rgba(242, 199, 110, 0.8);
+    pointer-events: none;
+  }
+  .freq-row {
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .freq {
+    font-family: var(--mono);
+    font-size: clamp(24px, 6vw, 30px);
+    color: var(--ink-strong);
+  }
+  .freq small { font-size: 0.5em; color: var(--ink-dim); }
+  .band { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.2em; }
+
+  .program {
+    margin-top: 14px;
+    border-top: 1px dashed var(--line);
+    padding-top: 14px;
+    min-height: 96px;
+  }
+  .program .p-tag { font-size: 12px; color: var(--gold); letter-spacing: 0.25em; }
+  .program .p-title { margin-top: 4px; color: var(--ink-strong); font-size: clamp(16px, 4.2vw, 19px); }
+  .program .p-body { margin-top: 6px; color: var(--ink); font-size: 15px; }
+  .program.fade { animation: fadein 0.35s ease; }
+  @keyframes fadein { from { opacity: 0.2; } to { opacity: 1; } }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>月亮电台</h1>
+  <p class="sub">深夜频段，信号由月光承载。<em>拖动指针</em>调频——同一频率，永远同一个节目。</p>
+
+  <div class="radio">
+    <div class="dial" id="dial">
+      <div class="ticks">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span>
+      </div>
+      <div class="needle" id="needle" style="left:0%"></div>
+    </div>
+    <div class="freq-row">
+      <span class="freq"><span id="freq">88.0</span><small> MHz</small></span>
+      <span class="band">FM · 月光频段</span>
+    </div>
+    <div class="program" id="program">
+      <div class="p-tag" id="p-tag">——</div>
+      <div class="p-title" id="p-title">向右拖动指针，开始搜台</div>
+      <div class="p-body" id="p-body">深夜的电台不吵，慢慢找，总有一个频段在说给你听。</div>
+    </div>
+  </div>
+
+  <p class="hint">本台全天候播出，零流量消耗——节目全部由本机即兴编播，同一频率不会变台。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var FMIN = 88.0, FMAX = 108.0;
+
+  // 频段节目表：每段一个节目（频率落在段内即播出）
+  var STATIONS = [
+    { max: 91.0,  tag: '今晚气象', title: '月光气象台', body: '今晚无风，月亮能见度极佳。适合把窗开一条缝，放一句心事出去散步。' },
+    { max: 94.0,  tag: '深夜信箱', title: '《没人睡就是这么晚》', body: '一位听众来信：「睡不着的时候，其实也不难过，就是舍不得。」本台深表同感。' },
+    { max: 97.0,  tag: '点歌时间', title: '听众点播：一首没有歌名的歌', body: '您现在听到的空白，就是那首歌——据说原唱是今晚的风，编曲是楼下偶尔驶过的车。' },
+    { max: 100.0, tag: '午夜读书', title: '《夜航西飞》第……页', body: '「可能我们过了今晚，就把这个夜晚忘了。」本台替月亮补一句：月亮会替你记住。' },
+    { max: 103.0, tag: '电波随缘', title: '信号不良', body: '滋……滋滋……这个频段今晚只有雪花声。有时候收不到，也是一种休息。' },
+    { max: 106.0, tag: '深夜告解', title: '匿名来电', body: '「其实我今天什么都没做成。」——接线上一位刚下班的朋友：没做成的一天，也把你带到了明天。' },
+    { max: 108.0, tag: '本台致谢', title: '与月亮同频', body: '感谢收听。本台功率来自您此刻还醒着——这一点点光，已经足够照亮频段表了。' }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var dial = $('dial');
+  var lastFreq = -1;
+
+  function programFor(freq) {
+    for (var i = 0; i < STATIONS.length; i++) {
+      if (freq <= STATIONS[i].max) return STATIONS[i];
+    }
+    return STATIONS[STATIONS.length - 1];
+  }
+
+  function tune(freq) {
+    freq = Math.max(FMIN, Math.min(FMAX, freq));
+    $('freq').textContent = freq.toFixed(1);
+    $('needle').style.left = ((freq - FMIN) / (FMAX - FMIN) * 100) + '%';
+    if (Math.abs(freq - lastFreq) < 0.15) return;   // 微调不切节目
+    lastFreq = freq;
+    var st = programFor(freq);
+    var p = $('program');
+    p.classList.remove('fade');
+    void p.offsetWidth;
+    p.classList.add('fade');
+    $('p-tag').textContent = st.tag;
+    $('p-title').textContent = st.title;
+    $('p-body').textContent = st.body;
+  }
+
+  // 拖动调频（pointer 事件统一鼠标与触屏）
+  var dragging = false;
+  function freqFromX(clientX) {
+    var r = dial.getBoundingClientRect();
+    var ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    return FMIN + ratio * (FMAX - FMIN);
+  }
+  dial.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    tune(freqFromX(e.clientX));
+    e.preventDefault();
+  });
+  dial.addEventListener('pointermove', function (e) {
+    if (dragging) { tune(freqFromX(e.clientX)); e.preventDefault(); }
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+})();
+</script>
+</body>
+</html>

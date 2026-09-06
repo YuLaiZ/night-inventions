@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一罐萤火虫</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .jar-wrap { margin-top: clamp(20px, 4vw, 26px); position: relative; display: inline-block; }
+  canvas { display: block; cursor: pointer; }
+
+  .status {
+    margin-top: 14px;
+    font-size: 15px;
+    color: var(--ink-strong);
+  }
+  .status .num { font-family: var(--mono); color: var(--ice); }
+  .say { margin-top: 6px; color: var(--ink-dim); font-size: 14px; min-height: 1.6em; }
+
+  .go-row { margin-top: 14px; }
+  button.again {
+    display: none;
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 22px;
+    cursor: pointer;
+  }
+  button.again.show { display: inline-block; }
+  button.again:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>一罐萤火虫</h1>
+  <p class="sub">罐里关着十只光。<em>点一下罐子，放走一只</em>——放生这种事，越舍不得越要做。</p>
+
+  <div class="jar-wrap">
+    <canvas id="cv" width="300" height="300"></canvas>
+  </div>
+
+  <p class="status">罐里还有 <span class="num" id="left">10</span> 只</p>
+  <p class="say" id="say">它们在罐里安安静静地亮着，也不知道自己被抓了。</p>
+
+  <div class="go-row">
+    <button class="again" id="again" type="button">再捉一罐</button>
+  </div>
+
+  <p class="hint">本馆承诺：萤火虫均为像素制，放生后已就地融入夜色，请勿挂念。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var START_N = 10;
+  var fireflies = [];   // {x, y, a(相位), sp, free(已放走→飞出动画)}
+  var inJar = START_N;
+  var released = 0;
+
+  var SAYS = [
+    null,
+    '它出去的时候亮了一下，像说了声谢谢。',
+    '又走了一只。剩下的往罐口挤了挤，装作不舍不得你。',
+    '放生进行时。罐子越来越空，心里越来越轻。',
+    '半罐了。要不要考虑全放？反正你也要睡了。',
+    '只剩几只了。它们开始商量谁最后一个走。',
+    '下一只就是压轴。压轴的萤火虫，最亮。',
+    '倒数第二只。它回头看了你一眼（大概）。',
+    '最后一只了。它说：谢谢你留我到最后。'
+  ];
+
+  function size() {
+    var dpr = window.devicePixelRatio || 1;
+    var side = Math.min(320, Math.max(240, document.querySelector('.jar-wrap').clientWidth));
+    cv.width = Math.round(side * dpr);
+    cv.height = Math.round(side * dpr);
+    cv.style.width = side + 'px';
+    cv.style.height = side + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function spawn() {
+    fireflies = [];
+    for (var i = 0; i < START_N; i++) {
+      fireflies.push({
+        x: 40 + Math.random() * 220,
+        y: 40 + Math.random() * 220,
+        a: Math.random() * Math.PI * 2,
+        sp: 0.15 + Math.random() * 0.25,
+        blink: Math.random() * Math.PI * 2,
+        free: false,
+        fx: 0, fy: 0
+      });
+    }
+    inJar = START_N;
+    released = 0;
+    document.getElementById('left').textContent = String(inJar);
+  }
+
+  // 墙钟驱动：后台冻结无碍，回前台跳位继续
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(100, now - last);
+    last = now;
+    var W = cv.clientWidth, H = cv.clientHeight;
+    ctx.clearRect(0, 0, W, H);
+
+    // 罐子（玻璃圆罐）
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, W / 2 - 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.04)';
+    ctx.fill();
+    // 罐口
+    ctx.fillStyle = 'rgba(199, 208, 226, 0.4)';
+    ctx.fillRect(W / 2 - 26, 4, 52, 6);
+
+    for (var i = 0; i < fireflies.length; i++) {
+      var f = fireflies[i];
+      if (f.free) {
+        // 放飞的向上飞出
+        f.fx -= 0.4; f.fy -= 1.6;
+        ctx.beginPath();
+        ctx.arc(f.fx, f.fy, 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(242, 199, 110, ' + Math.max(0, 0.9 - Math.abs(f.fy) / 160) + ')';
+        ctx.fill();
+        continue;
+      }
+      f.a += (Math.random() - 0.5) * 0.4;
+      f.x += Math.cos(f.a) * f.sp * dt / 16;
+      f.y += Math.sin(f.a) * f.sp * dt / 16;
+      if (f.x < 16 || f.x > W - 16) f.a = Math.PI - f.a;
+      if (f.y < 16 || f.y > H - 16) f.a = -f.a;
+      f.x = Math.max(16, Math.min(W - 16, f.x));
+      f.y = Math.max(16, Math.min(H - 16, f.y));
+      f.blink += 0.08;
+      var glow = 0.5 + 0.5 * Math.sin(f.blink);
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, 3 + glow * 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(242, 199, 110, ' + (0.15 + glow * 0.2) + ')';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 236, 180, ' + (0.6 + glow * 0.4) + ')';
+      ctx.fill();
+    }
+  }
+
+  cv.addEventListener('click', function () {
+    if (inJar <= 0) return;
+    // 放走一只（取还剩的里最早出现的那只）
+    for (var i = 0; i < fireflies.length; i++) {
+      if (!fireflies[i].free) {
+        fireflies[i].free = true;
+        fireflies[i].fx = fireflies[i].x;
+        fireflies[i].fy = fireflies[i].y;
+        break;
+      }
+    }
+    inJar--;
+    released++;
+    document.getElementById('left').textContent = String(inJar);
+    var say = SAYS[released] || '都放走了。它们会替你亮到天亮。';
+    if (inJar === 0) {
+      say = '都放走了。它们会替你亮到天亮。';
+      document.getElementById('again').classList.add('show');
+    }
+    document.getElementById('say').textContent = say;
+  });
+
+  document.getElementById('again').addEventListener('click', function () {
+    this.classList.remove('show');
+    document.getElementById('say').textContent = '新的一罐到货。它们还不知道自己马上就会被放走。';
+    spawn();
+  });
+
+  window.addEventListener('resize', function () { size(); });
+
+  size();
+  spawn();
+  setInterval(function () { tick(); }, 50);
+  tick();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>漂流瓶</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .write { margin-top: clamp(22px, 5vw, 28px); }
+  textarea#msg {
+    width: 100%;
+    min-height: 76px;
+    resize: vertical;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    outline: none;
+  }
+  textarea#msg:focus { border-color: var(--ice); }
+  .go-row { margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  button.throw {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.throw:hover { filter: brightness(1.08); }
+  button.throw:active { transform: scale(0.98); }
+  .go-note { font-size: 13px; color: var(--ink-dim); }
+
+  .sea {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(16px, 4vw, 26px);
+  }
+  .sea .s-tag { font-size: 12px; color: var(--gold); letter-spacing: 0.25em; }
+  .bottle-view { margin-top: 12px; min-height: 120px; }
+  .bottle-view .none { color: var(--ink-dim); font-size: 14px; }
+  .bottle-view .from { font-size: 12.5px; color: var(--ink-dim); letter-spacing: 0.08em; }
+  .bottle-view .text {
+    margin-top: 6px;
+    color: var(--ink-strong);
+    font-size: clamp(16px, 4.2vw, 18px);
+    border-left: 2px solid var(--gold);
+    padding-left: 12px;
+  }
+  .sea .acts { margin-top: 14px; display: flex; gap: 10px; justify-content: center; }
+  button.sea-btn {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  button.sea-btn:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>漂流瓶</h1>
+  <p class="sub">这片海只收<em>深夜的话</em>。写一句扔出去，再随手捞一瓶——捞到谁的，都算缘分。</p>
+
+  <div class="write">
+    <textarea id="msg" maxlength="60" placeholder="写一句想扔进海里的话……"></textarea>
+    <div class="go-row">
+      <button class="throw" id="throw" type="button">扔进海里</button>
+      <span class="go-note" id="go-note"></span>
+    </div>
+  </div>
+
+  <div class="sea">
+    <div class="s-tag">随手捞一瓶</div>
+    <div class="bottle-view" id="view">
+      <p class="none">海面很静。点下面的按钮，捞起今晚第一瓶。</p>
+    </div>
+    <div class="acts">
+      <button class="sea-btn" id="fish" type="button">捞一瓶</button>
+      <button class="sea-btn" id="back" type="button" style="display:none">扔回海里</button>
+    </div>
+  </div>
+
+  <p class="hint">海里的瓶游不出这台设备——陌生人的话是海里原本就有的，你的话也只有你能捞到。放心写。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'night-inventions.message-bottle';
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 海里原本就漂着的陌生人的瓶（文案库）
+  var SEA_BUILTINS = [
+    '如果睡不着，就当是海风在叫你起来看月亮。',
+    '今天也把饭好好吃了。写给我自己，也写给捞到这瓶的你。',
+    '凌晨两点半，楼下便利店的热柜还亮着，突然就安心了。',
+    '有些话说出来会轻一点。所以我把它装进瓶子。',
+    '希望明天的事，比今晚想象的简单一点。',
+    '刚才看见一颗很亮的星，不知道叫什么名字，先记在这里。',
+    '如果你也是熬夜的人：喝口热水，我们各自加油。',
+    '想通了一件事：难过不丢人，硬撑才累。共勉。',
+    '把「明天再说」正式授权为人生格言。',
+    '今晚的海很平。希望你那边也是。',
+    '存了很久的一句话：你已经做得很好了。',
+    '月亮在补贴整个夜班的电费，这事儿很少有人知道。'
+  ];
+
+  function mine() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+  }
+
+  $('throw').addEventListener('click', function () {
+    var text = $('msg').value.trim();
+    if (!text) {
+      $('go-note').textContent = '空瓶子扔下去，捞上来也是空瓶子。写点啥。';
+      $('msg').focus();
+      return;
+    }
+    var list = mine();
+    list.push({ text: text, at: Date.now(), self: true });
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+    $('msg').value = '';
+    $('go-note').textContent = '扑通。已经漂走了——想它的时候，随手捞一瓶。';
+  });
+
+  $('fish').addEventListener('click', function () {
+    var builtins = SEA_BUILTINS;
+    var own = mine();
+    var total = builtins.length + own.length;
+    if (!total) return;
+    var idx = Math.floor(Math.random() * total);
+    var text, from;
+    if (idx < builtins.length) {
+      text = builtins[idx];
+      from = '来自一位不知名的夜里漂流的人';
+    } else {
+      var b = own[idx - builtins.length];
+      text = b.text;
+      from = '来自你自己 · ' + new Date(b.at).toLocaleDateString('zh-CN');
+    }
+    $('view').innerHTML =
+      '<div class="from">' + from + '</div><div class="text"></div>';
+    $('view').querySelector('.text').textContent = text;
+    $('back').style.display = '';
+    $('back').textContent = '扔回海里';
+  });
+
+  $('back').addEventListener('click', function () {
+    $('view').innerHTML = '<p class="none">扑通——又漂走了。海里的瓶，永远捞不完。</p>';
+    this.style.display = 'none';
+  });
+})();
+</script>
+</body>
+</html>

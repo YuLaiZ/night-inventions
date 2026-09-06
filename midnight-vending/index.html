@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜自动贩卖机</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  /* ── 机身 ── */
+  .machine {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(16, 22, 40, 0.65);
+    padding: clamp(14px, 3vw, 22px);
+  }
+  .shelf {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .slot {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(156, 200, 255, 0.04);
+    text-align: center;
+    padding: 10px 4px 6px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .slot:hover { border-color: rgba(242, 199, 110, 0.5); background: rgba(242, 199, 110, 0.06); }
+  .slot .e { font-size: 26px; line-height: 1.4; display: block; }
+  .slot .n { font-size: 11.5px; color: var(--ink-dim); letter-spacing: 0.06em; }
+
+  .coin-row {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+  }
+  button.coin {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.coin:hover { filter: brightness(1.08); }
+  button.coin:active { transform: scale(0.97); }
+  .coin-note { font-size: 12.5px; color: var(--ink-dim); }
+
+  /* ── 取物口 ── */
+  .tray {
+    margin-top: 14px;
+    border-top: 1px dashed var(--line);
+    padding-top: 14px;
+    min-height: 96px;
+    text-align: center;
+  }
+  .can {
+    display: none;
+    margin: 0 auto 6px;
+    font-size: 40px;
+    line-height: 1.2;
+  }
+  .can.show { display: block; animation: drop 0.5s ease; }
+  @keyframes drop {
+    0%   { transform: translateY(-26px); opacity: 0; }
+    70%  { transform: translateY(4px); opacity: 1; }
+    100% { transform: translateY(0); }
+  }
+  .drink-name { color: var(--gold); font-size: clamp(17px, 4.5vw, 20px); letter-spacing: 0.1em; min-height: 1.5em; }
+  .drink-note { margin-top: 4px; color: var(--ink); font-size: 15px; min-height: 1.6em; }
+
+  .stats {
+    margin-top: clamp(18px, 4vw, 24px);
+    text-align: center;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .stats .num { font-family: var(--mono); color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜自动贩卖机</h1>
+  <p class="sub">深夜不收钱，<em>只收睡不着</em>。点一罐，掉一罐——每一罐都是当夜现调的。</p>
+
+  <div class="machine">
+    <div class="shelf" id="shelf"></div>
+    <div class="coin-row">
+      <button class="coin" id="buy" type="button">投一枚「睡不着」</button>
+      <span class="coin-note" id="coin-note">随缘出罐，也可以从柜里挑。</span>
+    </div>
+    <div class="tray">
+      <div class="can" id="can">🥤</div>
+      <div class="drink-name" id="d-name"></div>
+      <div class="drink-note" id="d-note"></div>
+    </div>
+  </div>
+
+  <p class="stats">今夜已取 <span class="num" id="bought">0</span> 罐 · 货道补货永不打烊</p>
+
+  <p class="hint">本机所有饮品均为深夜限量限定版：白天想买，它就下班。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var DRINKS = [
+    { e: '🥛', n: '热可可·微醺款', note: '不加酒的甜。喝完会有三分钟觉得自己是被世界偏爱的。' },
+    { e: '☕', n: '冰美式·醒神特调', note: '苦得很 straight。适合和今晚的死线正面对峙。' },
+    { e: '🍵', n: '桂花乌龙·收尾款', note: '一口下去，今天就算圆满结案了。' },
+    { e: '🧋', n: '珍珠奶茶·饱腹款', note: '嚼珍珠的工夫，烦恼会被暂时挤到一边排队。' },
+    { e: '🍋', n: '柠檬气泡水·清醒款', note: '气泡在舌尖炸开的那声，像给瞌睡念了紧箍咒。' },
+    { e: '🍯', n: '蜂蜜水·哄睡款', note: '温柔到没有攻击性。喝完请立刻躺下，别浪费。' },
+    { e: '🍑', n: '蜜桃乌龙·心软款', note: '专治嘴硬。喝完可以对今天的事说一句算了。' },
+    { e: '🥤', n: '可乐·气泡暴动款', note: '气很足。摇匀了烦恼一起打开，嗝出来就没了。' },
+    { e: '🍊', n: '橘子汽水·回忆限定', note: '味道很熟，像小时候小卖部里那瓶。' },
+    { e: '🫖', n: '热牛奶·妈妈牌', note: '本机按传统配方温的。喝完记得刷牙。' },
+    { e: '🧃', n: '苹果汁·清白款', note: '什么都不掺。今晚的错就今晚的，果汁不管。' },
+    { e: '❄️', n: '苏打冰·极简款', note: '无糖无色无故事。适合想一个人静静的夜。' }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var bought = 0;
+
+  function renderShelf() {
+    var shelf = $('shelf');
+    shelf.innerHTML = '';
+    // 柜里摆前 6 款（固定陈列，随缘出货）
+    for (var i = 0; i < 6; i++) {
+      (function (idx) {
+        var d = DRINKS[idx];
+        var slot = document.createElement('div');
+        slot.className = 'slot';
+        slot.innerHTML = '<span class="e">' + d.e + '</span><span class="n">' + d.n.split('·')[0] + '</span>';
+        slot.addEventListener('click', function () { vend(idx); });
+        shelf.appendChild(slot);
+      })(i);
+    }
+  }
+
+  function vend(idx) {
+    var i = (typeof idx === 'number') ? idx : Math.floor(Math.random() * DRINKS.length);
+    var d = DRINKS[i];
+    var can = $('can');
+    can.textContent = d.e;
+    can.classList.remove('show');
+    void can.offsetWidth;
+    can.classList.add('show');
+    $('d-name').textContent = d.n;
+    $('d-note').textContent = d.note;
+    bought++;
+    $('bought').textContent = String(bought);
+    $('coin-note').textContent = '取出即饮，冰镇的是心情。';
+  }
+
+  $('buy').addEventListener('click', function () { vend(); });
+
+  renderShelf();
+})();
+</script>
+</body>
+</html>

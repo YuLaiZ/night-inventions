@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手电筒</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .dark {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; cursor: none; touch-action: none; }
+
+  .found {
+    margin-top: 12px;
+    font-size: 14px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .found .num { font-family: var(--mono); color: var(--ice); }
+
+  .go-row { margin-top: 14px; }
+  button.rehide {
+    display: none;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  button.rehide.show { display: inline-block; }
+  button.rehide:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>手电筒</h1>
+  <p class="sub">黑屋子里藏着 <em>8 句深夜的话</em>。拿着手电筒慢慢找——照亮哪句，哪句就归你。</p>
+
+  <div class="dark">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <p class="found">已照亮 <span class="num" id="found">0</span> / 8 句</p>
+
+  <div class="go-row">
+    <button class="rehide" id="rehide" type="button">换个屋子再藏一遍</button>
+  </div>
+
+  <p class="hint">句子不会跑，就在原地等你。手机上用指头按住慢慢蹭。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var SENTENCES = [
+    '睡不着的人，其实是在替大家守夜。',
+    '夜里想通的事，第二天未必还成立。',
+    '手机屏幕是这个时代的小篝火。',
+    '困意来了别赶它，它可能是来接你下班的。',
+    '深夜的世界很安静，安静得能听见自己原谅自己。',
+    '每一盏没关的灯，背后都有一个没说完的故事。',
+    '星星不说话，但它们一直在线。',
+    '熬过这段的人，都值得一句「辛苦了」。'
+  ];
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var RADIUS = 74;            // 手电光圈半径
+  var sentences = [];         // {x, y, text, found}
+  var foundN = 0;
+  var mouse = { x: -999, y: -999, on: false };
+  var finished = false;
+
+  function size() {
+    var w = document.querySelector('.dark').clientWidth;
+    var h = Math.round(w * 1.25);   // 竖长黑屋
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function scatter() {
+    sentences = [];
+    foundN = 0;
+    finished = false;
+    document.getElementById('found').textContent = '0';
+    document.getElementById('rehide').classList.remove('show');
+    var w = cv.clientWidth, h = cv.clientHeight;
+    for (var i = 0; i < SENTENCES.length; i++) {
+      // 分 8 行布点，行内随机横向位置，避免重叠
+      var row = Math.floor(i / 2);
+      var col = i % 2;
+      sentences.push({
+        x: w * (0.16 + col * 0.5) + (Math.random() - 0.5) * w * 0.14,
+        y: h * (0.1 + row * 0.115) + (Math.random() - 0.5) * h * 0.05,
+        text: SENTENCES[i],
+        found: false
+      });
+    }
+    draw();
+  }
+
+  function draw() {
+    var w = cv.clientWidth, h = cv.clientHeight;
+    // 黑底
+    ctx.fillStyle = '#04060c';
+    ctx.fillRect(0, 0, w, h);
+
+    // 光圈：黑色遮罩 + 指针处挖洞
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    if (mouse.on) {
+      var g = ctx.createRadialGradient(mouse.x, mouse.y, RADIUS * 0.25, mouse.x, mouse.y, RADIUS);
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(1, 'rgba(0,0,0,0.55)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 剩余遮罩层（半透明黑）
+    ctx.fillStyle = 'rgba(2, 4, 9, 0.93)';
+    ctx.fillRect(0, 0, w, h);
+
+    // 再挖一次光圈
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    if (mouse.on) {
+      var g2 = ctx.createRadialGradient(mouse.x, mouse.y, RADIUS * 0.3, mouse.x, mouse.y, RADIUS);
+      g2.addColorStop(0, 'rgba(0,0,0,1)');
+      g2.addColorStop(1, 'rgba(0,0,0,0.5)');
+      ctx.fillStyle = g2;
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 已照亮的句子画在最上层常显（照亮哪句，哪句就归你）
+    ctx.textAlign = 'center';
+    for (var i = 0; i < sentences.length; i++) {
+      var s = sentences[i];
+      if (!s.found) continue;
+      var underLight = mouse.on && Math.sqrt(Math.pow(s.x - mouse.x, 2) + Math.pow(s.y - mouse.y, 2)) < RADIUS;
+      ctx.fillStyle = underLight ? 'rgba(233, 228, 211, 0.96)' : 'rgba(233, 228, 211, 0.45)';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.fillText(s.text, s.x, s.y);
+    }
+
+    // 光圈边缘一圈暖光
+    if (mouse.on) {
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, RADIUS, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(242, 199, 110, 0.25)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  function checkFind() {
+    if (!mouse.on) return;
+    for (var i = 0; i < sentences.length; i++) {
+      var s = sentences[i];
+      if (s.found) continue;
+      var dx = s.x - mouse.x, dy = s.y - mouse.y;
+      if (Math.sqrt(dx * dx + dy * dy) < RADIUS * 0.8) {
+        s.found = true;
+        foundN++;
+        document.getElementById('found').textContent = String(foundN);
+        if (foundN >= SENTENCES.length && !finished) {
+          finished = true;
+          document.getElementById('rehide').classList.add('show');
+        }
+      }
+    }
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var r = cv.getBoundingClientRect();
+    mouse.x = e.clientX - r.left;
+    mouse.y = e.clientY - r.top;
+    mouse.on = true;
+    checkFind();
+    draw();
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    var r = cv.getBoundingClientRect();
+    mouse.x = e.clientX - r.left;
+    mouse.y = e.clientY - r.top;
+    mouse.on = true;
+    checkFind();
+    draw();
+    e.preventDefault();
+  });
+  cv.addEventListener('pointerleave', function () {
+    mouse.on = false;
+    draw();
+  });
+
+  document.getElementById('rehide').addEventListener('click', function () {
+    scatter();
+  });
+
+  window.addEventListener('resize', function () { size(); scatter(); });
+
+  size();
+  scatter();
+})();
+</script>
+</body>
+</html>

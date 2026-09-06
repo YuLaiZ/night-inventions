@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暗房</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .paper {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; }
+
+  .status {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.1em;
+  }
+  .status .num { font-family: var(--mono); color: var(--ice); }
+  .status.done { color: var(--gold); }
+
+  .go-row {
+    margin-top: 14px;
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+  }
+  button.act {
+    display: none;
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 22px;
+    cursor: pointer;
+  }
+  button.act.show { display: inline-block; }
+  button.act:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>暗房</h1>
+  <p class="sub">这里只有一张底片，<em>正在慢慢显影</em>。别催——每一张都只冲一次，冲完就不再来。</p>
+
+  <div class="paper">
+    <canvas id="cv"></canvas>
+  </div>
+  <p class="status" id="status">配药中……</p>
+
+  <div class="go-row">
+    <button class="act" id="again" type="button">换一张底片</button>
+    <button class="act" id="save" type="button">收下这张</button>
+  </div>
+
+  <p class="hint">显影全程在本页完成：离开再回来，它会从你离开的地方继续——照片不会怪你迟到。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var DEVELOP_MS = 45 * 1000;   // 显影时长
+  // 测试钩子：#fast 时 5 秒显影
+  if (window.location.hash === '#fast') {
+    DEVELOP_MS = 5 * 1000;
+    history.replaceState(null, '', window.location.pathname);
+  }
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var startAt = Date.now();
+  var scene = null;
+  var done = false;
+
+  // ── 种子随机 ──
+  function rngOf(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function makeScene() {
+    var r = rngOf(Math.floor(Math.random() * 0xFFFFFF));
+    var ridges = [];
+    var n = 3 + Math.floor(r() * 2);
+    for (var i = 0; i < n; i++) {
+      var pts = [];
+      var yBase = 0.52 + i * (0.36 / n) + r() * 0.05;
+      var amp = 0.16 * (1 - i / n) + 0.03;
+      for (var p = 0; p <= 12; p++) {
+        pts.push(yBase - amp * Math.abs(Math.sin(p * (0.7 + r() * 0.6) + r() * 6)));
+      }
+      ridges.push(pts);
+    }
+    return {
+      moonX: 0.2 + r() * 0.6,
+      moonY: 0.14 + r() * 0.16,
+      moonR: 0.045 + r() * 0.035,
+      stars: (function () {
+        var arr = [];
+        for (var s = 0; s < 40; s++) arr.push([r(), r() * 0.42, 0.4 + r() * 0.8]);
+        return arr;
+      })(),
+      birds: (function () {
+        var arr = [];
+        var bn = Math.floor(r() * 3);
+        for (var b = 0; b < bn; b++) arr.push([0.2 + r() * 0.55, 0.12 + r() * 0.2, 0.02 + r() * 0.012]);
+        return arr;
+      })(),
+      ridges: ridges
+    };
+  }
+
+  function size() {
+    var w = document.querySelector('.paper').clientWidth;
+    var h = Math.round(w * 0.66);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // progress: 0..1 显影程度
+  function draw(progress) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.width / dpr, h = cv.height / dpr;
+    ctx.clearRect(0, 0, w, h);
+    // 底片黑底
+    ctx.fillStyle = '#05070d';
+    ctx.fillRect(0, 0, w, h);
+
+    var g = Math.max(0, Math.min(1, progress));
+    var fade = g * g * (3 - 2 * g);   // smoothstep，前慢中快后稳
+
+    ctx.save();
+    ctx.globalAlpha = fade;
+
+    // 星
+    ctx.fillStyle = '#c8d4ea';
+    for (var i = 0; i < scene.stars.length; i++) {
+      var st = scene.stars[i];
+      ctx.globalAlpha = fade * st[2] * 0.8;
+      ctx.fillRect(st[0] * w, st[1] * h, 1.4, 1.4);
+    }
+    ctx.globalAlpha = fade;
+
+    // 月
+    ctx.fillStyle = '#e9e4d3';
+    ctx.beginPath();
+    ctx.arc(scene.moonX * w, scene.moonY * h, scene.moonR * w, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 山脊（由远及近，颜色渐深）
+    for (var r = 0; r < scene.ridges.length; r++) {
+      var pts = scene.ridges[r];
+      var shade = 0.16 + (r / scene.ridges.length) * 0.24;
+      ctx.fillStyle = 'rgba(140, 160, 200, ' + shade + ')';
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (var p = 0; p < pts.length; p++) {
+        ctx.lineTo(p / (pts.length - 1) * w, pts[p] * h);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 飞鸟两笔
+    ctx.strokeStyle = '#0c101c';
+    ctx.lineWidth = Math.max(1.2, w * 0.004);
+    ctx.lineCap = 'round';
+    for (var b = 0; b < scene.birds.length; b++) {
+      var bd = scene.birds[b];
+      var bx = bd[0] * w, by = bd[1] * h, s = bd[2] * w;
+      ctx.beginPath();
+      ctx.moveTo(bx - s, by + s * 0.5);
+      ctx.quadraticCurveTo(bx - s * 0.4, by - s * 0.4, bx, by);
+      ctx.quadraticCurveTo(bx + s * 0.4, by - s * 0.4, bx + s, by + s * 0.5);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // 显影颗粒：越到后期颗粒越少
+    if (g < 1) {
+      var grains = Math.floor((1 - g) * 900);
+      ctx.fillStyle = 'rgba(200, 210, 230, 0.12)';
+      for (var gr = 0; gr < grains; gr++) {
+        ctx.fillRect(Math.random() * w, Math.random() * h, 1, 1);
+      }
+      // 显影中的暗角呼吸
+      var vg = ctx.createRadialGradient(w / 2, h / 2, w * 0.2, w / 2, h / 2, w * 0.75);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,' + (0.5 - fade * 0.35) + ')');
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  function tick() {
+    var g = (Date.now() - startAt) / DEVELOP_MS;   // 墙钟推算
+    var status = document.getElementById('status');
+    if (g >= 1) {
+      if (!done) {
+        done = true;
+        draw(1);
+        status.textContent = '照片冲好了。这一张，全世界的暗房里仅此一张。';
+        status.classList.add('done');
+        document.getElementById('again').classList.add('show');
+        document.getElementById('save').classList.add('show');
+      }
+      return;
+    }
+    status.classList.remove('done');
+    document.getElementById('again').classList.remove('show');
+    document.getElementById('save').classList.remove('show');
+    status.innerHTML = '显影中 <span class="num">' + Math.floor(g * 100) + '%</span> · 别开灯';
+    draw(g);
+  }
+
+  function start() {
+    size();
+    scene = makeScene();
+    startAt = Date.now();
+    done = false;
+    // 显影是慢过程：定时器驱动（后台被节流也照走，进度由墙钟保证）
+    if (window.__drTimer) clearInterval(window.__drTimer);
+    window.__drTimer = setInterval(tick, 200);
+    tick();
+  }
+
+  // 兜底：回前台/窗口聚焦时立即校正显影进度与状态栏
+  window.addEventListener('focus', function () { tick(); });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) tick();
+  });
+
+  document.getElementById('again').addEventListener('click', start);
+  document.getElementById('save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'darkroom-' + Date.now() + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+
+  window.addEventListener('resize', function () {
+    size();
+    var g = Math.min(1, (Date.now() - startAt) / DEVELOP_MS);
+    draw(g);
+  });
+
+  start();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜送分考</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .paper {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(14px, 3vw, 22px);
+  }
+  .paper .exam-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.12em;
+    border-bottom: 1px dashed var(--line);
+    padding-bottom: 8px;
+  }
+  .q { margin-top: 16px; }
+  .q .q-title { color: var(--ink-strong); font-size: 15.5px; }
+  .q .opts { margin-top: 8px; display: grid; gap: 6px; }
+  .q .opts button {
+    font-family: var(--sans);
+    font-size: 14.5px;
+    text-align: left;
+    color: var(--ink);
+    background: rgba(156, 200, 255, 0.04);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+  }
+  .q .opts button:hover { border-color: var(--ice); }
+  .q .opts button.sel { border-color: var(--gold); color: var(--gold); background: rgba(242, 199, 110, 0.08); }
+
+  .go-row { margin-top: 18px; text-align: center; }
+  button.submit {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 30px;
+    cursor: pointer;
+  }
+  button.submit:hover { filter: brightness(1.08); }
+
+  .result { margin-top: 16px; text-align: center; min-height: 3.4em; }
+  .result .score { font-family: var(--mono); font-size: 30px; color: var(--gold); }
+  .result .words { margin-top: 4px; color: var(--ink-strong); font-size: 15.5px; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜送分考</h1>
+  <p class="sub">三道题，全是送分题。<em>怎么答都是满分</em>——但还是要认真答，仪式感这东西很灵的。</p>
+
+  <div class="paper">
+    <div class="exam-head">
+      <span>夜班附属小学 · 随堂测</span>
+      <span>满分 <span class="num">100</span></span>
+    </div>
+
+    <div class="q">
+      <p class="q-title">一、今晚的你，伟大吗？</p>
+      <div class="opts" data-q="0">
+        <button type="button">伟大，不用问</button>
+        <button type="button">还行，正伟大着</button>
+        <button type="button">快了，正在伟大路上</button>
+      </div>
+    </div>
+
+    <div class="q">
+      <p class="q-title">二、明天的事，归谁管？</p>
+      <div class="opts" data-q="1">
+        <button type="button">明天的我</button>
+        <button type="button">也是明天的我</button>
+        <button type="button">反正不是现在的我</button>
+      </div>
+    </div>
+
+    <div class="q">
+      <p class="q-title">三、此刻最正确的下一步是？</p>
+      <div class="opts" data-q="2">
+        <button type="button">交卷</button>
+        <button type="button">交卷然后去睡</button>
+        <button type="button">交完卷就睡，不许刷手机</button>
+      </div>
+    </div>
+
+    <div class="go-row">
+      <button class="submit" id="submit" type="button">交卷</button>
+    </div>
+    <div class="result" id="result">
+      <div class="score"><span id="score">--</span> 分</div>
+      <p class="words" id="words"></p>
+    </div>
+  </div>
+
+  <p class="hint">本卷采用夜班附属小学特批评分标准：认真生活的人，一律满分。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var answered = [false, false, false];
+  var submitted = false;
+
+  document.querySelectorAll('.opts').forEach(function (group) {
+    var qIdx = +group.getAttribute('data-q');
+    group.querySelectorAll('button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (submitted) return;
+        group.querySelectorAll('button').forEach(function (b) { b.classList.remove('sel'); });
+        btn.classList.add('sel');
+        answered[qIdx] = true;
+      });
+    });
+  });
+
+  $('submit').addEventListener('click', function () {
+    if (submitted) return;
+    var all = answered.every(function (a) { return a; });
+    if (!all) {
+      $('score').textContent = '--';
+      $('words').textContent = '还有题没答。送分题也要伸手接一下。';
+      return;
+    }
+    submitted = true;
+    $('score').textContent = '100';
+    $('words').textContent = '满分！恭喜你从夜班附属小学光荣毕业。校长（一只路过的猫）建议：就此打住，去睡觉。';
+    this.textContent = '已交卷';
+  });
+})();
+</script>
+</body>
+</html>

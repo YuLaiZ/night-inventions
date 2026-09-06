@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>织一条围巾</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .loom {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #070a12;
+  }
+  canvas { display: block; width: 100%; }
+
+  .status {
+    margin-top: 12px;
+    font-size: 14px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .status .num { font-family: var(--mono); color: var(--ice); }
+
+  .go-row { margin-top: 14px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  button.knit {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.knit:hover { filter: brightness(1.08); }
+  button.knit:active { transform: scale(0.98); }
+  button.knit:disabled { opacity: 0.45; cursor: default; transform: none; filter: none; }
+  button.act {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 20px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+  button.act.hidden { display: none; }
+
+  .say { margin-top: 10px; color: var(--ink); font-size: 14.5px; min-height: 1.6em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>织一条围巾</h1>
+  <p class="sub">一夜织一行，<em>进度存在这台设备上</em>。织满二十行，这条围巾就是你的了——冬天还远，先织着。</p>
+
+  <div class="loom">
+    <canvas id="cv"></canvas>
+  </div>
+  <p class="status">已织 <span class="num" id="rows">0</span> / 20 行 · 存于本机，关灯也不拆</p>
+
+  <div class="go-row">
+    <button class="knit" id="knit" type="button">织一行</button>
+    <button class="act hidden" id="save" type="button">收下围巾</button>
+    <button class="act hidden" id="reset" type="button">拆了重织</button>
+  </div>
+  <p class="say" id="say"></p>
+
+  <p class="hint">毛线颜色随机，织出来的条纹永远不重样。哪天想起来就回来织一行，它等得起。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var TOTAL = 20;
+  var KEY = 'night-inventions.knit-scarf';
+  var COLORS = ['#e0855a', '#f2c76e', '#9cc8ff', '#8fd9c5', '#c9a6e8', '#edf1fa', '#c7402e', '#a8d977'];
+  var SAYS = [
+    [1, '第一行。万事开头难，围巾除外。'],
+    [5, '五行了。看起来已经很像一条认真的围巾。'],
+    [10, '过半！按这个速度，入冬前正好织完。'],
+    [15, '十五行。可以开始幻想围上它的样子了。'],
+    [19, '倒数第二行。针脚有点紧张，正常。'],
+    [20, '二十行，完工。这条围巾收下了你好多 个夜晚。']
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var rows = [];
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      var list = raw ? JSON.parse(raw) : null;
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+  }
+  function save(list) {
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  function size() {
+    var w = document.querySelector('.loom').clientWidth;
+    var h = Math.round(w * 0.72);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function rowH() {
+    return cv.clientHeight / TOTAL;
+  }
+
+  function drawAll() {
+    var w = cv.clientWidth, h = cv.clientHeight;
+    ctx.fillStyle = '#070a12';
+    ctx.fillRect(0, 0, w, h);
+    var rh = rowH();
+    for (var i = 0; i < rows.length; i++) {
+      ctx.fillStyle = rows[i];
+      ctx.fillRect(0, h - (i + 1) * rh, w, rh - 1);
+    }
+    // 待织区的暗格
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.03)';
+    for (var j = rows.length; j < TOTAL; j++) {
+      ctx.fillRect(0, h - (j + 1) * rh, w, rh - 1);
+    }
+    $('rows').textContent = String(rows.length);
+  }
+
+  function knit() {
+    if (rows.length >= TOTAL) return;
+    rows.push(COLORS[Math.floor(Math.random() * COLORS.length)]);
+    save(rows);
+    drawAll();
+    var n = rows.length;
+    var t = '';
+    for (var i = 0; i < SAYS.length; i++) {
+      if (n >= SAYS[i][0]) t = SAYS[i][1];
+    }
+    $('say').textContent = t;
+    if (n >= TOTAL) {
+      $('knit').disabled = true;
+      $('knit').textContent = '完工';
+      $('save').classList.remove('hidden');
+    }
+  }
+
+  function reset() {
+    rows = [];
+    save(rows);
+    drawAll();
+    $('knit').disabled = false;
+    $('knit').textContent = '织一行';
+    $('save').classList.add('hidden');
+    $('say').textContent = '拆了重织。毛线还是那些毛线，夜还是这个夜。';
+  }
+
+  $('knit').addEventListener('click', knit);
+  $('reset').addEventListener('click', reset);
+  $('save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'scarf-' + Date.now() + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+
+  window.addEventListener('resize', function () { size(); drawAll(); });
+
+  size();
+  rows = load();
+  if (rows.length >= TOTAL) {
+    $('knit').disabled = true;
+    $('knit').textContent = '完工';
+    $('save').classList.remove('hidden');
+  }
+  drawAll();
+})();
+</script>
+</body>
+</html>

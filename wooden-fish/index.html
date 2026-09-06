@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电子木鱼</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .merit {
+    margin-top: clamp(22px, 5vw, 30px);
+    font-family: var(--mono);
+    font-size: clamp(38px, 10vw, 54px);
+    color: var(--ink-strong);
+    line-height: 1.2;
+  }
+  .merit small { font-size: 0.4em; color: var(--ink-dim); }
+
+  .fish {
+    margin-top: clamp(18px, 4vw, 26px);
+    font-size: clamp(88px, 24vw, 130px);
+    line-height: 1.3;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    display: inline-block;
+    transition: transform 0.08s ease;
+  }
+  .fish:active { transform: scale(0.94); }
+  .fish.hit { animation: knock 0.18s ease; }
+  @keyframes knock {
+    0% { transform: scale(1); }
+    40% { transform: scale(0.92) rotate(-2deg); }
+    100% { transform: scale(1); }
+  }
+  .merit-float {
+    position: fixed;
+    pointer-events: none;
+    color: var(--gold);
+    font-size: 15px;
+    letter-spacing: 0.1em;
+    animation: floatup 1.1s ease forwards;
+    z-index: 5;
+  }
+  @keyframes floatup {
+    0% { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-46px); }
+  }
+
+  .combo { margin-top: 10px; color: var(--ice); font-size: 14px; min-height: 1.6em; }
+  .combo .num { font-family: var(--mono); }
+
+  .say { margin-top: 12px; color: var(--ink); font-size: clamp(15px, 4vw, 17px); min-height: 2.6em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>电子木鱼</h1>
+  <p class="sub">睡不着，就敲。<em>功德 +1</em>，连击有惊喜——本木鱼不渡人，只哄人。</p>
+
+  <div class="merit"><span id="merit">0</span><small> 功德</small></div>
+
+  <div class="fish" id="fish">🪵</div>
+  <p class="combo" id="combo"></p>
+
+  <p class="say" id="say">敲下第一声，今晚就算修行了。</p>
+
+  <p class="hint">敲击声为 Web Audio 现场合成，无需信号。功德数据不入库不登账，敲完即忘，心诚则灵。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var merit = 0;
+  var combo = 0;
+  var lastHit = 0;
+
+  var SAYS = [
+    [1,   '敲下第一声，今晚就算修行了。'],
+    [10,  '咚咚有声。佛祖在列表里给你点了个赞。'],
+    [25,  '连击不断，尘埃不生。你这定力，白天要是有就好了。'],
+    [50,  '功德 +50 达成。木鱼开始泛起包浆。'],
+    [100, '百敲之身。本台宣布：你已经敲赢了今晚。'],
+    [200, '两百科。木鱼想说的是：它也困了，但它不说话。'],
+    [350, '……你是认真的吗。这份毅力建议平移到明天的工作上。'],
+    [500, '五百功德圆满。木鱼正式认证你为「夜班护法」。好了，去睡吧，真心的。']
+  ];
+
+  function ensureAudio() {
+    if (!ensureAudio.ctx) {
+      ensureAudio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (ensureAudio.ctx.state === 'suspended') ensureAudio.ctx.resume();
+    return ensureAudio.ctx;
+  }
+
+  function knockSound() {
+    var ctx = ensureAudio();
+    var t = ctx.currentTime;
+    // 敲木鱼：短促的低频正弦 + 快速衰减，带一点泛音
+    var o = ctx.createOscillator();
+    var g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(180, t);
+    o.frequency.exponentialRampToValueAtTime(90, t + 0.09);
+    g.gain.setValueAtTime(0.55, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t); o.stop(t + 0.14);
+  }
+
+  function floatUp(text) {
+    var fish = $('fish');
+    var r = fish.getBoundingClientRect();
+    var el = document.createElement('div');
+    el.className = 'merit-float';
+    el.textContent = text;
+    el.style.left = (r.left + r.width / 2 - 30 + (Math.random() - 0.5) * 60) + 'px';
+    el.style.top = (r.top + 10) + 'px';
+    document.body.appendChild(el);
+    setTimeout(function () { el.remove(); }, 1200);
+  }
+
+  function sayFor(n) {
+    var t = SAYS[0][1];
+    for (var i = 0; i < SAYS.length; i++) {
+      if (n >= SAYS[i][0]) t = SAYS[i][1];
+    }
+    return t;
+  }
+
+  $('fish').addEventListener('click', function (e) {
+    var now = Date.now();
+    combo = (now - lastHit < 1500) ? combo + 1 : 1;
+    lastHit = now;
+    merit++;
+    $('merit').textContent = String(merit);
+    var self = this;
+    self.classList.remove('hit');
+    void self.offsetWidth;
+    self.classList.add('hit');
+    knockSound();
+    floatUp('功德 +1');
+    $('say').textContent = sayFor(merit);
+    $('combo').textContent = combo >= 3 ? '连击 ×' + combo : '';
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜班电报局</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .desk { margin-top: clamp(22px, 5vw, 28px); }
+  .desk label { display: block; font-size: 14px; color: var(--ink-dim); letter-spacing: 0.08em; margin-bottom: 8px; }
+  textarea#msg {
+    width: 100%;
+    min-height: 76px;
+    resize: vertical;
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    outline: none;
+  }
+  textarea#msg:focus { border-color: var(--ice); }
+  .go-row { margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  button.send {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.send:hover { filter: brightness(1.08); }
+  button.send:active { transform: scale(0.98); }
+  .lamp {
+    font-size: 15px;
+    color: var(--ink-dim);
+  }
+  .lamp .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: rgba(156, 200, 255, 0.15);
+    vertical-align: -1px;
+    margin-right: 6px;
+    transition: background 0.06s linear, box-shadow 0.06s linear;
+  }
+  .lamp .dot.on {
+    background: var(--gold);
+    box-shadow: 0 0 8px rgba(242, 199, 110, 0.9);
+  }
+
+  .telegram {
+    display: none;
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(16px, 4vw, 26px);
+  }
+  .telegram.show { display: block; animation: fadein 0.4s ease; }
+  @keyframes fadein { from { opacity: 0.3; } to { opacity: 1; } }
+  .tg-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.15em;
+    border-bottom: 1px dashed var(--line);
+    padding-bottom: 8px;
+  }
+  .tg-head .num { font-family: var(--mono); color: var(--ice); }
+  .tg-body { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 10px 14px; }
+  .tg-char { text-align: center; }
+  .tg-char .code {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--gold);
+    letter-spacing: 0.12em;
+    display: block;
+    min-height: 1.4em;
+  }
+  .tg-char .zi {
+    display: block;
+    font-size: 17px;
+    color: var(--ink-strong);
+  }
+  .tg-char.pending .zi { color: var(--ink-dim); }
+  .tg-foot { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.1em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>夜班电报局</h1>
+  <p class="sub">有些话走网络太快，<em>走电报刚好</em>。写一句话，报务员替你一个字一个字拍出去。</p>
+
+  <div class="desk">
+    <label for="msg">电文（最多 12 字，贵）：</label>
+    <textarea id="msg" maxlength="12" placeholder="例如：记得吃热的"></textarea>
+    <div class="go-row">
+      <button class="send" id="send" type="button">拍发</button>
+      <span class="lamp"><span class="dot" id="lamp"></span><span id="lamp-text">报务员待命</span></span>
+    </div>
+  </div>
+
+  <div class="telegram" id="telegram">
+    <div class="tg-head">
+      <span>夜班电报局 · 深夜特急</span>
+      <span>编号 <span class="num" id="tg-no">——</span></span>
+    </div>
+    <div class="tg-body" id="tg-body"></div>
+    <p class="tg-foot">电码为本局自编「夜班码」，同字必同码；不同字偶有同码，歧义请参照上下文——这是电报员的浪漫。</p>
+  </div>
+
+  <p class="hint">拍发全程自带滴答声效（脑补版）：灯亮一长是「划」，闪一短是「点」。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var lampTimer = null;
+
+  // 「夜班码」：字符哈希 → 3~5 位的点划序列（同字同码，确定性；56 种组合降低撞码）
+  function codeOf(ch) {
+    var h = 0;
+    for (var i = 0; i < ch.length; i++) {
+      h = (h * 131 + ch.charCodeAt(i)) >>> 0;
+    }
+    var len = 3 + (h % 3);            // 3~5 位
+    var s = '';
+    for (var j = 0; j < len; j++) {
+      h = (h * 31 + 7) >>> 0;
+      s += (h % 2 === 0) ? '·' : '—';
+    }
+    return s;
+  }
+
+  function stopLamp() {
+    if (lampTimer) { clearInterval(lampTimer); lampTimer = null; }
+    $('lamp').classList.remove('on');
+    $('lamp-text').textContent = '拍发完毕 · 报务员待命';
+  }
+
+  function send() {
+    var text = $('msg').value.trim();
+    if (!text) {
+      $('lamp-text').textContent = '空白电报发出去也是空白。写两个字。';
+      $('msg').focus();
+      return;
+    }
+    var chars = Array.from(text);
+    var body = $('tg-body');
+    body.innerHTML = '';
+    chars.forEach(function (ch) {
+      var div = document.createElement('div');
+      div.className = 'tg-char pending';
+      div.innerHTML = '<span class="code">' + codeOf(ch) + '</span><span class="zi">' + ch + '</span>';
+      body.appendChild(div);
+    });
+    $('tg-no').textContent = 'NB-' + String(Math.floor(Math.random() * 9000) + 1000);
+    $('telegram').classList.add('show');
+    $('lamp-text').textContent = '拍发中……';
+    $('send').setAttribute('disabled', '');
+
+    // 逐字点亮：每 420ms 拍一个字，灯随「点/划」闪（墙钟驱动，后台冻结回前台自动追平）
+    var idx = 0;
+    if (lampTimer) clearInterval(lampTimer);
+    var seq = [];
+    chars.forEach(function (ch) {
+      codeOf(ch).split('').forEach(function (sym) {
+        seq.push(sym);
+      });
+      seq.push(null);   // 字间停顿
+    });
+    var pos = 0;
+    lampTimer = setInterval(function () {
+      if (pos >= seq.length) {
+        Array.prototype.forEach.call(document.querySelectorAll('.tg-char.pending'), function (el) {
+          el.classList.remove('pending');
+        });
+        stopLamp();
+        return;
+      }
+      var sym = seq[pos++];
+      if (sym === null) {
+        $('lamp').classList.remove('on');
+        // 拍完一个字：把它从 pending 摘掉
+        var pending = document.querySelectorAll('.tg-char.pending');
+        if (pending.length) pending[pending.length - 1].classList.remove('pending');
+      } else {
+        // 灯闪：划长一点（260ms），点短一点（120ms）——用下次切换前的时长近似
+        $('lamp').classList.add('on');
+        $('lamp-text').textContent = sym === '—' ? '划——' : '点 ·';
+      }
+    }, 200);
+  }
+
+  $('send').addEventListener('click', send);
+  $('msg').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  // 兜底：回前台/聚焦时若拍发未完，直接跳到完成态（电报已拍出去了）
+  function settleIfSending() {
+    if (lampTimer) {
+      Array.prototype.forEach.call(document.querySelectorAll('.tg-char.pending'), function (el) {
+        el.classList.remove('pending');
+      });
+      stopLamp();
+      $('send').removeAttribute('disabled');
+    }
+  }
+  window.addEventListener('focus', settleIfSending);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) settleIfSending();
+  });
+})();
+</script>
+</body>
+</html>

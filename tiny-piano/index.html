@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小琴键</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .keys {
+    margin-top: clamp(22px, 5vw, 30px);
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+  }
+  button.key {
+    flex: 1;
+    max-width: 66px;
+    aspect-ratio: 1 / 1.35;
+    border: 1px solid var(--line);
+    border-radius: 0 0 10px 10px;
+    background: linear-gradient(180deg, rgba(156, 200, 255, 0.08), rgba(156, 200, 255, 0.02));
+    color: var(--ink-dim);
+    font-family: var(--sans);
+    font-size: 12px;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.1s ease, color 0.1s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button.key .cn { display: block; font-size: 15px; color: var(--ink-strong); margin-top: 14%; }
+  button.key .kb { display: block; font-family: var(--mono); font-size: 11px; margin-top: 4px; }
+  button.key.playing {
+    background: linear-gradient(180deg, rgba(242, 199, 110, 0.35), rgba(242, 199, 110, 0.1));
+    color: var(--gold);
+    transform: translateY(2px);
+  }
+  .first-tip { margin-top: 14px; font-size: 13px; color: var(--ink-dim); }
+
+  .melody-row { margin-top: clamp(18px, 4vw, 24px); }
+  .melody-row .lab { font-size: 13px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  button.play-melody {
+    margin-top: 8px;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  button.play-melody:hover { border-color: var(--ice); }
+  button.play-melody:disabled { opacity: 0.45; cursor: default; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>小琴键</h1>
+  <p class="sub">八枚键，五声音阶，怎么按都<em>不成曲错</em>。弹一句给今晚听——声音全部现场合成。</p>
+
+  <div class="keys" id="keys"></div>
+  <p class="first-tip" id="tip">点键或按键盘 1–8。第一次点按后声音才会醒来（浏览器规矩）。</p>
+
+  <div class="melody-row">
+    <p class="lab">不会弹？本台备了一段深夜小调：</p>
+    <button class="play-melody" id="melody" type="button">替你弹一段</button>
+  </div>
+
+  <p class="hint">五声音阶的秘密：随便乱按也像模像样。这是老祖宗留给睡不着的人的温柔。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  // 五声音阶（宫商角徵羽）两个八度：C D E G A
+  var NOTES = [
+    { cn: '宫', freq: 261.63 },
+    { cn: '商', freq: 293.66 },
+    { cn: '角', freq: 329.63 },
+    { cn: '徵', freq: 392.00 },
+    { cn: '羽', freq: 440.00 },
+    { cn: '高宫', freq: 523.25 },
+    { cn: '高商', freq: 587.33 },
+    { cn: '高角', freq: 659.25 }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var audio = null;
+  var master = null;
+
+  function ensureAudio() {
+    if (!audio) {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      master = audio.createGain();
+      master.gain.value = 0.5;
+      master.connect(audio.destination);
+    }
+    if (audio.state === 'suspended') audio.resume();
+    return audio;
+  }
+
+  function playNote(freq, when, dur) {
+    var ctx = ensureAudio();
+    var t = (typeof when === 'number') ? when : ctx.currentTime;
+    var d = dur || 0.9;
+    // 双振子：基音 + 八度泛音，音色更「叮」
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    var o1 = ctx.createOscillator();
+    o1.type = 'sine';
+    o1.frequency.value = freq;
+    var o2 = ctx.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.value = freq * 2;
+    var g2 = ctx.createGain();
+    g2.gain.value = 0.25;
+    o1.connect(g); o2.connect(g2); g2.connect(g);
+    g.connect(master);
+    o1.start(t); o2.start(t);
+    o1.stop(t + d + 0.05); o2.stop(t + d + 0.05);
+  }
+
+  var keysEl = $('keys');
+  NOTES.forEach(function (n, i) {
+    var b = document.createElement('button');
+    b.className = 'key';
+    b.setAttribute('data-i', i);
+    b.innerHTML = '<span class="cn">' + n.cn + '</span><span class="kb">' + (i + 1) + '</span>';
+    b.addEventListener('click', function () { strike(i); });
+    keysEl.appendChild(b);
+  });
+
+  function strike(i) {
+    ensureAudio();
+    playNote(NOTES[i].freq);
+    var b = keysEl.children[i];
+    b.classList.add('playing');
+    setTimeout(function () { b.classList.remove('playing'); }, 180);
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var i = '12345678'.indexOf(e.key);
+    if (i >= 0 && i < NOTES.length) strike(i);
+  });
+
+  // 深夜小调：宫 角 徵 角 宫 羽 徵 宫（预置旋律，逐音播放）
+  var MELODY = [0, 2, 3, 2, 0, 4, 3, 0, 1, 2, 0];
+  $('melody').addEventListener('click', function () {
+    var ctx = ensureAudio();
+    var t0 = ctx.currentTime + 0.05;
+    MELODY.forEach(function (idx, k) {
+      playNote(NOTES[idx].freq, t0 + k * 0.42, 0.55);
+      // 键位联动视觉
+      setTimeout((function (i2) {
+        return function () {
+          var b = keysEl.children[i2];
+          b.classList.add('playing');
+          setTimeout(function () { b.classList.remove('playing'); }, 160);
+        };
+      })(idx), k * 420);
+    });
+    var self = this;
+    self.disabled = true;
+    setTimeout(function () { self.disabled = false; }, MELODY.length * 420 + 400);
+  });
+})();
+</script>
+</body>
+</html>

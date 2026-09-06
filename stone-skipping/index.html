@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打水漂</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .lake {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+  }
+  canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; }
+
+  .score-row {
+    margin-top: 12px;
+    display: flex;
+    justify-content: center;
+    gap: clamp(18px, 5vw, 34px);
+    font-size: 14px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .score-row .num { font-family: var(--mono); color: var(--ice); font-size: 16px; }
+
+  .verdict { margin-top: 8px; color: var(--ink-strong); font-size: clamp(15px, 4vw, 17px); min-height: 1.6em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>打水漂</h1>
+  <p class="sub">在水面上<em>按住然后快速一划</em>——滑得越快，石子蹦得越远。看看今晚你能漂几下。</p>
+
+  <div class="lake">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="score-row">
+    <span>本局水漂 <span class="num" id="skips">--</span> 次</span>
+    <span>今晚最佳 <span class="num" id="best">0</span> 次</span>
+  </div>
+  <p class="verdict" id="verdict">拿起石子，从左往右快快划一道。</p>
+
+  <p class="hint">本湖为像素湖，深不见底但永不干涸；石子无限量供应，捡起来还能再扔。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var best = 0;
+  var ripples = [];    // {x, y, r, a}
+  var stone = null;    // 飞行中的石子动画（墙钟驱动）
+
+  function size() {
+    var w = document.querySelector('.lake').clientWidth;
+    var h = Math.round(w * 0.56);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawBase();
+  }
+
+  function drawBase() {
+    var w = cv.clientWidth, h = cv.clientHeight;
+    var grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#0a1222');
+    grad.addColorStop(0.42, '#0d1626');
+    grad.addColorStop(0.42, '#0e1c30');
+    grad.addColorStop(1, '#081222');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    // 水面线
+    ctx.strokeStyle = 'rgba(156, 200, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.42);
+    ctx.lineTo(w, h * 0.42);
+    ctx.stroke();
+    // 月亮倒影碎光
+    ctx.fillStyle = 'rgba(233, 228, 211, 0.12)';
+    for (var i = 0; i < 14; i++) {
+      ctx.fillRect(w * 0.72 + (Math.random() - 0.5) * 60, h * 0.5 + i * (h * 0.03), 6 + Math.random() * 10, 1.4);
+    }
+    // 已有涟漪
+    for (var r = 0; r < ripples.length; r++) {
+      drawRipple(ripples[r]);
+    }
+    // 飞行石子
+    if (stone) {
+      ctx.beginPath();
+      ctx.ellipse(stone.x, stone.y, 5, 2.2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#8a93a8';
+      ctx.fill();
+    }
+  }
+
+  function drawRipple(rp) {
+    ctx.strokeStyle = 'rgba(156, 200, 255, ' + rp.a + ')';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(rp.x, rp.y, rp.r, rp.r * 0.32, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  var animating = false;
+  function animate() {
+    if (animating) return;
+    animating = true;
+    var lastT = Date.now();
+    (function frame() {
+      var now = Date.now();
+      var dt = Math.min(50, now - lastT);
+      lastT = now;
+      var alive = false;
+      for (var i = 0; i < ripples.length; i++) {
+        var rp = ripples[i];
+        if (rp.a > 0.02) { rp.r += 26 * dt / 1000; rp.a -= 0.5 * dt / 1000; alive = true; }
+      }
+      ripples = ripples.filter(function (rp) { return rp.a > 0.02; });
+      var stoneAlive = stone && stone.t < 1;
+      drawBase();
+      if (stone && stone.t < 1) {
+        stone.t += dt / stone.dur;
+        var x = stone.x0 + (stone.x1 - stone.x0) * stone.t;
+        // 弹跳弧线
+        var bounceH = 26 * Math.pow(1 - stone.t, 0.6);
+        var seg = (stone.t * stone.skips) % 1;
+        var y = stone.y - Math.abs(Math.sin(seg * Math.PI)) * bounceH;
+        ctx.beginPath();
+        ctx.ellipse(x, y, 5, 2.2, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#8a93a8';
+        ctx.fill();
+        alive = true;
+      } else if (stone) {
+        stone = null;
+      }
+      if (alive) requestAnimationFrame(frame);
+      else { drawBase(); animating = false; }
+    })();
+  }
+
+  // 从 (sx, sy) 划到 (ex, ey)：速度决定水漂次数
+  function throwStone(sx, sy, ex, ey, ms) {
+    var speed = Math.abs(ex - sx) / Math.max(30, ms);   // px/ms
+    var skips = Math.max(1, Math.min(12, Math.round(speed * 1.9)));
+    var w = cv.clientWidth, h = cv.clientHeight;
+    var y0 = h * 0.52;
+    ripples = [];
+    for (var i = 0; i < skips; i++) {
+      var rp = { x: w * 0.16 + (i + 0.6) / skips * w * 0.62, y: h * (0.56 + (i % 3) * 0.09), r: 4, a: 0.8 };
+      ripples.push(rp);
+    }
+    stone = { x0: w * 0.08, x1: w * 0.92, y: y0, t: 0, dur: 600 + skips * 120, skips: skips };
+    // 结算
+    best = Math.max(best, skips);
+    document.getElementById('skips').textContent = String(skips);
+    document.getElementById('best').textContent = String(best);
+    var v = document.getElementById('verdict');
+    if (skips >= 10) v.textContent = '水花王！这石子在你手里是活的。';
+    else if (skips >= 7) v.textContent = '好身手。湖面都被你打出了节奏感。';
+    else if (skips >= 4) v.textContent = '标准水漂。稳、准、不狠——狠劲儿留给明天。';
+    else v.textContent = '石子表示它尽力了。下次出手再快一点点。';
+    animate();
+  }
+
+  var drag = null;
+  cv.addEventListener('pointerdown', function (e) {
+    drag = { x: e.clientX, y: e.clientY, t: Date.now() };
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (drag && !drag.ex) { drag.ex = e.clientX; drag.ey = e.clientY; }
+  });
+  cv.addEventListener('pointerup', function (e) {
+    if (!drag) return;
+    var dx = e.clientX - drag.x;
+    var ms = Date.now() - drag.t;
+    if (dx > 30 && ms < 2000) {
+      throwStone(drag.x, drag.y, e.clientX, e.clientY, ms);
+    } else if (dx <= 30 && ms < 600) {
+      // 轻点也扔一个低速的
+      throwStone(e.clientX - 120, e.clientY, e.clientX, e.clientY, 700);
+    }
+    drag = null;
+  });
+
+  window.addEventListener('resize', function () {
+    ripples = [];
+    drawBase();
+  });
+
+  size();
+})();
+</script>
+</body>
+</html>

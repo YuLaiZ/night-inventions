@@ -150,7 +150,7 @@
     <p class="go-note" id="go-note"></p>
   </div>
 
-  <p class="stats">已记 <span class="num" id="count">0</span> 天 · 最近一年：</p>
+  <p class="stats">共记 <span class="num" id="count">0</span> 天 · 最近 210 天：</p>
   <div class="year" id="year"></div>
   <p class="legend">描金的一格是今天 · 亮着的是已经收留的日子</p>
 
@@ -190,7 +190,8 @@
     year.innerHTML = '';
     var today = new Date();
     var todayKey = dayKey(today);
-    var cells = 0;
+    // 统计为全部记录数（格子只展示最近 210 天，更早的收进抽屉）
+    $('count').textContent = String(Object.keys(diary).length);
     for (var i = SPAN - 1; i >= 0; i--) {
       var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
       var k = dayKey(d);
@@ -200,14 +201,12 @@
         cell.classList.add('has');
         cell.textContent = diary[k];
         cell.title = k + ' · ' + diary[k];
-        cells++;
       } else if (i === 0) {
         cell.title = k + ' · 还空着';
       }
       if (i === 0) cell.classList.add('today');
       year.appendChild(cell);
     }
-    $('count').textContent = String(cells);
   }
 
   $('drop').addEventListener('click', function () {

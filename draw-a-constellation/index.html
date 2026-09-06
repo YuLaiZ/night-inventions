@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>画一个星座</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .sky {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; }
+
+  .name-row {
+    margin-top: 14px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+  }
+  input#cname {
+    flex: 1;
+    min-width: 140px;
+    max-width: 260px;
+    font-family: var(--sans);
+    font-size: 15px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    outline: none;
+  }
+  input#cname:focus { border-color: var(--ice); }
+  button.act {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 20px;
+    cursor: pointer;
+  }
+  button.act:hover { border-color: var(--ice); }
+  button.act.primary {
+    color: var(--bg-0);
+    background: var(--gold);
+    border-color: var(--gold);
+  }
+  .tip { margin-top: 10px; text-align: center; font-size: 13px; color: var(--ink-dim); min-height: 1.5em; }
+
+  .cert {
+    display: none;
+    margin-top: clamp(18px, 4vw, 24px);
+    text-align: center;
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    padding: clamp(14px, 3vw, 22px);
+  }
+  .cert.show { display: block; animation: fadein 0.5s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  .cert .c-name { color: var(--gold); font-size: clamp(19px, 5vw, 24px); letter-spacing: 0.2em; }
+  .cert .c-line { margin-top: 8px; color: var(--ink); font-size: 14.5px; }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>画一个星座</h1>
+  <p class="sub">夜空已经撒好了星。<em>依次点亮三到七颗</em>，连成线，再取个名字——从此天上多了一个座。</p>
+
+  <div class="sky">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="name-row">
+    <input id="cname" maxlength="8" placeholder="给星座取个名（可留空）" autocomplete="off">
+    <button class="act primary" id="done" type="button">命名成座</button>
+    <button class="act" id="reset" type="button">重撒星空</button>
+  </div>
+  <p class="tip" id="tip">点亮第一颗星，就从它开始连。</p>
+
+  <div class="cert" id="cert">
+    <div class="c-name" id="c-name"></div>
+    <p class="c-line" id="c-line"></p>
+  </div>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var STARS_N = 46;
+  var stars = [];        // 背景 + 可选亮星
+  var picked = [];       // 依次点亮的星索引
+  var hoverIdx = -1;
+
+  function size() {
+    var w = document.querySelector('.sky').clientWidth;
+    var h = Math.round(w * 0.72);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function scatter() {
+    stars = [];
+    var w = cv.clientWidth, h = cv.clientHeight;
+    for (var i = 0; i < STARS_N; i++) {
+      // 前 24 颗是可点的大亮星（网格抖动分布，避免扎堆），其余是背景小星
+      var big = i < 24;
+      var x, y;
+      if (big) {
+        var col = i % 6, row = Math.floor(i / 6);
+        x = (col + 0.2 + Math.random() * 0.6) / 6 * w;
+        y = (row + 0.2 + Math.random() * 0.6) / 4 * h;
+      } else {
+        x = Math.random() * w;
+        y = Math.random() * h;
+      }
+      stars.push({ x: x, y: y, big: big, r: big ? 2.6 : 0.8 + Math.random() * 0.9 });
+    }
+    picked = [];
+    draw();
+  }
+
+  function draw() {
+    var w = cv.clientWidth, h = cv.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#05070d';
+    ctx.fillRect(0, 0, w, h);
+    // 背景（含全部星）
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = s.big ? 'rgba(233, 228, 211, 0.95)' : 'rgba(200, 210, 230, 0.35)';
+      ctx.fill();
+    }
+    // 连线
+    if (picked.length >= 2) {
+      ctx.strokeStyle = 'rgba(242, 199, 110, 0.75)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (var j = 0; j < picked.length; j++) {
+        var st = stars[picked[j]];
+        if (j === 0) ctx.moveTo(st.x, st.y); else ctx.lineTo(st.x, st.y);
+      }
+      ctx.stroke();
+    }
+    // 已点亮的星描金
+    for (var k = 0; k < picked.length; k++) {
+      var ps = stars[picked[k]];
+      ctx.beginPath();
+      ctx.arc(ps.x, ps.y, ps.r + 2.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(242, 199, 110, 0.9)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+    // 悬停提示圈
+    if (hoverIdx >= 0 && picked.indexOf(hoverIdx) === -1) {
+      var hs = stars[hoverIdx];
+      ctx.beginPath();
+      ctx.arc(hs.x, hs.y, hs.r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(156, 200, 255, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  function starAt(x, y) {
+    var best = -1, bestD = 26 * 26;
+    for (var i = 0; i < stars.length; i++) {
+      if (!stars[i].big) continue;
+      var dx = stars[i].x - x, dy = stars[i].y - y;
+      var d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  function pos(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var p = pos(e);
+    var idx = starAt(p.x, p.y);
+    if (idx < 0) return;
+    var at = picked.indexOf(idx);
+    if (at !== -1) {
+      // 点已选的星：回退到该星（撤销其后连线）
+      picked = picked.slice(0, at + 1);
+      tip('回退到这一颗，后面的线已拆掉。');
+    } else if (picked.length >= 7) {
+      tip('七颗封顶——星座讲究留白。');
+    } else {
+      picked.push(idx);
+      tip(picked.length === 1 ? '好，就从这颗开始。继续点亮下一颗。'
+        : picked.length < 7 ? '已连 ' + picked.length + ' 颗。可以继续，也可以命名了。'
+        : '七颗连成！取个名字吧。');
+    }
+    draw();
+    e.preventDefault();
+  });
+
+  cv.addEventListener('pointermove', function (e) {
+    var p = pos(e);
+    hoverIdx = starAt(p.x, p.y);
+    draw();
+  });
+
+  function tip(t) { document.getElementById('tip').textContent = t; }
+
+  document.getElementById('reset').addEventListener('click', function () {
+    scatter();
+    document.getElementById('cert').classList.remove('show');
+    tip('星空重撒完毕。点亮第一颗，就从它开始连。');
+  });
+
+  document.getElementById('done').addEventListener('click', function () {
+    if (picked.length < 3) {
+      tip('至少点亮三颗，才够资格叫星座。');
+      return;
+    }
+    var name = document.getElementById('cname').value.trim() || '无名座';
+    var now = new Date();
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    document.getElementById('c-name').textContent = name;
+    document.getElementById('c-line').textContent =
+      picked.length + ' 星连线 · ' + now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) +
+      ' 授座 · 从此它每晚都在那里';
+    document.getElementById('cert').classList.add('show');
+    // 导出星座证（天空 + 证书文字一并画进画布）
+    var exportCv = document.createElement('canvas');
+    exportCv.width = cv.width;
+    exportCv.height = cv.height + Math.round(cv.clientWidth * 0.16 * (window.devicePixelRatio || 1));
+    var ec = exportCv.getContext('2d');
+    ec.fillStyle = '#05070d';
+    ec.fillRect(0, 0, exportCv.width, exportCv.height);
+    ec.drawImage(cv, 0, 0);
+    ec.fillStyle = '#f2c76e';
+    ec.textAlign = 'center';
+    var dpr = window.devicePixelRatio || 1;
+    ec.font = Math.round(22 * dpr) + 'px system-ui, sans-serif';
+    ec.fillText(name, exportCv.width / 2, cv.height + 30 * dpr);
+    ec.fillStyle = '#c7d0e2';
+    ec.font = Math.round(13 * dpr) + 'px system-ui, sans-serif';
+    ec.fillText(picked.length + ' 星连线 · ' + now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + ' 授座',
+      exportCv.width / 2, cv.height + 58 * dpr);
+    var a = document.createElement('a');
+    a.download = 'constellation-' + Date.now() + '.png';
+    a.href = exportCv.toDataURL('image/png');
+    a.click();
+  });
+
+  window.addEventListener('resize', function () { size(); draw(); });
+
+  size();
+  scatter();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>放风筝</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .sky {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #04060c;
+  }
+  canvas { display: block; width: 100%; }
+
+  .wind-row {
+    margin-top: clamp(16px, 4vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-size: 14px;
+    color: var(--ink-dim);
+  }
+  .wind-row input[type="range"] { width: 200px; accent-color: var(--gold); }
+  .wind-row .num { font-family: var(--mono); color: var(--ice); }
+  .wind-word { margin-top: 6px; font-size: 13px; color: var(--ink-dim); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>放风筝</h1>
+  <p class="sub">不用等天气——<em>风几级你说了算</em>。拖动风杆，看它在夜空里怎么接招。</p>
+
+  <div class="sky">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="wind-row">
+    <span>无风</span>
+    <input type="range" id="wind" min="0" max="10" step="1" value="4">
+    <span>台风</span>
+    <span class="num" id="wind-no">4</span> 级
+  </div>
+  <p class="wind-word" id="wind-word"></p>
+
+  <p class="hint">风筝会自己晃，风大了会翻跟头——它们的心情都写在平衡感里。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var wind = 4;
+  var phase = 0;
+  var last = Date.now();
+
+  var WIND_WORDS = [
+    [0, '无风。风筝表示：那我先躺平了。'],
+    [2, '一级微风。风筝勉强支棱起来，像个刚睡醒的。'],
+    [4, '三级风。教科书级飞行姿态，适合拍照。'],
+    [6, '五级风。风筝开始兴奋，线绷得笔直。'],
+    [8, '七级风。它在跟风搏斗，你在跟线搏斗。'],
+    [10, '九级以上。风筝已进入自主创业阶段，线只是个建议。']
+  ];
+
+  function size() {
+    var w = document.querySelector('.sky').clientWidth;
+    var h = Math.round(w * 0.62);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function draw(now) {
+    var w = cv.clientWidth, h = cv.clientHeight;
+    var grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#05070f');
+    grad.addColorStop(1, '#101a30');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // 少量背景星
+    ctx.fillStyle = 'rgba(200, 210, 230, 0.3)';
+    for (var i = 0; i < 24; i++) {
+      ctx.fillRect(((i * 137) % w), ((i * 89) % (h * 0.5)), 1.2, 1.2);
+    }
+
+    // 风筝几何：锚点在左下，风筝位置随风力上扬、随风晃动
+    var anchorX = w * 0.12, anchorY = h * 0.92;
+    var len = w * 0.62;
+    var sway = Math.sin(phase) * (2 + wind * 1.1);
+    var gust = wind >= 8 ? Math.sin(phase * 3.1) * 10 : 0;
+    var kx = anchorX + Math.cos((-35 - wind * 2.6) * Math.PI / 180) * len + sway + gust;
+    var ky = anchorY + Math.sin((-35 - wind * 2.6) * Math.PI / 180) * len * (1 - wind * 0.012);
+    ky = Math.max(24, ky);
+
+    // 线（二次曲线，风力越大越直）
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(anchorX, anchorY);
+    var bow = Math.sin(phase * 0.7) * (6 + wind * 3);
+    ctx.quadraticCurveTo(anchorX + (kx - anchorX) * 0.5 + bow, (anchorY + ky) / 2 + 14, kx, ky);
+    ctx.stroke();
+
+    // 风筝（菱形，随摆动微倾）
+    ctx.save();
+    ctx.translate(kx, ky);
+    ctx.rotate(Math.sin(phase * 1.3) * (0.05 + wind * 0.02));
+    var k = 16 + wind * 1.2;
+    ctx.fillStyle = '#e0855a';
+    ctx.beginPath();
+    ctx.moveTo(0, -k);
+    ctx.lineTo(k * 0.72, 0);
+    ctx.lineTo(0, k * 1.25);
+    ctx.lineTo(-k * 0.72, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#f2c76e';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(0, -k); ctx.lineTo(0, k * 1.25);
+    ctx.moveTo(-k * 0.72, 0); ctx.lineTo(k * 0.72, 0);
+    ctx.stroke();
+    // 尾巴
+    ctx.strokeStyle = 'rgba(242, 199, 110, 0.7)';
+    ctx.beginPath();
+    ctx.moveTo(0, k * 1.25);
+    for (var t = 1; t <= 4; t++) {
+      ctx.lineTo(-Math.sin(phase * 2 + t) * (4 + wind) * 0.5 + t * -2, k * 1.25 + t * 7);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // 手
+    ctx.fillStyle = 'rgba(199, 208, 226, 0.7)';
+    ctx.beginPath();
+    ctx.arc(anchorX, anchorY, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function loop() {
+    var now = Date.now();
+    phase += (1.4 + wind * 0.22) * (now - last) / 1000;
+    if (phase > Math.PI * 2) phase -= Math.PI * 2;
+    last = now;
+    draw(now);
+    requestAnimationFrame(loop);
+  }
+
+  function wordFor(w) {
+    var t = WIND_WORDS[0][1];
+    for (var i = 0; i < WIND_WORDS.length; i++) {
+      if (w >= WIND_WORDS[i][0]) t = WIND_WORDS[i][1];
+    }
+    return t;
+  }
+
+  document.getElementById('wind').addEventListener('input', function () {
+    wind = +this.value;
+    document.getElementById('wind-no').textContent = String(wind);
+    document.getElementById('wind-word').textContent = wordFor(wind);
+    draw(Date.now());   // 立即重绘（后台冻结时 rAF 不跑，靠这里保证调风有反馈）
+  });
+
+  window.addEventListener('resize', size);
+  document.getElementById('wind-word').textContent = wordFor(wind);
+  size();
+  loop();
+})();
+</script>
+</body>
+</html>

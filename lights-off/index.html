@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>熄灯</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .go-row { margin-top: clamp(26px, 6vw, 36px); }
+  button.switch {
+    font-family: var(--sans);
+    font-size: 15px;
+    letter-spacing: 0.2em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 14px 46px;
+    cursor: pointer;
+  }
+  button.switch:hover { filter: brightness(1.08); }
+  button.switch:active { transform: scale(0.97); }
+
+  body.lightsout {
+    background: #02030a;
+    transition: background 1.6s ease;
+  }
+  .goodnight {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 18px;
+    pointer-events: none;
+    z-index: 3;
+  }
+  body.lightsout .goodnight { display: flex; }
+  .goodnight .gn {
+    color: #d8c9a0;
+    font-size: clamp(19px, 5vw, 26px);
+    letter-spacing: 0.3em;
+    text-indent: 0.3em;
+    opacity: 0;
+    transition: opacity 1.4s ease 0.8s;
+  }
+  body.lightsout .goodnight .gn { opacity: 1; }
+  .goodnight .sub-gn {
+    color: #6b7590;
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    opacity: 0;
+    transition: opacity 1.4s ease 1.6s;
+  }
+  body.lightsout .goodnight .sub-gn { opacity: 1; }
+  .spark {
+    position: fixed;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #f2c76e;
+    box-shadow: 0 0 10px 3px rgba(242, 199, 110, 0.6);
+    pointer-events: none;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 0.8s ease;
+  }
+  body.lightsout .spark { opacity: 1; }
+
+  .lightsout-hide { transition: opacity 0.8s ease; }
+  body.lightsout .lightsout-hide { opacity: 0; pointer-events: none; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <div class="lightsout-hide">
+    <a class="back-home" href="../">← 陈列馆</a>
+
+    <h1>熄灯</h1>
+    <p class="sub">一夜的展会到这里收场。<em>按下开关</em>，替所有小玩意道一声晚安。</p>
+
+    <div class="go-row">
+      <button class="switch" id="switch" type="button">熄 灯</button>
+    </div>
+
+    <p class="hint">熄灯之后只剩一粒星光陪你——它就是本页的全部余电。</p>
+  </div>
+
+  <div class="goodnight">
+    <div class="gn">晚安，今夜值班的都辛苦了。</div>
+    <div class="sub-gn">再按一次开关，灯就回来。</div>
+  </div>
+  <div class="spark" id="spark"></div>
+
+  <footer class="lightsout-hide" style="margin-top: clamp(32px, 6vw, 44px)">
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var off = false;
+  var spark = document.getElementById('spark');
+  var sparkX = window.innerWidth / 2, sparkY = window.innerHeight / 2;
+  var targetX = sparkX, targetY = sparkY;
+
+  document.getElementById('switch').addEventListener('click', function () {
+    off = !off;
+    document.body.classList.toggle('lightsout', off);
+    this.textContent = off ? '开 灯' : '熄 灯';
+  });
+
+  // 微光跟随：弹性追踪（回前台时由 rAF 恢复，位置用墙钟差分自然接续）
+  document.addEventListener('pointermove', function (e) {
+    targetX = e.clientX;
+    targetY = e.clientY;
+  });
+
+  function loop() {
+    sparkX += (targetX - sparkX) * 0.06;
+    sparkY += (targetY - sparkY) * 0.06;
+    spark.style.left = (sparkX - 2.5) + 'px';
+    spark.style.top = (sparkY - 2.5) + 'px';
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

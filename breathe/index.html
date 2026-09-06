@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>呼吸练习</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .orb-zone {
+    margin-top: clamp(20px, 4vw, 26px);
+    height: clamp(240px, 52vw, 320px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .orb {
+    width: clamp(120px, 30vw, 170px);
+    height: clamp(120px, 30vw, 170px);
+    border-radius: 50%;
+    background: radial-gradient(circle at 42% 36%, rgba(156, 200, 255, 0.5), rgba(156, 200, 255, 0.12));
+    box-shadow: 0 0 40px rgba(156, 200, 255, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform linear;
+    will-change: transform;
+  }
+  .orb .inner {
+    font-size: clamp(16px, 4.4vw, 20px);
+    color: var(--ink-strong);
+    letter-spacing: 0.15em;
+  }
+  .orb .inner .num { font-family: var(--mono); }
+
+  .round-line { margin-top: 8px; font-size: 13px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  .round-line .num { font-family: var(--mono); color: var(--ice); }
+
+  .go-row { margin-top: clamp(16px, 3vw, 20px); }
+  button.start {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 28px;
+    cursor: pointer;
+  }
+  button.start:hover { filter: brightness(1.08); }
+  button.start:disabled { opacity: 0.45; cursor: default; }
+  button.stop {
+    display: none;
+    margin-left: 10px;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 10px 20px;
+    cursor: pointer;
+  }
+  button.stop.show { display: inline-block; }
+  button.stop:hover { border-color: var(--ice); }
+
+  .done-line { margin-top: 12px; color: var(--gold); font-size: 15px; min-height: 1.6em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>呼吸练习</h1>
+  <p class="sub">4 秒吸气，7 秒屏住，8 秒呼出——<em>跟着圆圈走四轮</em>。这是给神经系统的强制下班。</p>
+
+  <div class="orb-zone">
+    <div class="orb" id="orb"><span class="inner" id="orb-text">准备</span></div>
+  </div>
+  <p class="round-line">第 <span class="num" id="round">0</span> / 4 轮</p>
+
+  <div class="go-row">
+    <button class="start" id="start" type="button">开始呼吸</button>
+    <button class="stop" id="stop" type="button">停下</button>
+  </div>
+  <p class="done-line" id="done-line"></p>
+
+  <p class="hint">节奏是经典的 4-7-8 放松法。练习中无需闭眼，看着圆圈即可——它替你数拍子。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var PHASES = [
+    { name: '吸气', secs: 4, scale: 1.35 },
+    { name: '屏息', secs: 7, scale: 1.35 },
+    { name: '呼气', secs: 8, scale: 1.0 }
+  ];
+  var ROUNDS = 4;
+  // 测试钩子：#fast 时每阶段 1 秒（节奏感保留）
+  var scale_secs = 1;
+  if (window.location.hash === '#fast') {
+    scale_secs = 4 / 19;   // 19 秒一轮 → 1 秒一轮
+    history.replaceState(null, '', window.location.pathname);
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var orb = $('orb');
+  var running = false;
+  var timer = null;
+
+  function setOrb(text, scaleSecs) {
+    $('orb-text').textContent = text;
+    // 缩放时长随阶段：transition-duration 动态设置
+    orb.style.transitionDuration = scaleSecs + 's';
+    orb.style.transform = 'scale(' + PHASES[0].scale + ')';
+    // 占位，实际 scale 在 phaseTick 里按阶段设置
+  }
+
+  function phaseTick(round, phaseIdx) {
+    if (!running) return;
+    if (round > ROUNDS) {
+      finish();
+      return;
+    }
+    $('round').textContent = String(round);
+    var ph = PHASES[phaseIdx];
+    var secs = ph.secs * scale_secs;
+    $('orb-text').textContent = ph.name + ' ' + Math.ceil(ph.secs * (scale_secs === 1 ? 1 : 1)) + 's';
+    orb.style.transitionDuration = secs + 's';
+    orb.style.transform = 'scale(' + ph.scale + ')';
+    timer = setTimeout(function () {
+      var nextPhase = phaseIdx + 1;
+      var nextRound = round;
+      if (nextPhase >= PHASES.length) { nextPhase = 0; nextRound = round + 1; }
+      phaseTick(nextRound, nextPhase);
+    }, secs * 1000);
+  }
+
+  function finish() {
+    running = false;
+    $('orb-text').textContent = '完成';
+    orb.style.transitionDuration = '1.2s';
+    orb.style.transform = 'scale(1)';
+    $('start').disabled = false;
+    $('stop').classList.remove('show');
+    $('done-line').textContent = '四轮结束。世界还在，你也可以了。';
+  }
+
+  $('start').addEventListener('click', function () {
+    if (running) return;
+    running = true;
+    this.disabled = true;
+    $('stop').classList.add('show');
+    $('done-line').textContent = '';
+    if (timer) clearTimeout(timer);
+    orb.style.transitionDuration = '0.6s';
+    orb.style.transform = 'scale(1)';
+    setTimeout(function () { phaseTick(1, 0); }, 700);
+  });
+
+  $('stop').addEventListener('click', function () {
+    if (timer) clearTimeout(timer);
+    running = false;
+    this.classList.remove('show');
+    $('start').disabled = false;
+    $('orb-text').textContent = '暂停';
+    orb.style.transitionDuration = '1s';
+    orb.style.transform = 'scale(1)';
+  });
+
+  // 兜底：回前台/聚焦时若练习仍在进行，直接视为完成（后台定时器冻结不丢课程）
+  function settleIfRunning() {
+    if (running) finish();
+  }
+  window.addEventListener('focus', settleIfRunning);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) settleIfRunning();
+  });
+})();
+</script>
+</body>
+</html>

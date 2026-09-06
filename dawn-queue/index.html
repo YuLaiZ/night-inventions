@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>等天亮队列</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .queue-count {
+    margin-top: clamp(28px, 6vw, 40px);
+    font-family: var(--mono);
+    font-size: clamp(40px, 11vw, 60px);
+    color: var(--ink-strong);
+    line-height: 1.2;
+  }
+  .queue-count small { font-size: 0.38em; color: var(--ink-dim); }
+  .queue-word { margin-top: 10px; color: var(--ink); font-size: clamp(15px, 4vw, 17px); }
+
+  .track {
+    margin: clamp(22px, 5vw, 30px) auto 0;
+    max-width: 480px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(156, 200, 255, 0.05);
+    height: 14px;
+    overflow: hidden;
+    position: relative;
+  }
+  .track .fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, rgba(242, 199, 110, 0.25), var(--gold));
+    transition: width 0.6s ease;
+  }
+  .track-labels {
+    max-width: 480px;
+    margin: 8px auto 0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .track-labels .num { font-family: var(--mono); }
+
+  .say { margin-top: clamp(20px, 4vw, 26px); color: var(--ink); font-size: clamp(15px, 4vw, 17px); min-height: 2.6em; }
+
+  .fine {
+    margin-top: clamp(24px, 5vw, 30px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>等天亮队列</h1>
+  <p class="sub">天亮前醒着的人，都在这条队里。<em>位置随真实时间前进</em>——太阳一出来，全体解散。</p>
+
+  <div class="queue-count"><span id="ahead">--</span><small> 人排在你前面</small></div>
+  <p class="queue-word" id="queue-word"></p>
+
+  <div class="track"><div class="fill" id="fill" style="width:0%"></div></div>
+  <div class="track-labels">
+    <span>入队 <span class="num">23:00</span></span>
+    <span>日出 <span class="num">06:00</span></span>
+  </div>
+
+  <p class="say" id="say"></p>
+
+  <p class="fine">队伍按此刻钟点排定：几点进来，就排在几点的位置。白天来客请今晚 23:00 再来入队——队伍每晚重排。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var OPEN_MIN = 23 * 60;          // 23:00 入队
+  var DAWN_MIN = 30 * 60;          // 06:00（第二天，即 30*60）
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 测试钩子：#t=HH,MM 模拟指定时刻（平时不影响页面）
+  function nowMinutes() {
+    var m = window.location.hash.match(/^#t=(\d{1,2}),(\d{1,2})$/);
+    if (m) {
+      history.replaceState(null, '', window.location.pathname);
+      return (+m[1]) * 60 + (+m[2]);
+    }
+    var now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  }
+
+  function render() {
+    var cur = nowMinutes();
+    // 夜间窗口：23:00 → 次日 06:00
+    var inNight = cur >= OPEN_MIN || cur < 6 * 60;
+    var elapsed, remain;
+    if (cur >= OPEN_MIN) {
+      elapsed = cur - OPEN_MIN;
+      remain = DAWN_MIN - OPEN_MIN - elapsed;
+    } else if (cur < 6 * 60) {
+      elapsed = cur + (24 * 60 - OPEN_MIN);
+      remain = DAWN_MIN - OPEN_MIN - elapsed;
+    } else {
+      // 白天：队伍已散
+      $('ahead').textContent = '0';
+      $('queue-word').textContent = '队伍散了——天亮那会儿，大家各自回家睡了。';
+      $('say').textContent = '今晚 23:00 重新入队。白天好好过，夜里才有的等。';
+      $('fill').style.width = '100%';
+      return;
+    }
+
+    var total = DAWN_MIN - OPEN_MIN;   // 420 分钟
+    var progress = elapsed / total;
+    // 队列：由时刻确定性给出「你前面的人数」——每分钟约 7 人离队，越接近天亮人越少
+    var ahead = Math.max(0, Math.round(remain / total * 233));
+
+    $('ahead').textContent = String(ahead);
+    $('fill').style.width = Math.round(progress * 100) + '%';
+
+    var word, say;
+    if (remain > 180) {
+      word = '长夜刚开头，队伍还密。';
+      say = '排队的都很默契：不看手机，不看表，偶尔换一下站着的腿。';
+    } else if (remain > 90) {
+      word = '队伍松了些，前面开始有人小声聊天。';
+      say = '聊的都是些小事：晚风、泡面、还有刚才那阵不知道哪里来的桂花香。';
+    } else if (remain > 30) {
+      word = '天边有一点灰了，队伍安静下来。';
+      say = '没人说话。大家都知道快到了，怕一开口，天就急着亮。';
+    } else {
+      word = '就快到了。队伍薄得像一层雾。';
+      say = '最后这一段路，是自己走完的。前面的人会替你看好第一缕光。';
+    }
+    $('queue-word').textContent = word;
+    $('say').textContent = say;
+  }
+
+  render();
+  setInterval(render, 5000);
+  window.addEventListener('focus', render);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) render();
+  });
+})();
+</script>
+</body>
+</html>

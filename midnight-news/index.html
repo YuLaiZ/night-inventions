@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜快讯</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  /* ── 报纸 ── */
+  .paper {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(16px, 4vw, 26px);
+  }
+  .paper .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid var(--gold);
+    padding-bottom: 8px;
+  }
+  .paper .masthead .paper-name {
+    color: var(--ink-strong);
+    font-size: clamp(19px, 5vw, 24px);
+    letter-spacing: 0.2em;
+    font-weight: 700;
+  }
+  .paper .masthead .issue { font-size: 12px; color: var(--ink-dim); }
+  .paper .masthead .issue .num { font-family: var(--mono); }
+  .breaking {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--red, #e08585);
+    letter-spacing: 0.25em;
+  }
+  .headline {
+    margin-top: 6px;
+    color: var(--ink-strong);
+    font-size: clamp(17px, 4.6vw, 21px);
+    line-height: 1.55;
+  }
+  .lead { margin-top: 10px; color: var(--ink); font-size: 15px; }
+  .editor { margin-top: 10px; color: var(--ink-dim); font-size: 13px; }
+  .editor b { color: var(--ice); font-weight: 500; }
+
+  .go-row { margin-top: 16px; text-align: center; }
+  button.next {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 28px;
+    cursor: pointer;
+  }
+  button.next:hover { filter: brightness(1.08); }
+  button.next:active { transform: scale(0.98); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜快讯</h1>
+  <p class="sub">本台只在深夜发稿，只报道<em>没人注意的小事</em>。每刷新一次，世界就多一条新闻。</p>
+
+  <div class="paper">
+    <div class="masthead">
+      <span class="paper-name">夜班晚报</span>
+      <span class="issue">第 <span class="num" id="issue">——</span> 期 · <span class="num" id="time">--:--</span> 发稿</span>
+    </div>
+    <div class="breaking">深夜特快</div>
+    <div class="headline" id="headline">本报正在排版今晚的第一条新闻……</div>
+    <p class="lead" id="lead"></p>
+    <p class="editor" id="editor"></p>
+  </div>
+
+  <div class="go-row">
+    <button class="next" id="next" type="button">再来一条</button>
+  </div>
+
+  <p class="hint">新闻全部现场编发，如有雷同，说明深夜真的很多这样的小事。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var WHO = ['一位不愿透露姓名的夜猫子', '某个刚合上电脑的人', '一名自称在等天亮的读者',
+    '一位刚刚叹完气的邻居', '某个数羊数到一半的人', '一位手机只剩 3% 电的朋友'];
+  var WHAT = [
+    '发现深夜的天空其实不是黑色，是一种很深的蓝',
+    '把手机翻面扣下，坚持了整整四分钟',
+    '听见了冰箱在厨房里独自嗡嗡作响',
+    '成功想起了三天前说过的那句尴尬的话',
+    '给绿植浇了水，并进行了今日唯一一次深度交谈',
+    '数羊数到第 89 只时，突然替羊感到疲惫',
+    '在关灯之后想起了明天要做的事的全部细节',
+    '听到楼下传来一声很轻的车门响，然后世界又静了'
+  ];
+  var EDITOR = [
+    '本台评论：小事不小，它们撑起了夜的一半。',
+    '本台评论：以上内容将在日出后自动失效，请注意查收。',
+    '本台评论：该新闻无人转发，但月亮点了一个赞。',
+    '本台评论：编辑部已就此现象成立深夜研究所（不定期营业）。'
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var issueNo = Math.floor(Math.random() * 900) + 100;
+
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function publish() {
+    var now = new Date();
+    var who = pick(WHO);
+    var what = pick(WHAT);
+    $('headline').textContent = '本台消息：' + who + '，于' + pad(now.getHours()) + ' 时 ' + pad(now.getMinutes()) + ' 分' + what + '。';
+    $('lead').textContent = '据现场观察，事发时四周安静，只有屏幕的光照亮了当事人半张脸。相关方面（也就是当事人自己）表示：反正也睡不着，不如就这样。';
+    $('editor').innerHTML = '<b>' + pick(EDITOR).replace('本台评论：', '') + '</b>';
+    $('issue').textContent = String(issueNo++);
+    $('time').textContent = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  }
+
+  $('next').addEventListener('click', publish);
+  publish();
+})();
+</script>
+</body>
+</html>

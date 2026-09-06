@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多面骰</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .dice-visual {
+    margin-top: clamp(20px, 4vw, 26px);
+    font-family: var(--mono);
+    font-size: clamp(52px, 14vw, 76px);
+    color: var(--ink-strong);
+    line-height: 1.3;
+    min-height: 1.3em;
+  }
+  .dice-note { margin-top: 4px; color: var(--ink-dim); font-size: 14px; min-height: 1.6em; }
+
+  .sides-row {
+    margin-top: clamp(16px, 4vw, 22px);
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  button.side {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--ink-dim);
+    background: rgba(156, 200, 255, 0.05);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+  }
+  button.side.sel { color: var(--bg-0); background: var(--ice); border-color: var(--ice); }
+  button.side:hover { border-color: var(--ice); }
+
+  .go-row { margin-top: clamp(16px, 4vw, 22px); }
+  button.roll {
+    font-family: var(--sans);
+    font-size: 14.5px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 32px;
+    cursor: pointer;
+  }
+  button.roll:hover { filter: brightness(1.08); }
+  button.roll:active { transform: scale(0.98); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>多面骰</h1>
+  <p class="sub">选择困难、谁洗碗、今晚几点睡——<em>交给骰子</em>。它没有立场，只有点数。</p>
+
+  <div class="dice-visual" id="face">?</div>
+  <p class="dice-note" id="note">选择面数，然后掷。</p>
+
+  <div class="sides-row" id="sides">
+    <button class="side" data-s="4" type="button">d4</button>
+    <button class="side sel" data-s="6" type="button">d6</button>
+    <button class="side" data-s="8" type="button">d8</button>
+    <button class="side" data-s="12" type="button">d12</button>
+    <button class="side" data-s="20" type="button">d20</button>
+    <button class="side" data-s="100" type="button">d100</button>
+  </div>
+
+  <div class="go-row">
+    <button class="roll" id="roll" type="button">掷骰</button>
+  </div>
+
+  <p class="hint">本骰子公平公正，随机到令人发指。掷出不理想的结果，属于命运的艺术加工。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var sides = 6;
+
+  document.querySelectorAll('button.side').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('button.side').forEach(function (x) { x.classList.remove('sel'); });
+      this.classList.add('sel');
+      sides = +this.getAttribute('data-s');
+      $('face').textContent = '?';
+      $('note').textContent = '已换上 ' + sides + ' 面骰。';
+    });
+  });
+
+  $('roll').addEventListener('click', function () {
+    var v = 1 + Math.floor(Math.random() * sides);
+    $('face').textContent = String(v);
+    var comment;
+    if (v === sides) comment = '满点！今晚的运气全用在这一下了。';
+    else if (v === 1) comment = '一点。命运表示：它也没办法。';
+    else if (v > sides / 2) comment = '不错，这个点数够你理直气壮。';
+    else comment = '点数平平，但胜在真实。';
+    $('note').textContent = 'd' + sides + ' → ' + v + '。' + comment;
+  });
+})();
+</script>
+</body>
+</html>

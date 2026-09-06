@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜班灯谜</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .lamp-row {
+    margin-top: clamp(20px, 4vw, 28px);
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    font-size: 22px;
+  }
+  .lamp-row .off { opacity: 0.18; }
+  .lamp-row .on { color: var(--gold); text-shadow: 0 0 10px rgba(242, 199, 110, 0.6); }
+
+  .quiz {
+    margin-top: clamp(18px, 4vw, 24px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(16px, 4vw, 26px);
+  }
+  .quiz .no { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.2em; }
+  .quiz .riddle {
+    margin-top: 8px;
+    color: var(--ink-strong);
+    font-size: clamp(16px, 4.4vw, 19px);
+    min-height: 2.8em;
+  }
+  .answer-row { margin-top: 14px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  input#ans {
+    flex: 1;
+    min-width: 130px;
+    max-width: 220px;
+    font-family: var(--sans);
+    font-size: 15px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    outline: none;
+    text-align: center;
+  }
+  input#ans:focus { border-color: var(--ice); }
+  button.guess {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 24px;
+    cursor: pointer;
+  }
+  button.guess:hover { filter: brightness(1.08); }
+  .fb { margin-top: 10px; font-size: 14px; min-height: 1.6em; }
+  .fb.ok { color: var(--gold); }
+  .fb.no { color: var(--red, #e08585); }
+  .next-btn { display: none; margin-top: 8px; }
+  .next-btn.show { display: inline-block; }
+  button.nextq {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  button.nextq:hover { border-color: var(--ice); }
+
+  .final { margin-top: 14px; color: var(--gold); font-size: clamp(16px, 4.4vw, 19px); min-height: 1.6em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>夜班灯谜</h1>
+  <p class="sub">八条物谜，谜底都是<em>夜里常见的东西</em>。答对一条，亮一盏灯——看你能点亮几盏。</p>
+
+  <div class="lamp-row" id="lamps"></div>
+
+  <div class="quiz">
+    <div class="no" id="q-no">谜面 1 / 8</div>
+    <p class="riddle" id="riddle"></p>
+    <div class="answer-row">
+      <input id="ans" maxlength="8" placeholder="谜底是一个词" autocomplete="off">
+      <button class="guess" id="guess" type="button">猜</button>
+    </div>
+    <p class="fb" id="fb"></p>
+    <div class="next-btn" id="next-btn">
+      <button class="nextq" id="nextq" type="button">下一盏灯</button>
+    </div>
+    <p class="final" id="final"></p>
+  </div>
+
+  <p class="hint">答案不限写法，意思对就亮灯。猜不出来也可以直接跳下一盏——灯不会笑话你。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var RIDDLES = [
+    { q: '你走它也走，你停它也停；太阳一出来，它就无影踪。', a: ['影子'] },
+    { q: '对着它喊话，它学你的话；山谷里最爱，多嘴传万家。', a: ['回声', '回音'] },
+    { q: '白天它睡觉，夜里它瞪眼；站在马路旁，一夜不合眼。', a: ['路灯', '路灯灯', '街灯'] },
+    { q: '有时圆又胖，有时弯如钩；挂在夜天上，星星排队走。', a: ['月亮', '月'] },
+    { q: '夜里来敲门，白天不见人；它来过的地方，枕头最知情。', a: ['梦'] },
+    { q: '秋夜落在草上，太阳一照就没；不是雨也不是露，凉丝丝的白色小珠。', a: ['霜'] },
+    { q: '看不见摸不着，围着火苗跳舞；一扇门关上，它就被挡住。', a: ['烟', '烟气', '烟雾'] },
+    { q: '夜晚撒了一把盐，撒在深蓝色的绒布上；数也数不清，眨眼对着你。', a: ['星星', '星'] }
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var idx = 0;
+  var lit = 0;
+  var solvedFlags = [];
+
+  function renderLamps() {
+    var row = $('lamps');
+    row.innerHTML = '';
+    for (var i = 0; i < RIDDLES.length; i++) {
+      var s = document.createElement('span');
+      s.textContent = '🏮';
+      s.className = solvedFlags[i] ? 'on' : 'off';
+      row.appendChild(s);
+    }
+  }
+
+  function show() {
+    $('q-no').textContent = '谜面 ' + (idx + 1) + ' / ' + RIDDLES.length;
+    $('riddle').textContent = RIDDLES[idx].q;
+    $('ans').value = '';
+    $('fb').textContent = '';
+    $('fb').className = 'fb';
+    $('next-btn').classList.remove('show');
+    $('ans').focus();
+  }
+
+  function norm(s) {
+    return s.trim().toLowerCase().replace(/的|一个/g, '');
+  }
+
+  $('guess').addEventListener('click', function () {
+    if (solvedFlags[idx]) return;
+    var v = norm($('ans').value);
+    if (!v) {
+      $('fb').textContent = '先写个答案，猜错也是勇气。';
+      $('fb').className = 'fb no';
+      return;
+    }
+    var hit = RIDDLES[idx].a.some(function (a) {
+      return norm(a) === v || norm(a).indexOf(v) !== -1 && v.length >= 1 && a.indexOf(v.trim()) !== -1 && v.trim().length >= 1;
+    });
+    if (hit || RIDDLES[idx].a.indexOf($('ans').value.trim()) !== -1) {
+      solvedFlags[idx] = true;
+      lit++;
+      renderLamps();
+      $('fb').textContent = '「' + $('ans').value.trim() + '」——正确！灯亮了。';
+      $('fb').className = 'fb ok';
+      $('next-btn').classList.add('show');
+      if (idx < RIDDLES.length - 1) {
+        // 有下一题，按钮文案在 show 时已是「下一盏灯」
+      } else {
+        $('next-btn').classList.add('show');
+        document.getElementById('nextq').textContent = '看战绩';
+        document.getElementById('final').textContent =
+          lit === RIDDLES.length ? '八盏全亮！你就是今晚的灯神。' :
+          lit >= 5 ? lit + ' 盏灯亮了。夜里的事，你懂得不少。' :
+          lit + ' 盏灯亮了。剩下的交给风去揭晓。';
+      }
+    } else {
+      $('fb').textContent = '不对，但很接近想象的边缘。再试一次？';
+      $('fb').className = 'fb no';
+    }
+  });
+
+  $('ans').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('guess').click();
+  });
+
+  $('nextq').addEventListener('click', function () {
+    if (idx < RIDDLES.length - 1) {
+      idx++;
+      show();
+    } else {
+      // 战绩页：重置
+      idx = 0;
+      lit = 0;
+      solvedFlags = [];
+      renderLamps();
+      $('final').textContent = '';
+      document.getElementById('nextq').textContent = '下一盏灯';
+      show();
+    }
+  });
+
+  renderLamps();
+  show();
+})();
+</script>
+</body>
+</html>

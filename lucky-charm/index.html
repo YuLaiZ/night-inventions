@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>平安符</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .desk { margin-top: clamp(20px, 4vw, 26px); display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  input#name {
+    flex: 1;
+    min-width: 160px;
+    max-width: 280px;
+    font-family: var(--sans);
+    font-size: 15px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    outline: none;
+    text-align: center;
+  }
+  input#name:focus { border-color: var(--ice); }
+  button.make {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.make:hover { filter: brightness(1.08); }
+  button.make:active { transform: scale(0.98); }
+
+  .charm-case {
+    margin: clamp(18px, 4vw, 24px) auto 0;
+    max-width: 240px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #070a12;
+  }
+  canvas { display: block; width: 100%; }
+
+  .bless { margin-top: 12px; color: var(--gold); font-size: clamp(15px, 4vw, 18px); letter-spacing: 0.1em; min-height: 1.6em; }
+  .bless-note { margin-top: 6px; color: var(--ink-dim); font-size: 13px; min-height: 1.5em; }
+
+  .go-row { margin-top: 14px; }
+  button.save {
+    display: none;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  button.save.show { display: inline-block; }
+  button.save:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>平安符</h1>
+  <p class="sub">夜班限量手绘。<em>同名字同符文</em>，换个名字就换一张——写谁的，就护谁的。</p>
+
+  <div class="desk">
+    <input id="name" maxlength="10" placeholder="写个名字（留空就护你自己）" autocomplete="off">
+    <button class="make" id="make" type="button">请符</button>
+  </div>
+
+  <div class="charm-case">
+    <canvas id="cv"></canvas>
+  </div>
+  <p class="bless" id="bless"></p>
+  <p class="bless-note" id="bless-note"></p>
+
+  <div class="go-row">
+    <button class="save" id="save" type="button">收下这张符</button>
+  </div>
+
+  <p class="hint">符文纹样由名字生成，纯属好看，不承担法力——真正护你的是你自己。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var BLESSES = [
+    '一夜无梦到天亮',
+    '晚晚有好觉，天天有精神',
+    '困意绕道走，好运顺路来',
+    '万事有惊无险，夜夜有人惦记',
+    '少加班，多吃饭，早睡觉',
+    '心里的事有着落，手头的事有着手',
+    '今夜安枕，明朝清醒',
+    '所求皆如愿，所行化坦途'
+  ];
+
+  function hashOf(str) {
+    var h = 0;
+    for (var i = 0; i < str.length; i++) h = (h * 131 + str.charCodeAt(i)) >>> 0;
+    return h >>> 0;
+  }
+  function rngOf(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+
+  function size() {
+    var w = document.querySelector('.charm-case').clientWidth;
+    var h = Math.round(w * 1.42);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawFor(name) {
+    var seed = hashOf(name);
+    var r = rngOf(seed);
+    size();
+    var w = cv.clientWidth, h = cv.clientHeight;
+
+    // 符纸底（暖黄宣纸）
+    ctx.fillStyle = '#e8d9a8';
+    ctx.fillRect(0, 0, w, h);
+    // 纸纹
+    ctx.strokeStyle = 'rgba(160, 130, 60, 0.12)';
+    ctx.lineWidth = 1;
+    for (var l = 0; l < 14; l++) {
+      ctx.beginPath();
+      var ly = (l + 0.5) / 14 * h;
+      ctx.moveTo(0, ly);
+      ctx.lineTo(w, ly + (r() - 0.5) * 6);
+      ctx.stroke();
+    }
+    // 边框（朱砂双框）
+    ctx.strokeStyle = '#c7402e';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(8, 8, w - 16, h - 16);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(14, 14, w - 28, h - 28);
+
+    // 符头：三勾
+    ctx.strokeStyle = '#c7402e';
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = 'round';
+    var cx = w / 2, top = 34;
+    ctx.beginPath();
+    ctx.moveTo(cx, top);
+    ctx.lineTo(cx, top + 26);
+    ctx.stroke();
+    for (var k = -1; k <= 1; k += 2) {
+      ctx.beginPath();
+      ctx.moveTo(cx, top + 8);
+      ctx.quadraticCurveTo(cx + k * 16, top + 16, cx + k * 24, top + 6);
+      ctx.stroke();
+    }
+
+    // 符文主体：名字哈希生成的圈与折线（6~9 笔）
+    var strokes = 6 + Math.floor(r() * 4);
+    ctx.lineWidth = 2.2;
+    for (var s = 0; s < strokes; s++) {
+      var x1 = 26 + r() * (w - 52), y1 = 84 + r() * (h - 160);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      var segs = 2 + Math.floor(r() * 2);
+      for (var g = 0; g < segs; g++) {
+        var x2 = x1 + (r() - 0.5) * (w - 60), y2 = y1 + (r() - 0.5) * (h - 180);
+        x2 = Math.max(24, Math.min(w - 24, x2));
+        y2 = Math.max(80, Math.min(h - 80, y2));
+        ctx.lineTo(x2, y2);
+        x1 = x2; y1 = y2;
+      }
+      ctx.stroke();
+      // 收笔小圈
+      ctx.beginPath();
+      ctx.arc(x1, y1, 3 + r() * 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 底部名讳 + 印章
+    ctx.fillStyle = '#2b2620';
+    ctx.font = '600 ' + Math.round(w * 0.085) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(name, w / 2, h - 46);
+    ctx.fillStyle = '#c7402e';
+    ctx.fillRect(w / 2 - 26, h - 38, 52, 24);
+    ctx.fillStyle = '#e8d9a8';
+    ctx.font = '600 13px system-ui, "PingFang SC", sans-serif';
+    ctx.fillText('夜班平安', w / 2, h - 21);
+  }
+
+  function make() {
+    var raw = document.getElementById('name').value.trim();
+    var name = raw || '夜归人';
+    drawFor(name);
+    var bless = BLESSES[hashOf(name) % BLESSES.length];
+    document.getElementById('bless').textContent = '「' + bless + '」';
+    document.getElementById('bless-note').textContent = '为「' + name + '」定制 · 同名同符，换个名字就换一张';
+    document.getElementById('save').classList.add('show');
+    window.__charmName = name;
+  }
+
+  document.getElementById('make').addEventListener('click', make);
+  document.getElementById('name').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') make();
+  });
+  document.getElementById('save').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.download = 'charm-' + (window.__charmName || 'yours') + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  });
+
+  make();   // 默认给「夜归人」先画一张
+})();
+</script>
+</body>
+</html>

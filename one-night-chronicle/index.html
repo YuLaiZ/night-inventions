@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>这一夜 · 编年史</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: clamp(24px, 5vw, 44px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(28px, 7vw, 38px);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+  .sub { margin-top: 10px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .tally {
+    margin-top: clamp(20px, 4vw, 28px);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    justify-content: center;
+    border-top: 1px solid var(--gold);
+    border-bottom: 1px solid var(--gold);
+    padding: 12px 4px;
+  }
+  .tally span { font-size: 13.5px; color: var(--ink-dim); letter-spacing: 0.08em; }
+  .tally b { font-family: var(--mono); color: var(--gold); font-weight: 600; font-size: 15px; }
+
+  /* ── 时间轴 ── */
+  .timeline {
+    margin-top: clamp(28px, 6vw, 40px);
+    position: relative;
+    padding-left: 26px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 5px; top: 6px; bottom: 6px;
+    width: 2px;
+    background: linear-gradient(180deg, var(--gold), rgba(242, 199, 110, 0.15));
+  }
+  .chapter { position: relative; padding-bottom: clamp(26px, 5vw, 36px); }
+  .chapter::before {
+    content: '';
+    position: absolute;
+    left: -27px; top: 8px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 8px rgba(242, 199, 110, 0.8);
+  }
+  .chapter .time {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--gold);
+    letter-spacing: 0.15em;
+  }
+  .chapter h2 {
+    margin-top: 4px;
+    color: var(--ink-strong);
+    font-size: clamp(17px, 4.4vw, 20px);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .chapter .theme { margin-top: 4px; color: var(--ink-dim); font-size: 14px; }
+  .chapter ul {
+    margin-top: 10px;
+    list-style: none;
+    display: grid;
+    gap: 5px;
+  }
+  .chapter li a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(156, 200, 255, 0.35);
+    transition: color 0.12s ease, border-color 0.12s ease;
+  }
+  .chapter li a:hover { color: var(--ice); border-bottom-color: var(--ice); }
+  .chapter li .no {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-dim);
+    margin-right: 7px;
+  }
+  .chapter .extra {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  .chapter .extra .mark { color: var(--ice); }
+
+  .chapter { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .chapter.in { opacity: 1; transform: none; }
+
+  /* ── 第 50 件里程碑 ── */
+  .milestone {
+    position: relative;
+    padding: clamp(16px, 4vw, 26px);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    background: rgba(242, 199, 110, 0.05);
+    margin-left: 26px;
+  }
+  .milestone::before {
+    content: '';
+    position: absolute;
+    left: -32px; top: 22px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 12px rgba(242, 199, 110, 1);
+  }
+  .milestone .m-tag { font-size: 12px; color: var(--gold); letter-spacing: 0.3em; }
+  .milestone h2 { margin-top: 6px; color: var(--ink-strong); font-size: clamp(19px, 5vw, 24px); }
+  .milestone p { margin-top: 8px; color: var(--ink); font-size: 15px; }
+
+  .ending {
+    margin-top: clamp(28px, 6vw, 40px);
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 14px;
+  }
+  .ending em { font-style: normal; color: var(--ink); }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>这一夜</h1>
+  <p class="sub">2026 年 9 月 5 日晚至 6 日晨 · 无聊发明的<em>第三个夜晚</em>。六个班次，一夜没停——本页是它的编年史，也是馆藏第 50 件。</p>
+
+  <div class="tally">
+    <span>班次 <b>6</b> 个</span>
+    <span>新作 <b>32</b> 件</span>
+    <span>打磨 <b>5</b> 项</span>
+    <span>修复 <b>3</b> 处</span>
+    <span>馆藏 <b>49 → 50</b></span>
+  </div>
+
+  <div class="timeline" id="timeline"></div>
+
+  <div class="milestone" id="m50">
+    <div class="m-tag">第 50 件 · 里程碑</div>
+    <h2>05:05 · 《这一夜》——就是本页</h2>
+    <p>编到第 50 件的时候，发现最好的素材其实是这一夜本身。于是把六个班次装订成册，作为压轴展品挂在这里。上面每一件小玩意都还亮着，随时可点。</p>
+  </div>
+
+  <p class="ending">夜还长，故事继续。<em>下一件，也许正在路上。</em></p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  // 本夜编年史数据（据 ledgers/night-log.md 誊录）
+  var NIGHT = [
+    {
+      time: '23:05', ch: '班次 #11', theme: '换脑首班 · 自由发挥六连发',
+      items: [
+        ['018', '一本正经的猜拳裁判', 'rock-paper-referee'],
+        ['019', '煞有介事开工仪式', 'work-opening-ritual'],
+        ['020', '今晚限定晚安', 'tonight-goodnight'],
+        ['021', '深夜食堂菜单', 'midnight-diner-menu'],
+        ['022', '给屏幕擦擦灰', 'wipe-the-dust'],
+        ['023', '此刻同醒的人', 'awake-right-now']
+      ],
+      extra: '顺手翻出一桩旧账：星星邮局的 №017 卡其实从未上墙，本班补齐——馆藏账实重新相符。'
+    },
+    {
+      time: '00:05', ch: '班次 #12', theme: 'canvas 视觉专场',
+      items: [
+        ['024', '万花筒画板', 'kaleido-draw'],
+        ['025', '生成式蝴蝶', 'generative-butterfly'],
+        ['026', '今晚困意检测', 'sleepiness-meter'],
+        ['027', '深夜词典', 'midnight-dictionary'],
+        ['028', '数羊助手', 'sheep-counter'],
+        ['029', '熬夜勋章', 'night-owl-medal']
+      ],
+      extra: '蝴蝶上线前重孵了两次才够「全网无同款」；困意检测顺手发明了 #fast 测试钩子。'
+    },
+    {
+      time: '01:05', ch: '班次 #13', theme: '回访打磨专场 + 三件加场',
+      items: [
+        ['030', '寄给明天的便签', 'tomorrow-note'],
+        ['031', '日子换算所', 'day-converter']
+      ],
+      extra: '正事是打磨：万花筒加了对称切换、蝴蝶有了栖枝、馆藏多了「手气不错」、月亮和像素画都能带回家了。指挥家一句「时间不够了吗」，把收工变成了加时赛。'
+    },
+    {
+      time: '02:05', ch: '班次 #14', theme: '氛围与陪伴专场',
+      items: [
+        ['032', '一日一字', 'one-word-diary'],
+        ['033', '暗房', 'darkroom'],
+        ['034', '等天亮队列', 'dawn-queue'],
+        ['035', '深夜电梯', 'midnight-elevator'],
+        ['036', '深夜辩论会', 'midnight-debate']
+      ],
+      extra: '暗房教会全队一件事：这个宿主的后台连页面脚本都会冻结——从此 QA 多了一道 cache-bust 探针。'
+    },
+    {
+      time: '03:05', ch: '班次 #15', theme: '连发七件 · 素材大爆发',
+      items: [
+        ['037', '深夜自动贩卖机', 'midnight-vending'],
+        ['038', '月亮电台', 'moon-radio'],
+        ['039', '夜班电报局', 'night-telegraph'],
+        ['040', '画一个星座', 'draw-a-constellation'],
+        ['041', '深夜快讯', 'midnight-news'],
+        ['042', '纠结天平', 'dilemma-scale'],
+        ['043', '一罐萤火虫', 'firefly-jar']
+      ],
+      extra: '四十分钟七件，本夜产量之最。收班时如实交代：灵感库存见底，宁可收工也不硬凑。'
+    },
+    {
+      time: '04:05', ch: '班次 #16', theme: '策展巡检 + 连发六件',
+      items: [
+        ['044', '漂流瓶', 'message-bottle'],
+        ['045', '今夜观星指数', 'stargazing-index'],
+        ['046', '打瞌睡', 'doze-whack'],
+        ['047', '手电筒', 'flashlight'],
+        ['048', '平安符', 'lucky-charm'],
+        ['049', '深夜送分考', 'easy-exam']
+      ],
+      extra: '先当了一回策展人：43 张卡、46 个目录全部体检，零异常。然后才轮到发新。'
+    }
+  ];
+
+  var timeline = document.getElementById('timeline');
+  NIGHT.forEach(function (c) {
+    var div = document.createElement('div');
+    div.className = 'chapter';
+    var html = '<div class="time">' + c.time + ' · ' + c.ch + '</div>' +
+      '<h2>' + c.theme + '</h2><ul>';
+    c.items.forEach(function (it) {
+      html += '<li><span class="no">№' + it[0] + '</span><a href="../' + it[2] + '/" target="_blank" rel="noopener">' + it[1] + '</a></li>';
+    });
+    html += '</ul>';
+    if (c.extra) html += '<p class="extra"><span class="mark">本班注：</span>' + c.extra + '</p>';
+    div.innerHTML = html;
+    timeline.appendChild(div);
+  });
+
+  // 滚动渐入（IntersectionObserver：滚动到才亮，事件驱动无动画循环）
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (en.isIntersecting) {
+        en.target.classList.add('in');
+        io.unobserve(en.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.chapter').forEach(function (el) { io.observe(el); });
+  // 兜底：瞬跳滚动（End 键/锚点）会跳过观察器，2.5 秒后未亮的全亮——内容永远可见
+  setTimeout(function () {
+    document.querySelectorAll('.chapter').forEach(function (el) { el.classList.add('in'); });
+  }, 2500);
+})();
+</script>
+</body>
+</html>

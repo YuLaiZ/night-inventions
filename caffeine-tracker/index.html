@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>咖啡因账本</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .gauge {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(16px, 4vw, 24px);
+    text-align: center;
+  }
+  .gauge .now {
+    font-family: var(--mono);
+    font-size: clamp(34px, 9vw, 48px);
+    color: var(--ink-strong);
+  }
+  .gauge .now small { font-size: 0.4em; color: var(--ink-dim); }
+  .gauge .desc { margin-top: 4px; color: var(--ink); font-size: 14.5px; min-height: 1.6em; }
+
+  .go-row {
+    margin-top: clamp(16px, 4vw, 22px);
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  button.cup {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 18px;
+    cursor: pointer;
+  }
+  button.cup:hover { border-color: var(--ice); color: var(--ice); }
+
+  .list { margin-top: clamp(16px, 4vw, 22px); display: grid; gap: 6px; }
+  .cup-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13.5px;
+  }
+  .cup-row .t { font-family: var(--mono); color: var(--ink-dim); }
+  .cup-row .rem { color: var(--ink); font-family: var(--mono); }
+  .cup-row button {
+    background: none;
+    border: none;
+    color: var(--ink-dim);
+    cursor: pointer;
+    font-size: 15px;
+  }
+  .cup-row button:hover { color: #e08585; }
+  .empty-tip { color: var(--ink-dim); font-size: 13.5px; padding: 10px 0; }
+
+  .fine {
+    margin-top: clamp(16px, 4vw, 22px);
+    color: var(--ink-dim);
+    font-size: 12.5px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>咖啡因账本</h1>
+  <p class="sub">每喝一杯记一笔，本账按<em>五小时半衰期</em>算出你此刻体内的咖啡因余量——够不够撑到天亮，数字说了算。</p>
+
+  <div class="gauge">
+    <div class="now"><span id="now">0.0</span><small> mg</small></div>
+    <p class="desc" id="desc">账上还没有咖啡。</p>
+  </div>
+
+  <div class="go-row">
+    <button class="cup" data-d="95" type="button">☕ 咖啡 95mg</button>
+    <button class="cup" data-d="45" type="button">🍵 茶 45mg</button>
+    <button class="cup" data-d="35" type="button">🥤 可乐 35mg</button>
+  </div>
+
+  <div class="list" id="list"></div>
+
+  <p class="fine">算法：每杯按剂量记入，之后每小时衰减 12.9%（半衰期约 5 小时）。数据只存本机。友情提示：咖啡因不是睡眠的替代品，只是它的预付款。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var KEY = 'night-inventions.caffeine';
+  var HALF_LIFE_H = 5;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+  }
+  function save(list) {
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  function remainingFor(cup, now) {
+    var hours = (now - cup.at) / 3600000;
+    if (hours < 0) hours = 0;
+    return cup.dose * Math.pow(0.5, hours / HALF_LIFE_H);
+  }
+
+  function descFor(mg) {
+    if (mg <= 0.5) return '账上基本清零。想提神就再来一杯，想睡就合上页面。';
+    if (mg < 30) return '余量不多。适合收尾，不适合开新局。';
+    if (mg < 80) return '中等剂量。此刻的你，效率应该还不错。';
+    if (mg < 180) return '相当精神。请把这份清醒用在正经事上。';
+    return '剂量偏高。心跳如果敲鼓，请立刻补水并考虑收工。';
+  }
+
+  function render() {
+    var list = load();
+    var now = Date.now();
+    var total = 0;
+    var listEl = $('list');
+    listEl.innerHTML = '';
+    if (!list.length) {
+      listEl.innerHTML = '<p class="empty-tip">账本空空如也。</p>';
+    } else {
+      // 新的在最上
+      for (var i = list.length - 1; i >= 0; i--) {
+        (function (cup, idx) {
+          var rem = remainingFor(cup, now);
+          total += rem;
+          var row = document.createElement('div');
+          row.className = 'cup-row';
+          var t = new Date(cup.at);
+          var pad = function (n) { return String(n).padStart(2, '0'); };
+          row.innerHTML = '<span>' + cup.label + ' · <span class="t">' + pad(t.getHours()) + ':' + pad(t.getMinutes()) +
+            '</span></span><span style="display:flex;gap:12px;align-items:center"><span class="rem">' +
+            rem.toFixed(1) + ' mg</span><button type="button" title="删除">✕</button></span>';
+          row.querySelector('button').addEventListener('click', function () {
+            var l = load();
+            l.splice(idx, 1);
+            save(l);
+            render();
+          });
+          listEl.appendChild(row);
+        })(list[i]);
+      }
+    }
+    var mg = 0;
+    list.forEach(function (cup) { mg += remainingFor(cup, now); });
+    $('now').textContent = mg.toFixed(1);
+    $('desc').textContent = descFor(mg);
+  }
+
+  document.querySelectorAll('button.cup').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var d = +this.getAttribute('data-d');
+      var list = load();
+      var now = new Date();
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+      list.push({
+        dose: d,
+        at: now.getTime(),
+        label: this.textContent.trim().split(' ')[0] + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes())
+      });
+      save(list);
+      render();
+    });
+  });
+
+  render();
+  setInterval(render, 30000);
+})();
+</script>
+</body>
+</html>

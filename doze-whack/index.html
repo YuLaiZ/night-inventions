@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打瞌睡</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .hud {
+    margin-top: clamp(18px, 4vw, 24px);
+    display: flex;
+    justify-content: center;
+    gap: clamp(18px, 5vw, 34px);
+    font-size: 14px;
+    color: var(--ink-dim);
+    letter-spacing: 0.08em;
+  }
+  .hud .num { font-family: var(--mono); color: var(--ink-strong); font-size: 17px; }
+
+  .holes {
+    margin-top: clamp(16px, 4vw, 22px);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: clamp(10px, 2.5vw, 16px);
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .hole {
+    aspect-ratio: 1;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: radial-gradient(circle at 50% 78%, rgba(0,0,0,0.5), rgba(156, 200, 255, 0.04));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(30px, 8vw, 42px);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s ease;
+  }
+  .hole:active { background: radial-gradient(circle at 50% 78%, rgba(0,0,0,0.5), rgba(242, 199, 110, 0.1)); }
+  .hole .zzz { opacity: 0; transition: opacity 0.12s ease; transform: translateY(6px); }
+  .hole.up .zzz { opacity: 1; transform: none; }
+  .hole.hit .zzz { opacity: 0; }
+
+  .go-row { margin-top: clamp(16px, 4vw, 22px); }
+  button.go {
+    font-family: var(--sans);
+    font-size: 14.5px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 30px;
+    cursor: pointer;
+  }
+  button.go:hover { filter: brightness(1.08); }
+  button.go:active { transform: scale(0.98); }
+
+  .verdict { margin-top: clamp(16px, 4vw, 22px); min-height: 3em; }
+  .verdict .grade { color: var(--gold); font-size: clamp(16px, 4.4vw, 19px); letter-spacing: 0.1em; }
+  .verdict .words { margin-top: 6px; color: var(--ink); font-size: 15px; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>打瞌睡</h1>
+  <p class="sub">瞌睡虫会从九个洞里探出头来。<em>点它</em>，赶走一只是一只——30 秒后结算今晚的战果。</p>
+
+  <div class="hud">
+    <span>剩余 <span class="num" id="time">30</span> 秒</span>
+    <span>已赶走 <span class="num" id="score">0</span> 只</span>
+  </div>
+
+  <div class="holes" id="holes"></div>
+
+  <div class="go-row">
+    <button class="go" id="go" type="button">开赶</button>
+  </div>
+
+  <div class="verdict" id="verdict">
+    <p class="grade" id="grade"></p>
+    <p class="words" id="words"></p>
+  </div>
+
+  <p class="hint">瞌睡虫被赶走后会从别的洞再来——它们只是想让你陪它们玩一会儿。手快有，手慢它们就住下了。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var GAME_MS = 30 * 1000;
+  // 测试钩子：#fast 时 5 秒一局、洞全常冒（便于无定时器断言）
+  var TEST_MODE = window.location.hash === '#fast';
+  if (TEST_MODE) {
+    GAME_MS = 5 * 1000;
+    history.replaceState(null, '', window.location.pathname);
+  }
+
+  var HOLES_N = 9;
+  var FACES = ['😮‍💨', '💤', '😴'];
+  var $ = function (id) { return document.getElementById(id); };
+  var holesEl = $('holes');
+  var score = 0;
+  var playing = false;
+  var popTimers = [];
+  var endTimer = null;
+  var cells = [];
+  var startedAt = 0;
+
+  function buildHoles() {
+    holesEl.innerHTML = '';
+    cells = [];
+    for (var i = 0; i < HOLES_N; i++) {
+      var h = document.createElement('div');
+      h.className = 'hole';
+      h.innerHTML = '<span class="zzz"></span>';
+      h.addEventListener('click', (function (idx) {
+        return function () { whack(idx); };
+      })(i));
+      holesEl.appendChild(h);
+      cells.push(h);
+    }
+  }
+
+  function popOne() {
+    if (!playing) return;
+    var idx = Math.floor(Math.random() * HOLES_N);
+    var cell = cells[idx];
+    var upMs = 700 + Math.random() * 600;
+    cell.querySelector('.zzz').textContent = FACES[Math.floor(Math.random() * FACES.length)];
+    cell.classList.add('up');
+    var t = setTimeout(function () {
+      if (cell.dataset.free === '1') cell.classList.remove('up');
+    }, upMs);
+    popTimers.push(t);
+    cell.dataset.freeUntil = String(Date.now() + upMs);
+    // 点中判定窗口
+    cell._upUntil = Date.now() + upMs;
+  }
+
+  function whack(idx) {
+    if (!playing) return;
+    var cell = cells[idx];
+    if (!cell.classList.contains('up') || Date.now() > (cell._upUntil || 0)) return;
+    cell.classList.remove('up');
+    cell._upUntil = 0;
+    score++;
+    $('score').textContent = String(score);
+  }
+
+  function finish() {
+    playing = false;
+    popTimers.forEach(clearTimeout);
+    popTimers = [];
+    cells.forEach(function (c) { c.classList.remove('up'); });
+    var g, w;
+    if (score >= 18) {
+      g = '守夜冠军';
+      w = '今晚的困意被你按在地上摩擦。它服了，你也该睡了。';
+    } else if (score >= 12) {
+      g = '资深守夜员';
+      w = '手速在线，困意退散。这个状态，再撑一个班次没问题。';
+    } else if (score >= 6) {
+      g = '业余守夜';
+      w = '有几只跑掉了，但大部分都被你请走了。及格，且有余温。';
+    } else {
+      g = '被瞌睡虫反向安顿';
+      w = '你点的不是它们，是你自己的眼皮。本台建议：顺着它。';
+    }
+    $('grade').textContent = g;
+    $('words').textContent = w;
+    $('go').textContent = '再赶一局';
+    $('go').disabled = false;
+  }
+
+  function start() {
+    score = 0;
+    $('score').textContent = '0';
+    $('time').textContent = String(Math.round(GAME_MS / 1000));
+    $('grade').textContent = '';
+    $('words').textContent = '';
+    $('go').disabled = true;
+    playing = true;
+    startedAt = Date.now();
+
+    // 冒头节奏：墙钟计算，间隔随时间略变短
+    function popLoop() {
+      if (!playing) return;
+      popOne();
+      var elapsed = Date.now() - startedAt;
+      var wait = TEST_MODE ? 120 : Math.max(260, 620 - elapsed / GAME_MS * 300);
+      popTimers.push(setTimeout(popLoop, wait + Math.random() * 200));
+    }
+    popLoop();
+
+    // 倒计时：墙钟
+    endTimer = setInterval(function () {
+      var left = GAME_MS - (Date.now() - startedAt);
+      $('time').textContent = String(Math.max(0, Math.ceil(left / 1000)));
+      if (left <= 0) {
+        clearInterval(endTimer);
+        finish();
+      }
+    }, 200);
+  }
+
+  buildHoles();
+
+  // 测试模式：九洞常冒，点击计分可离线断言
+  if (TEST_MODE) {
+    playing = true;
+    cells.forEach(function (c) {
+      c.querySelector('.zzz').textContent = FACES[0];
+      c.classList.add('up');
+      c._upUntil = Date.now() + 9e9;
+    });
+  }
+
+  $('go').addEventListener('click', start);
+
+  // 兜底：回前台/聚焦时若局已超时，立即结算（后台定时器冻结也不丢战果）
+  function settleIfOver() {
+    if (playing && Date.now() - startedAt >= GAME_MS) {
+      if (endTimer) clearInterval(endTimer);
+      finish();
+    }
+  }
+  window.addEventListener('focus', settleIfOver);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) settleIfOver();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夸夸三连</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .desk { margin-top: clamp(20px, 4vw, 26px); display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  input#name {
+    flex: 1;
+    min-width: 150px;
+    max-width: 260px;
+    font-family: var(--sans);
+    font-size: 15px;
+    color: var(--ink-strong);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    outline: none;
+    text-align: center;
+  }
+  input#name:focus { border-color: var(--ice); }
+  button.go {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+  }
+  button.go:hover { filter: brightness(1.08); }
+
+  .praise-box { margin-top: clamp(18px, 4vw, 24px); display: grid; gap: 10px; }
+  .p-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: 12px 16px;
+    color: var(--ink-strong);
+    font-size: clamp(15px, 4vw, 17px);
+    display: none;
+  }
+  .p-card.show { display: block; animation: pop 0.4s ease; }
+  @keyframes pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+  .p-card .who { color: var(--gold); font-size: 13px; letter-spacing: 0.1em; }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>夸夸三连</h1>
+  <p class="sub">写个名字，领<em>三句正经的夸奖</em>。不是客套——是深夜替你把优点念出来。</p>
+
+  <div class="desk">
+    <input id="name" maxlength="12" placeholder="写个名字（留空就是夸你）" autocomplete="off">
+    <button class="go" id="go" type="button">开始夸</button>
+  </div>
+
+  <div class="praise-box" id="box"></div>
+
+  <p class="hint">夸奖由本台现场撰写，不重复发放（大概率）。夸完了记得谢谢本台。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var BANK = [
+    '熬到这个点还清醒，本身就是一种了不起的体力。',
+    '你今天一定悄悄搞定了一些别人根本不知道的难事。',
+    '认真生活的人，值得被大声夸奖——比如现在这样。',
+    '你的存在让某个深夜的群聊或工位都变得更有意思了。',
+    '不管今晚过得如何，你坚持到了现在，这就够厉害。',
+    '你能把一天过完，就已经完成了大多数人逃避的挑战。',
+    '你有一种别人学不来的节奏，慢一点也没关系。',
+    '深夜还在自省的人，运气通常不会太差。',
+    '你的胃口、耐心和幽默感，都是稀缺资源。',
+    '别看数据了，你本人比任何数据都好。'
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+  var box = $('box');
+
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+
+  function praise() {
+    var raw = $('name').value.trim();
+    var name = raw || '你';
+    var picks = [];
+    while (picks.length < 3) {
+      var s = pick(BANK);
+      if (picks.indexOf(s) === -1) picks.push(s);
+    }
+    box.innerHTML = '';
+    picks.forEach(function (text, i) {
+      var card = document.createElement('div');
+      card.className = 'p-card';
+      card.innerHTML = '<span class="who">夸奖 ' + (i + 1) + ' · 送给 ' + name + '</span><br>';
+      var span = document.createElement('span');
+      span.textContent = text;
+      card.appendChild(span);
+      box.appendChild(card);
+      setTimeout((function (el) {
+        return function () { el.classList.add('show'); };
+      })(card), i * 260);
+    });
+  }
+
+  $('go').addEventListener('click', praise);
+  $('name').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') praise();
+  });
+})();
+</script>
+</body>
+</html>

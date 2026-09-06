@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜电梯</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .shaft {
+    margin-top: clamp(22px, 5vw, 28px);
+    display: flex;
+    gap: clamp(14px, 4vw, 24px);
+    align-items: stretch;
+  }
+  .panel {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    align-content: start;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: 12px;
+  }
+  .panel button {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--ink);
+    background: rgba(156, 200, 255, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 0;
+    cursor: pointer;
+    min-width: 52px;
+  }
+  .panel button:hover { border-color: var(--ice); color: var(--ink-strong); }
+  .panel button.visited { color: var(--ink-dim); border-style: dashed; }
+  .panel button.top { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  .panel .rooftop-slot { grid-column: 1 / -1; }
+
+  .scene {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(16px, 4vw, 24px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 220px;
+  }
+  .scene .floor-tag {
+    font-size: 12px;
+    color: var(--gold);
+    letter-spacing: 0.3em;
+  }
+  .scene .floor-tag .num { font-family: var(--mono); }
+  .scene .story {
+    margin-top: 10px;
+    color: var(--ink-strong);
+    font-size: clamp(15px, 4vw, 17px);
+  }
+  .scene .icon { font-size: 34px; margin-top: 10px; }
+  .scene.idle .story { color: var(--ink-dim); }
+
+  .hint {
+    margin-top: clamp(22px, 5vw, 28px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜电梯</h1>
+  <p class="sub">这栋楼里住着各种睡不着的楼层。<em>随便按一层</em>——每一层都在发生一件小事，天台是唯一的终点。</p>
+
+  <div class="shaft">
+    <div class="panel" id="panel"></div>
+    <div class="scene idle" id="scene">
+      <div class="floor-tag">大堂 · <span class="num">1F</span></div>
+      <p class="story">电梯门开着，等你按一个楼层。今晚它哪儿都去。</p>
+    </div>
+  </div>
+
+  <p class="hint">每层的事随机发生，去第二次未必一样。去过的层会记着你来过。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var FLOORS = [1, 3, 5, 7, 9, 12, 14, 16, 18, 21, 23];
+  var TOP = 24;
+
+  var EVENTS = {
+    1:  [['大堂的猫伸了个懒腰，没睁眼，表示欢迎。', '🐈'], ['夜班保安冲你点点头：又见面了。', '🛋']],
+    3:  [['有人在门口放了一箱没人认领的橘子，牌子上写「随便拿」。', '🍊'], ['走廊尽头的灯闪了两下，像是打招呼。', '💡']],
+    5:  [['302 在练大提琴，拉得很慢，但今天没拉错。', '🎻'], ['谁家在煮泡面，香味把整层楼占了。', '🍜']],
+    7:  [['一扇门缝下透出蓝光，里面像是在放老电影。', '📺'], ['电梯口贴着寻物启事：丢了一把伞和一点睡意。', '☔']],
+    9:  [['阳台上有人收衣服，动作轻得像在收月光。', '🌙'], ['楼道里飘着桂花香，来源不明。', '🌼']],
+    12: [['绿萝顺着防盗网爬到了邻居家，两边都没意见。', '🌿'], ['一台旧冰箱在深夜里嗡嗡地哼歌。', '🎵']],
+    14: [['有人在门上贴了张便签：「外卖放这，谢谢」。字很好看。', '📝'], ['一盆多养了七年的多肉，胖得理直气壮。', '🪴']],
+    16: [['窗户没关严，风把窗帘吹成一个缓慢的浪。', '🍃'], ['地上有一行粉笔字：跳房子，从这格开始。', '⭕']],
+    18: [['猫在楼梯口坐着，审了你三秒，放行了。', '🐱'], ['谁把快递箱改成了猫窝，里面垫了一件旧毛衣。', '📦']],
+    21: [['这层静得能听见电梯缆绳的声音，像很远的海。', '🌊'], ['天花的声控灯为你亮起，非常尽职。', '🔦']],
+    23: [['顶层前厅有一台坏掉的老风扇，扇叶上落满安静。', '🌀'], ['消防通道的门开了一条缝，风从上面下来。', '🚪']]
+  };
+  var TOP_EVENTS = [
+    ['风很大。城市在脚下亮着，像替谁留的灯。看完就回家吧。', '🌃'],
+    ['天台上晾着一床被子，大概是白天忘了收。月亮替看着呢。', '🛏'],
+    ['整座城市的窗户明明灭灭——每一点都是另一个睡不着的人。', '✨']
+  ];
+
+  var $ = function (id) { return document.getElementById(id); };
+  var panel = $('panel');
+  var visited = {};
+
+  // 楼层按钮：FLOORS 两列排布，最下面一格是天台
+  FLOORS.forEach(function (f) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = f + 'F';
+    b.setAttribute('data-floor', f);
+    b.addEventListener('click', function () { arrive(f, b); });
+    panel.appendChild(b);
+  });
+  var top = document.createElement('button');
+  top.type = 'button';
+  top.className = 'rooftop-slot top';
+  top.textContent = TOP + 'F · 天台';
+  top.setAttribute('data-floor', TOP);
+  top.addEventListener('click', function () { arrive(TOP, top); });
+  panel.appendChild(top);
+
+  function arrive(floor, btn) {
+    var scene = $('scene');
+    scene.classList.remove('idle');
+    var pick;
+    if (floor === TOP) {
+      pick = TOP_EVENTS[Math.floor(Math.random() * TOP_EVENTS.length)];
+      top.textContent = TOP + 'F · 已到达';
+    } else {
+      var list = EVENTS[floor] || [['这一层今晚没什么事，风替它值班。', '🌬']];
+      pick = list[Math.floor(Math.random() * list.length)];
+    }
+    scene.querySelector('.floor-tag').innerHTML =
+      (floor === TOP ? '天台' : floor + ' 层') + ' · <span class="num">' + floor + 'F</span>';
+    scene.querySelector('.story').textContent = pick[0];
+    var iconEl = scene.querySelector('.icon');
+    if (!iconEl) {
+      iconEl = document.createElement('div');
+      iconEl.className = 'icon';
+      scene.appendChild(iconEl);
+    }
+    iconEl.textContent = pick[1];
+
+    if (floor !== TOP) btn.classList.add('visited');
+    visited[floor] = true;
+  }
+})();
+</script>
+</body>
+</html>

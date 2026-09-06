@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今夜观星指数</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .report {
+    margin-top: clamp(22px, 5vw, 30px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(16, 22, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+  }
+  .stars-row {
+    font-size: clamp(30px, 8vw, 40px);
+    letter-spacing: 0.1em;
+    line-height: 1.4;
+  }
+  .stars-row .dim { opacity: 0.22; }
+  .score-line { margin-top: 8px; color: var(--gold); font-size: clamp(16px, 4.4vw, 19px); letter-spacing: 0.1em; }
+
+  .facts {
+    margin-top: 16px;
+    display: grid;
+    gap: 6px;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .facts .row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed var(--line);
+    padding: 4px 2px;
+    font-size: 14px;
+  }
+  .facts .k { color: var(--ink-dim); }
+  .facts .v { color: var(--ink); }
+  .facts .v .num { font-family: var(--mono); }
+
+  .advice { margin-top: 14px; color: var(--ink-strong); font-size: clamp(15px, 4vw, 17px); }
+
+  .fine {
+    margin-top: 14px;
+    color: var(--ink-dim);
+    font-size: 12.5px;
+  }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>今夜观星指数</h1>
+  <p class="sub">月亮越亮，星星越害羞。本页按<em>真实的月相</em>给今晚打分——数据是算的，心动是真的。</p>
+
+  <div class="report">
+    <div class="stars-row" id="stars"></div>
+    <p class="score-line" id="score-line"></p>
+    <div class="facts">
+      <div class="row"><span class="k">今晚月相</span><span class="v" id="f-phase">--</span></div>
+      <div class="row"><span class="k">月亮亮面</span><span class="v"><span class="num" id="f-lit">--</span>%（越低越利于观星）</span></div>
+      <div class="row"><span class="k">现在钟点</span><span class="v"><span class="num" id="f-hour">--:--</span></span></div>
+      <div class="row"><span class="k">距下次满月</span><span class="v"><span class="num" id="f-full">--</span> 天</span></div>
+    </div>
+    <p class="advice" id="advice"></p>
+    <p class="fine">口径：满月前后星光最「害羞」，朔月前后最适合看星星；指数已按当前钟点校正。天气本台管不着，出门前自己抬头看一眼。</p>
+  </div>
+
+  <p class="hint">与隔壁<a href="../today-moon/" style="color:inherit">「今日月亮圆缺」</a>是同事：它管月亮长什么样，本台管月亮今天吵不吵。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var SYNODIC = 29.53058867;
+  var EPOCH = Date.UTC(2000, 0, 6, 18, 14, 0);   // 2000-01-06 新月
+
+  function moonAge(date) {
+    var days = (date.getTime() - EPOCH) / 86400000;
+    var a = days % SYNODIC;
+    if (a < 0) a += SYNODIC;
+    return a;
+  }
+  function phaseName(age) {
+    var p = age / SYNODIC;
+    if (p < 0.02 || p >= 0.98) return '新月（朔）';
+    if (p < 0.23) return '娥眉月';
+    if (p < 0.27) return '上弦月';
+    if (p < 0.48) return '盈凸月';
+    if (p < 0.52) return '满月（望）';
+    if (p < 0.73) return '亏凸月';
+    if (p < 0.77) return '下弦月';
+    return '残月';
+  }
+  function litFraction(age) {
+    return Math.round((1 - Math.cos(2 * Math.PI * age / SYNODIC)) / 2 * 100);
+  }
+
+  var now = new Date();
+  var age = moonAge(now);
+  var lit = litFraction(age);
+
+  // 观星指数（0-5 星）：月亮亮面越低越好，权重 70%；后半夜（23-04 点）加成 30%
+  var hour = now.getHours();
+  var moonScore = 1 - lit / 100;                 // 0..1
+  var hourScore = (hour >= 22 || hour < 5) ? 1 : (hour >= 20 ? 0.7 : 0.4);
+  var score = Math.round(moonScore * 3.5 + hourScore * 1.5);
+  score = Math.max(0, Math.min(5, score));
+
+  var starsHtml = '';
+  for (var i = 0; i < 5; i++) {
+    starsHtml += i < score ? '★' : '<span class="dim">★</span>';
+  }
+  document.getElementById('stars').innerHTML = starsHtml;
+
+  var grade;
+  if (score >= 4) grade = '暗夜友好 · 星星营业中';
+  else if (score >= 3) grade = '条件尚可 · 亮星仍在';
+  else if (score >= 2) grade = '月亮有点吵 · 挑亮星看';
+  else grade = '满月档 · 星星在休假';
+
+  document.getElementById('score-line').textContent = '今夜观星指数 ' + score + ' / 5 · ' + grade;
+  document.getElementById('f-phase').textContent = phaseName(age);
+  document.getElementById('f-lit').textContent = String(lit);
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  document.getElementById('f-hour').textContent = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  var d = SYNODIC * 0.5 - age;
+  if (d < 0) d += SYNODIC;
+  document.getElementById('f-full').textContent = String(Math.round(d));
+
+  var advice;
+  if (score >= 4) advice = '今晚月亮很懂事，把灯调到最暗。抬头吧，星星都在上班。';
+  else if (score >= 3) advice = '月色不算吵。先找最亮的那几颗，看到谁就算谁。';
+  else if (score >= 2) advice = '月亮今晚比较健谈。适合看月亮本星，顺便认认它旁边的亮星。';
+  else advice = '满月档的夜空是月亮的主场。星星请假了，你可以早点睡，养足精神看明晚。';
+  document.getElementById('advice').textContent = advice;
+})();
+</script>
+</body>
+</html>

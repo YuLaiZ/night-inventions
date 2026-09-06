@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜风铃</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(20px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #070a12;
+  }
+  canvas { display: block; width: 100%; }
+
+  .wind-row {
+    margin-top: clamp(16px, 4vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-size: 14px;
+    color: var(--ink-dim);
+  }
+  .wind-row input[type="range"] { width: 200px; accent-color: var(--gold); }
+  .wind-row .num { font-family: var(--mono); color: var(--ice); }
+  .chime-note { margin-top: 8px; font-size: 13px; color: var(--ink-dim); min-height: 1.5em; }
+
+  .hint {
+    margin-top: clamp(18px, 4vw, 24px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜风铃</h1>
+  <p class="sub">五枚铃铛，风来就唱。<em>拖动风杆</em>——风越大，它们唱得越密，但从不吵。</p>
+
+  <div class="frame">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="wind-row">
+    <span>无风</span>
+    <input type="range" id="wind" min="0" max="10" step="1" value="3">
+    <span>大风</span>
+    <span class="num" id="wind-no">3</span> 级
+  </div>
+  <p class="chime-note" id="chime-note"></p>
+
+  <p class="hint">铃声全部现场合成，五枚铃各占一个音——凑齐了就是一个五声音阶。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = $('cv');
+  var ctx = cv.getContext('2d');
+  var wind = 3;
+  var CHIME_N = 5;
+  var chimes = [];       // {x, len, a(相位), lastRing}
+  var scale = [523.25, 587.33, 659.25, 783.99, 880.0];
+  var audio = null;
+  var ringCount = 0;
+
+  function ensureAudio() {
+    if (!audio) {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audio.state === 'suspended') audio.resume();
+    return audio;
+  }
+
+  function ring(i) {
+    var ctxA = ensureAudio();
+    var t = ctxA.currentTime;
+    var o = ctxA.createOscillator();
+    var g = ctxA.createGain();
+    o.type = 'sine';
+    o.frequency.value = scale[i % scale.length];
+    g.gain.setValueAtTime(0.14, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+    o.connect(g); g.connect(ctxA.destination);
+    o.start(t); o.stop(t + 1.2);
+    ringCount++;
+    $('chime-note').textContent = '今晚已响 ' + ringCount + ' 声。风不说话，铃替它说。';
+  }
+
+  function size() {
+    var w = document.querySelector('.frame').clientWidth;
+    var h = Math.round(w * 0.6);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function initChimes() {
+    chimes = [];
+    var w = cv.clientWidth;
+    for (var i = 0; i < CHIME_N; i++) {
+      chimes.push({ x: w * (0.2 + i * 0.15), len: 0.18 + (i % 3) * 0.07, a: Math.random() * 6, lastRing: 0 });
+    }
+  }
+
+  var last = Date.now();
+  function draw(now) {
+    var dt = Math.min(80, now - last);
+    last = now;
+    var w = cv.clientWidth, h = cv.clientHeight;
+    ctx.fillStyle = '#070a12';
+    ctx.fillRect(0, 0, w, h);
+
+    // 横梁
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.1, 12);
+    ctx.lineTo(w * 0.9, 12);
+    ctx.stroke();
+
+    var swing = 0.06 + wind * 0.045;   // 摆幅（弧度）
+    for (var i = 0; i < chimes.length; i++) {
+      var ch = chimes[i];
+      ch.a += (Math.sin(now / (700 - i * 60)) * swing - ch.a) * 0.08 * dt / 16;
+      var bx = ch.x + Math.sin(ch.a) * ch.len * w * 0.14;
+      var by = 12 + Math.cos(ch.a) * ch.len * h * 0.7;
+      // 线
+      ctx.strokeStyle = 'rgba(199, 208, 226, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ch.x, 12);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      // 铃铛（管状）
+      ctx.strokeStyle = '#f2c76e';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx, by + 22 + i * 3);
+      ctx.stroke();
+      // 相撞判定（相邻铃摆角差大时）
+      if (i > 0) {
+        var prev = chimes[i - 1];
+        var diff = Math.abs(ch.a - prev.a);
+        if (diff > swing * 1.5 && now - ch.lastRing > 400) {
+          ch.lastRing = now;
+          if (wind > 0) ring(i);
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+
+  $('wind').addEventListener('input', function () {
+    wind = +this.value;
+    $('wind-no').textContent = String(wind);
+    if (wind === 0) $('chime-note').textContent = '无风。铃铛们在打盹。';
+  });
+
+  window.addEventListener('resize', function () {
+    size();
+    initChimes();
+  });
+
+  size();
+  initChimes();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

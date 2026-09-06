@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜打铁铺</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --red: #e0855a;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .anvil {
+    margin-top: clamp(20px, 4vw, 26px);
+    font-size: clamp(64px, 16vw, 96px);
+    line-height: 1.4;
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    display: inline-block;
+    position: relative;
+  }
+  .anvil.hit { animation: hammer 0.16s ease; }
+  @keyframes hammer {
+    0% { transform: scale(1); }
+    35% { transform: scale(0.93) rotate(-2deg); }
+    100% { transform: scale(1); }
+  }
+  .spark {
+    position: absolute;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--gold);
+    pointer-events: none;
+    animation: sparkfly 0.5s ease-out forwards;
+  }
+  @keyframes sparkfly {
+    to { transform: translate(var(--sx), var(--sy)); opacity: 0; }
+  }
+
+  .progress-track {
+    margin: 14px auto 0;
+    max-width: 360px;
+    height: 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(156, 200, 255, 0.05);
+  }
+  .progress-track .fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--red), var(--gold));
+    transition: width 0.2s ease;
+  }
+  .progress-label { margin-top: 6px; font-size: 13px; color: var(--ink-dim); }
+  .progress-label .num { font-family: var(--mono); color: var(--ice); }
+
+  .result { margin-top: clamp(18px, 4vw, 24px); min-height: 6em; }
+  .result .sword { font-size: 40px; line-height: 1.4; }
+  .result .s-name { color: var(--gold); font-size: clamp(18px, 5vw, 23px); letter-spacing: 0.12em; }
+  .result .s-star { color: var(--gold); font-size: 15px; margin-top: 2px; }
+  .result .s-note { margin-top: 6px; color: var(--ink); font-size: 15px; }
+
+  .go-row { margin-top: 14px; }
+  button.again {
+    display: none;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    letter-spacing: 0.1em;
+    color: var(--ice);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  button.again.show { display: inline-block; }
+  button.again:hover { border-color: var(--ice); }
+
+  .hint {
+    margin-top: clamp(20px, 4vw, 26px);
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(36px, 7vw, 52px); }
+  .sig { margin-top: 12px; font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜打铁铺</h1>
+  <p class="sub">睡不着就打铁。<em>敲满五十锤</em>，出一把今夜限定的兵器——成分全是你的精神损失。</p>
+
+  <div class="anvil" id="anvil">⚒️</div>
+
+  <div class="progress-track"><div class="fill" id="fill"></div></div>
+  <p class="progress-label">已敲 <span class="num" id="hits">0</span> / 50 锤</p>
+
+  <div class="result">
+    <div class="sword" id="s-word"></div>
+    <div class="s-name" id="s-name"></div>
+    <div class="s-star" id="s-star"></div>
+    <p class="s-note" id="s-note"></p>
+  </div>
+
+  <div class="go-row">
+    <button class="again" id="again" type="button">再开一炉</button>
+  </div>
+
+  <p class="hint">锤数不清零的秘诀是多敲几下。本铺出品的兵器均为精神制成，不可劈柴，但很提气。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var NEED = 50;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var PREFIX = ['夜色', '无梦', '晨曦', '碎星', '镇睡', '听风', '揽月', '熄灯'];
+  var CORE = ['青锋', '软剑', '重锤', '长枪', '短匕', '巨阙', '鱼肠', '裂空'];
+  var NOTES = [
+    '开锋时淬的是今夜的月色，砍什么都有点困。',
+    '分量极轻，专为深夜提不动重物的人打造。',
+    '剑身有一道细纹，是第 37 锤手滑的纪念。',
+    '挥舞时会发出轻微的叮咚声，与白噪音八音盒同厂。',
+    '只在天亮前出鞘。其余时间建议挂墙上。',
+    '本铺担保三件套：够亮、够直、够唬人。',
+    '据传能斩断一切拖延。据传。',
+    '成品自带 BGM：万籁俱寂一声锤。'
+  ];
+
+  var hits = 0;
+
+  function hashOf(str) {
+    var h = 0;
+    for (var i = 0; i < str.length; i++) h = (h * 131 + str.charCodeAt(i)) >>> 0;
+    return h >>> 0;
+  }
+
+  function spark() {
+    var anvil = $('anvil');
+    var r = anvil.getBoundingClientRect();
+    for (var i = 0; i < 5; i++) {
+      var s = document.createElement('div');
+      s.className = 'spark';
+      s.style.left = (r.left + r.width / 2 + (Math.random() - 0.5) * 40) + 'px';
+      s.style.top = (r.top + r.height * 0.6) + 'px';
+      s.style.setProperty('--sx', (Math.random() - 0.5) * 90 + 'px');
+      s.style.setProperty('--sy', (-30 - Math.random() * 60) + 'px');
+      document.body.appendChild(s);
+      (function (el) { setTimeout(function () { el.remove(); }, 550); })(s);
+    }
+  }
+
+  function forge() {
+    // 名字 = 出炉时刻（同一分钟出炉的同款）
+    var now = new Date();
+    var seedStr = 'forge-' + now.getHours() + ':' + now.getMinutes();
+    var h = hashOf(seedStr);
+    var name = PREFIX[h % PREFIX.length] + '·' + CORE[(h >> 3) % CORE.length];
+    var star = 1 + (h >> 5) % 5;
+    $('s-word').textContent = '🗡️';
+    $('s-name').textContent = '「' + name + '」';
+    $('s-star').textContent = '★★★★★☆☆☆☆☆'.slice(5 - star, 10 - star + 5 - star + star);
+    $('s-note').textContent = NOTES[(h >> 7) % NOTES.length];
+    $('again').classList.add('show');
+  }
+
+  $('anvil').addEventListener('click', function () {
+    hits++;
+    $('hits').textContent = String(hits);
+    $('fill').style.width = (hits / NEED * 100) + '%';
+    var self = this;
+    self.classList.remove('hit');
+    void self.offsetWidth;
+    self.classList.add('hit');
+    spark();
+    if (hits >= NEED) {
+      hits = 0;
+      $('hits').textContent = '0';
+      $('fill').style.width = '0%';
+      forge();
+    }
+  });
+
+  $('again').addEventListener('click', function () {
+    this.classList.remove('show');
+    $('s-word').textContent = '';
+    $('s-name').textContent = '';
+    $('s-star').textContent = '';
+    $('s-note').textContent = '';
+    hits = 0;
+    $('hits').textContent = '0';
+    $('fill').style.width = '0%';
+  });
+})();
+</script>
+</body>
+</html>
