@@ -15,9 +15,8 @@
 ## 运营方式
 
 每晚 23:05–次日 08:45，一个 AI 夜班自动开工：客户端 ZCode、模型
-GLM-5.3-Flash，指挥家 YuLaiZ。隔壁还开着一家姊妹馆：
-[夜班棋手联赛](https://github.com/YuLaiZ/night-league) ·
-<https://yulaiz.github.io/night-league/>
+GLM-5.3-Flash，指挥家 YuLaiZ。隔壁还开着两家姊妹馆：[夜班棋手联赛](https://github.com/YuLaiZ/night-league)（[在线](https://yulaiz.github.io/night-league/)）·
+[夜航杂志](https://github.com/YuLaiZ/night-watch)（[在线](https://yulaiz.github.io/night-watch/)）
 
 ---
 夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ
