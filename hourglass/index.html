@@ -125,156 +125,222 @@
 (function () {
   'use strict';
 
+  var $ = function (id) { return document.getElementById(id); };
   var TOTAL = 200;
   var cv = document.getElementById('cv');
   var ctx = cv.getContext('2d');
-  var grains = [];   // {x, y, vx, vy, inTop}
+  var W = cv.width, H = cv.height;
+  var gateY = H / 2;
+
+  var remaining = TOTAL;   // 上室沙量
+  var landed = 0;          // 下室沙量
+  var falling = [];        // 正在下落的粒 {x, y, vy}
+  var lastPass = 0;
   var flipping = false;
-  var last = Date.now();
 
-  var SAYS = [
-    '漏完一趟大约二十秒。比真实时间好懂多了。',
-    '翻转的时候，沙子其实短暂地失重了一下——像深夜的你。',
-    '上室的沙在等，下室的沙在攒。都挺忙的。',
-    '两百粒沙，每一粒都以为自己是主角。'
-  ];
+  var SAND = '#e2c07a';
+  var SAND_DIM = 'rgba(226, 192, 122, 0.85)';
 
-  function spawn() {
-    grains = [];
-    for (var i = 0; i < TOTAL; i++) {
-      grains.push({ x: 0, y: 0, vx: 0, vy: 0, state: 'settled' });
-    }
-    settleTop(grains);
+  // 上室粒子表：撒满漏斗后按深度降序（贴底的在前），
+  // 显示前 remaining 粒——沙体始终坐在斗底，表面随漏出水平下降
+  var topGrid = [];
+  var botGrid = [];
+
+  var TOP_Y = 26;                 // 漏斗内顶
+  var TOP_BOT = gateY - 12;       // 漏斗内底（喉口上方）
+  var TOP_HALF = 84;              // 漏斗顶口半宽
+  var NECK_HALF = 4;              // 喉口半宽
+
+  function wallHalf(y) {
+    var t = (y - TOP_Y) / (TOP_BOT - TOP_Y);
+    return TOP_HALF * (1 - t) + NECK_HALF * t;
   }
 
-  // 把未落下的沙铺在上室
-  function settleTop(list) {
-    var cx = cv.width / 2;
-    var top = 40;
-    list.forEach(function (g, i) {
-      if (g.state !== 'settled' || g.y !== 0) return;
-      var row = Math.floor(i / 12), col = i % 12;
-      g.x = cx - 55 + col * 10 + (Math.random() - 0.5) * 3;
-      g.y = top + row * 3 + Math.random() * 2;
-    });
+  function buildTop() {
+    topGrid = [];
+    while (topGrid.length < TOTAL) {
+      var y = TOP_Y + Math.random() * (TOP_BOT - TOP_Y);
+      var hw = wallHalf(y);
+      topGrid.push({ x: W / 2 + (Math.random() * 2 - 1) * (hw - 3), y: y });
+    }
+    topGrid.sort(function (a, b) { return b.y - a.y; });
   }
 
-  var gateY = 0;   // 漏口 y
-  var flowTimer = null;
-
-  function countTop() {
-    var n = 0;
-    for (var i = 0; i < grains.length; i++) {
-      if (grains[i].y < gateY - 4) n++;
+  // 下室堆位表：底部摊平、上部圆顶；粒位带大抖动，堆出来才有颗粒感
+  function buildBot() {
+    botGrid = [];
+    var i = 0;
+    var level = 0;
+    while (i < TOTAL && level < 40) {
+      var y = H - 18 - level * (2.1 + Math.random() * 1.2) + (Math.random() - 0.5) * 3;
+      var half;
+      if (level < 3) {
+        half = 80;                      // 摊平的堆底
+      } else {
+        var t = (level - 2) / 15;
+        half = Math.max(7, 80 * Math.sqrt(Math.max(0, 1 - t * t)));
+      }
+      var perRow = Math.max(2, Math.round(half / 4.6));
+      for (var k = 0; k < perRow && i < TOTAL; k++, i++) {
+        var fx = (perRow === 1) ? 0.5 : k / (perRow - 1);
+        botGrid.push({
+          x: W / 2 + (fx - 0.5) * 2 * half + (Math.random() - 0.5) * (half * 0.3 + 6),
+          y: y + (Math.random() - 0.5) * 2
+        });
+      }
+      level++;
     }
-    return n;
+    while (i < TOTAL) {                 // 兜底：极少数塞进堆体
+      botGrid.push({ x: W / 2 + (Math.random() - 0.5) * 30, y: H - 24 - Math.random() * 34 });
+      i++;
+    }
+  }
+
+  function surfaceY() {
+    return landed > 0 ? botGrid[landed - 1].y - 2 : H - 18;
+  }
+
+  function drawGlass() {
+    var cy = W / 2;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.55)';
+    ctx.beginPath();
+    // 左壁：上口 → 喉 → 下口
+    ctx.moveTo(cy - TOP_HALF, 16);
+    ctx.lineTo(cy - NECK_HALF - 2, gateY - 4);
+    ctx.lineTo(cy - TOP_HALF, H - 16);
+    // 右壁
+    ctx.moveTo(cy + TOP_HALF, 16);
+    ctx.lineTo(cy + NECK_HALF + 2, gateY - 4);
+    ctx.lineTo(cy + TOP_HALF, H - 16);
+    ctx.stroke();
+
+    // 上下口沿（木框感）
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.4)';
+    ctx.beginPath();
+    ctx.moveTo(cy - TOP_HALF - 4, 16); ctx.lineTo(cy + TOP_HALF + 4, 16);
+    ctx.moveTo(cy - TOP_HALF - 4, H - 16); ctx.lineTo(cy + TOP_HALF + 4, H - 16);
+    ctx.stroke();
+
+    // 玻璃高光
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(220, 232, 255, 0.14)';
+    ctx.beginPath();
+    ctx.moveTo(cy - TOP_HALF + 10, 24);
+    ctx.lineTo(cy - NECK_HALF - 6, gateY - 12);
+    ctx.moveTo(cy + TOP_HALF - 10, H - 24);
+    ctx.lineTo(cy + NECK_HALF + 6, gateY + 12);
+    ctx.stroke();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var cy = W / 2;
+    drawGlass();
+
+    // 上室沙堆：前 remaining 粒（表在顶部，随漏出下降）
+    ctx.fillStyle = SAND;
+    var i, p;
+    for (i = 0; i < remaining; i++) {
+      p = topGrid[i];
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+    // 堆面一层提亮，读起来有"沙堆"的体积
+    if (remaining > 0) {
+      ctx.fillStyle = SAND_DIM;
+      var surf = topGrid[remaining - 1].y;   // 最浅的显示粒即表面
+      for (i = 0; i < remaining; i++) {
+        p = topGrid[i];
+        if (p.y < surf + 6) ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+      }
+    }
+
+    // 下室沙堆：前 landed 粒
+    ctx.fillStyle = SAND;
+    for (i = 0; i < landed; i++) {
+      p = botGrid[i];
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+    }
+
+    // 下落中的沙：喉口到堆面的一条细流
+    ctx.fillStyle = SAND_DIM;
+    for (i = 0; i < falling.length; i++) {
+      ctx.fillRect(falling[i].x - 1.5, falling[i].y - 1.5, 3, 3);
+    }
   }
 
   function tick() {
     var now = Date.now();
-    var dt = Math.min(60, now - last);
-    last = now;
-    var W = cv.width, H = cv.height;
-    gateY = H / 2;
-
-    ctx.clearRect(0, 0, W, H);
-    // 玻璃轮廓：两个三角漏斗
-    ctx.strokeStyle = 'rgba(199, 208, 226, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(40, 8); ctx.lineTo(W - 40, 8);
-    ctx.lineTo(W / 2 + 3, gateY - 3);
-    ctx.lineTo(W - 40, H - 8);
-    ctx.lineTo(40, H - 8);
-    ctx.lineTo(W / 2 - 3, gateY - 3);
-    ctx.closePath();
-    ctx.stroke();
-
-    // 沙粒物理：上室沙向漏口汇聚，过口后自由落体，下室堆积
-    for (var i = 0; i < grains.length; i++) {
-      var g = grains[i];
-      if (g.state === 'done') {
-        // 下室：固定在堆上
-        continue;
+    if (!flipping) {
+      // 漏口限流：每 90ms 放行一粒，全程约二十秒，与文案一致
+      if (remaining > 0 && now - lastPass > 90) {
+        lastPass = now;
+        remaining--;
+        falling.push({
+          x: W / 2 + (Math.random() - 0.5) * 6,
+          y: gateY - 2,
+          vy: 0.25 + Math.random() * 0.35,
+          vx: (Math.random() - 0.5) * 0.34   // 每帧横向漂移，落成散乱的沙流
+        });
       }
-      var dy = gateY - g.y;
-      if (dy > 4) {
-        // 上室：向漏口缓慢滑落（漏斗壁内）
-        g.vy += 0.05 * dt / 16;
-        g.vx += ((W / 2 - g.x) * 0.004) * dt / 16;
-        g.x += g.vx * dt / 16;
-        g.y += g.vy * dt / 16;
-        if (g.y >= gateY - 3 && Math.abs(g.x - W / 2) < 3) {
-          g.vy = 0.4;   // 开始下落
-        } else if (g.y > gateY - 3) {
-          g.x = W / 2 + (Math.random() - 0.5) * 2;
+      var floor = surfaceY();
+      for (var i = falling.length - 1; i >= 0; i--) {
+        var f = falling[i];
+        f.vy += 0.12;
+        f.x += f.vx;
+        f.y += f.vy;
+        if (f.y >= floor) {
+          falling.splice(i, 1);
+          landed++;
         }
-      } else {
-        // 下室：下落直到堆顶
-        g.vy += 0.12 * dt / 16;
-        g.y += g.vy * dt / 16;
-        var floor = H - 10 - Math.floor((g.x - 0) / 0) * 0;
-        // 堆顶高度按已落下数量粗略抬升
-        var doneCount = 0;
-        for (var j = 0; j < grains.length; j++) if (grains[j].state === 'done') doneCount++;
-        floor = H - 10 - doneCount * 0.5;
-        if (g.y >= floor) {
-          g.y = floor;
-          g.state = 'done';
-        }
-        if (g.x < 24) g.x = 24;
-        if (g.x > W - 24) g.x = W - 24;
       }
-      // 绘制
-      ctx.fillStyle = '#e8d9a8';
-      ctx.fillRect(g.x - 1, g.y - 1, 2, 2);
     }
-    requestAnimationFrame(tick);
+    draw();
   }
+
+  var accAngle = 0;   // 累计翻转角
 
   function flip() {
     if (flipping) return;
     flipping = true;
+    // 绕纵轴转半圈：沙漏左右对称，内容翻转无感；
+    // 不能把画布转 180°——那样画布里的"下落"在屏幕上会变成上升
+    accAngle += 180;
     var glass = document.getElementById('glass');
-    glass.classList.add('flipping');
+    glass.style.transform = 'perspective(600px) rotateY(' + accAngle + 'deg)';
     $('say').textContent = '哗——整个世界倒了个个儿。';
-    updateCount();   // 同步计数（后台冻结环境下也能立即反映）
+    updateCount();
     setTimeout(function () {
-      glass.classList.remove('flipping');
-      // 重力方向翻转：把 done/settled 全部重置到「新的上室」
-      grains.forEach(function (g) {
-        g.y = cv.height - g.y;
-        g.x = cv.width - g.x;
-        g.vy = 0; g.vx = 0;
-        g.state = 'settled';
-      });
-      settleTop(grains);
+      // 悬在半空的沙归入下室，然后上下对调
+      landed += falling.length;
+      falling = [];
+      var total = remaining + landed;
+      remaining = landed;
+      landed = total - remaining;
+      buildTop();
+      buildBot();
       flipping = false;
       updateCount();
       $('say').textContent = '翻好了。沙子假装什么都没发生，继续漏。';
-    }, 620);
+    }, 640);
   }
 
   function updateCount() {
-    var gy = cv.height / 2;
-    var top = 0, bot = 0;
-    for (var i = 0; i < grains.length; i++) {
-      if (grains[i].y < gy - 4) top++; else bot++;
-    }
-    $('top-n').textContent = String(top);
-    $('bot-n').textContent = String(bot);
+    $('top-n').textContent = String(remaining);
+    $('bot-n').textContent = String(landed);
   }
 
   var glassEl = document.getElementById('glass');
   glassEl.addEventListener('click', flip);
   $('flip').addEventListener('click', flip);
 
-  window.addEventListener('resize', function () { /* 尺寸固定 280x360，无需处理 */ });
-
-  spawn();
+  buildTop();
+  buildBot();
   updateCount();
   tick();
-  // 定时刷新计数
+  // 用 interval 驱动而非 rAF：后台标签页 rAF 会停摆，沙漏就整个冻住了
+  setInterval(tick, 33);
   setInterval(updateCount, 500);
   window.__hgReady = true;
 })();

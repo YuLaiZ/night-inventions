@@ -184,6 +184,7 @@
     $('state').textContent = '打乱中';
     $('state').style.color = '';
     $('verdict').textContent = '';
+    render();
   }
 
   function isSolved() {
@@ -229,7 +230,7 @@
       solved = true;
       $('state').textContent = '已归位';
       $('state').style.color = 'var(--gold)';
-      $('verdict').textContent = '归位。今晚纷乱的念头，一块块都齐了。晚安， puzzle master。';
+      $('verdict').textContent = '归位。今晚纷乱的念头，一块块都齐了。晚安，摆牌的人。';
       render();
       return;
     }
@@ -252,7 +253,7 @@
 
   render();
   if (solved) {
-    $('verdict').textContent = '归位。今晚纷乱的念头，一块块都齐了。晚安， puzzle master。';
+    $('verdict').textContent = '归位。今晚纷乱的念头，一块块都齐了。晚安，摆牌的人。';
     return;
   }
 })();

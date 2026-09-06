@@ -139,7 +139,8 @@
 
   function size() {
     var w = document.querySelector('.dark').clientWidth;
-    var h = Math.round(w * 1.25);   // 竖长黑屋
+    // 桌面用横一点的屋子，别拉出一个顶天立地的大黑框；手机保持竖长
+    var h = Math.round(w > 480 ? Math.min(540, w * 0.72) : w * 1.25);
     var dpr = window.devicePixelRatio || 1;
     cv.width = Math.round(w * dpr);
     cv.height = Math.round(h * dpr);
@@ -147,22 +148,43 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  function scatter() {
+  var foundFlags = [];        // 按句子序号记录照亮状态，resize 重铺时不丢进度
+  var fontSize = 13;
+
+  function scatter(keepFound) {
+    if (!keepFound) {
+      foundFlags = SENTENCES.map(function () { return false; });
+    }
     sentences = [];
     foundN = 0;
-    finished = false;
-    document.getElementById('found').textContent = '0';
-    document.getElementById('rehide').classList.remove('show');
+    for (var i = 0; i < SENTENCES.length; i++) if (foundFlags[i]) foundN++;
+    finished = foundN >= SENTENCES.length;
+    document.getElementById('found').textContent = String(foundN);
+    document.getElementById('rehide').classList.toggle('show', finished);
     var w = cv.clientWidth, h = cv.clientHeight;
+    fontSize = Math.max(13, Math.min(15, Math.floor(w / 38)));
+    ctx.font = fontSize + 'px system-ui, "PingFang SC", sans-serif';
+    var placed = [];
     for (var i = 0; i < SENTENCES.length; i++) {
-      // 分 8 行布点，行内随机横向位置，避免重叠
-      var row = Math.floor(i / 2);
-      var col = i % 2;
+      // 每句一个纵向槽位，铺满整间黑屋；左右交错，按文本实宽收拢防裁边
+      var t = i / (SENTENCES.length - 1);
+      var half = ctx.measureText(SENTENCES[i]).width / 2 + 8;
+      var x = Math.max(half, Math.min(w - half, w * (0.3 + (i % 2) * 0.4) + (Math.random() - 0.5) * w * 0.12));
+      var y = h * (0.09 + t * 0.78) + (Math.random() - 0.5) * h * 0.04;
+      // 与已放句子重叠就往下挪，兜底防叠字
+      var guard = 0;
+      while (guard++ < 40 && placed.some(function (p) {
+        return Math.abs(p.x - x) < p.half + half && Math.abs(p.y - y) < 22;
+      })) {
+        y += 24;
+      }
+      if (y > h - 14) y = h - 14;
+      placed.push({ x: x, y: y, half: half });
       sentences.push({
-        x: w * (0.16 + col * 0.5) + (Math.random() - 0.5) * w * 0.14,
-        y: h * (0.1 + row * 0.115) + (Math.random() - 0.5) * h * 0.05,
+        x: x,
+        y: y,
         text: SENTENCES[i],
-        found: false
+        found: foundFlags[i]
       });
     }
     draw();
@@ -213,7 +235,7 @@
       if (!s.found) continue;
       var underLight = mouse.on && Math.sqrt(Math.pow(s.x - mouse.x, 2) + Math.pow(s.y - mouse.y, 2)) < RADIUS;
       ctx.fillStyle = underLight ? 'rgba(233, 228, 211, 0.96)' : 'rgba(233, 228, 211, 0.45)';
-      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.font = fontSize + 'px system-ui, "PingFang SC", sans-serif';
       ctx.fillText(s.text, s.x, s.y);
     }
 
@@ -235,6 +257,7 @@
       var dx = s.x - mouse.x, dy = s.y - mouse.y;
       if (Math.sqrt(dx * dx + dy * dy) < RADIUS * 0.8) {
         s.found = true;
+        foundFlags[i] = true;
         foundN++;
         document.getElementById('found').textContent = String(foundN);
         if (foundN >= SENTENCES.length && !finished) {
@@ -272,7 +295,11 @@
     scatter();
   });
 
-  window.addEventListener('resize', function () { size(); scatter(); });
+  var rsTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(rsTimer);
+    rsTimer = setTimeout(function () { size(); scatter(true); }, 180);
+  });
 
   size();
   scatter();

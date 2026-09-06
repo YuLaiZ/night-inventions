@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多面骰</title>
+<title>六面骰</title>
 <style>
   :root {
     --bg-0: #0a0d17;
@@ -50,35 +50,60 @@
   .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
   .sub em { font-style: normal; color: var(--gold); }
 
-  .dice-visual {
-    margin-top: clamp(20px, 4vw, 26px);
-    font-family: var(--mono);
-    font-size: clamp(52px, 14vw, 76px);
-    color: var(--ink-strong);
-    line-height: 1.3;
-    min-height: 1.3em;
+  .dice-stage {
+    --d: clamp(104px, 26vw, 128px);
+    margin-top: clamp(26px, 6vw, 40px);
+    perspective: 640px;
   }
-  .dice-note { margin-top: 4px; color: var(--ink-dim); font-size: 14px; min-height: 1.6em; }
-
-  .sides-row {
-    margin-top: clamp(16px, 4vw, 22px);
+  .dice-cube {
+    width: var(--d);
+    height: var(--d);
+    margin: 0 auto;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 1.15s cubic-bezier(0.18, 0.72, 0.22, 1);
+  }
+  .face {
+    position: absolute;
+    width: var(--d);
+    height: var(--d);
+    border-radius: 18px;
+    background: linear-gradient(160deg, #f8f4e9, #e6dfcb);
+    border: 1px solid rgba(0, 0, 0, 0.22);
+    box-shadow: inset 0 0 16px rgba(60, 50, 30, 0.14);
     display: flex;
+    align-items: center;
     justify-content: center;
-    gap: 8px;
-    flex-wrap: wrap;
   }
-  button.side {
-    font-family: var(--mono);
-    font-size: 14px;
-    color: var(--ink-dim);
-    background: rgba(156, 200, 255, 0.05);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 8px 14px;
-    cursor: pointer;
+  .f-front  { transform: translateZ(calc(var(--d) / 2)); }
+  .f-back   { transform: rotateY(180deg) translateZ(calc(var(--d) / 2)); }
+  .f-right  { transform: rotateY(90deg) translateZ(calc(var(--d) / 2)); }
+  .f-left   { transform: rotateY(-90deg) translateZ(calc(var(--d) / 2)); }
+  .f-top    { transform: rotateX(90deg) translateZ(calc(var(--d) / 2)); }
+  .f-bottom { transform: rotateX(-90deg) translateZ(calc(var(--d) / 2)); }
+  .pips {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    width: 74%;
+    height: 74%;
   }
-  button.side.sel { color: var(--bg-0); background: var(--ice); border-color: var(--ice); }
-  button.side:hover { border-color: var(--ice); }
+  .pip {
+    width: calc(var(--d) * 0.15);
+    height: calc(var(--d) * 0.15);
+    border-radius: 50%;
+    background: #2c3242;
+    place-self: center;
+    box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.35);
+  }
+  .dice-shadow {
+    width: calc(var(--d) * 1.15);
+    height: 16px;
+    margin: 28px auto 0;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0) 70%);
+  }
+  .dice-note { margin-top: 14px; color: var(--ink-dim); font-size: 14px; min-height: 1.6em; }
 
   .go-row { margin-top: clamp(16px, 4vw, 22px); }
   button.roll {
@@ -109,20 +134,21 @@
 <main>
   <a class="back-home" href="../">← 陈列馆</a>
 
-  <h1>多面骰</h1>
+  <h1>六面骰</h1>
   <p class="sub">选择困难、谁洗碗、今晚几点睡——<em>交给骰子</em>。它没有立场，只有点数。</p>
 
-  <div class="dice-visual" id="face">?</div>
-  <p class="dice-note" id="note">选择面数，然后掷。</p>
-
-  <div class="sides-row" id="sides">
-    <button class="side" data-s="4" type="button">d4</button>
-    <button class="side sel" data-s="6" type="button">d6</button>
-    <button class="side" data-s="8" type="button">d8</button>
-    <button class="side" data-s="12" type="button">d12</button>
-    <button class="side" data-s="20" type="button">d20</button>
-    <button class="side" data-s="100" type="button">d100</button>
+  <div class="dice-stage">
+    <div class="dice-cube" id="cube">
+      <div class="face f-front" data-n="1"></div>
+      <div class="face f-back" data-n="6"></div>
+      <div class="face f-right" data-n="2"></div>
+      <div class="face f-left" data-n="5"></div>
+      <div class="face f-top" data-n="3"></div>
+      <div class="face f-bottom" data-n="4"></div>
+    </div>
+    <div class="dice-shadow"></div>
   </div>
+  <p class="dice-note" id="note">一枚六面骰，掷到几点算几点。</p>
 
   <div class="go-row">
     <button class="roll" id="roll" type="button">掷骰</button>
@@ -139,28 +165,79 @@
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var sides = 6;
 
-  document.querySelectorAll('button.side').forEach(function (b) {
-    b.addEventListener('click', function () {
-      document.querySelectorAll('button.side').forEach(function (x) { x.classList.remove('sel'); });
-      this.classList.add('sel');
-      sides = +this.getAttribute('data-s');
-      $('face').textContent = '?';
-      $('note').textContent = '已换上 ' + sides + ' 面骰。';
-    });
-  });
+  var rolling = false;
+  var lastV = 0;
+  var lastPose = '';
+  var cube = $('cube');
+
+  var PIP_CELLS = {
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 3, 6, 2, 5, 8]
+  };
+
+  function pipFace(v) {
+    var wrap = document.createElement('div');
+    wrap.className = 'pips';
+    var cells = PIP_CELLS[v] || [];
+    for (var c = 0; c < 9; c++) {
+      var cell = document.createElement('div');
+      if (cells.indexOf(c) !== -1) {
+        var pip = document.createElement('div');
+        pip.className = 'pip';
+        cell.appendChild(pip);
+      }
+      wrap.appendChild(cell);
+    }
+    return wrap;
+  }
+
+  // 真骰子：掷出几，就转到几的面对着观众。各面基础姿态（对面点数和为七）
+  var FACE_POSE = { 1: [0, 0], 2: [0, -90], 3: [-90, 0], 4: [90, 0], 5: [0, 90], 6: [0, 180] };
+
+  function poseFor(v) {
+    var b = FACE_POSE[v];
+    var kx = 360 * (2 + Math.floor(Math.random() * 2));
+    var ky = 360 * (2 + Math.floor(Math.random() * 2));
+    var t = 'rotateX(' + (b[0] + kx) + 'deg) rotateY(' + (b[1] + ky) + 'deg)';
+    if (t === lastPose) t = 'rotateX(' + (b[0] + kx + 360) + 'deg) rotateY(' + (b[1] + ky) + 'deg)';
+    lastPose = t;
+    return t;
+  }
+
+
+  function commentFor(v) {
+    if (v === 6) return '满点！今晚的运气全用在这一下了。';
+    if (v === 1) return '一点。命运表示：它也没办法。';
+    if (v > 3) return '不错，这个点数够你理直气壮。';
+    return '点数平平，但胜在真实。';
+  }
 
   $('roll').addEventListener('click', function () {
-    var v = 1 + Math.floor(Math.random() * sides);
-    $('face').textContent = String(v);
-    var comment;
-    if (v === sides) comment = '满点！今晚的运气全用在这一下了。';
-    else if (v === 1) comment = '一点。命运表示：它也没办法。';
-    else if (v > sides / 2) comment = '不错，这个点数够你理直气壮。';
-    else comment = '点数平平，但胜在真实。';
-    $('note').textContent = 'd' + sides + ' → ' + v + '。' + comment;
+    if (rolling) return;
+    rolling = true;
+    var note = $('note');
+    var finalV = 1 + Math.floor(Math.random() * 6);
+    note.textContent = '骰子在桌上转……';
+    // 真骰子：转出点数面对着观众，翻滚两三圈后停住
+    cube.style.transform = poseFor(finalV);
+    setTimeout(function () {
+      var again = finalV === lastV ? '又是它——' : '';
+      note.textContent = '掷出 ' + finalV + ' 点。' + again + commentFor(finalV);
+      lastV = finalV;
+      rolling = false;
+    }, 1250);
   });
+
+  // 立方体六面铺点数（对面和为七）
+  document.querySelectorAll('.face[data-n]').forEach(function (f) {
+    f.appendChild(pipFace(+f.getAttribute('data-n')));
+  });
+
 })();
 </script>
 </body>

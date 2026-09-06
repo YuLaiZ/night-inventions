@@ -61,14 +61,13 @@
 
   .fish {
     margin-top: clamp(18px, 4vw, 26px);
-    font-size: clamp(88px, 24vw, 130px);
-    line-height: 1.3;
     cursor: pointer;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
     display: inline-block;
     transition: transform 0.08s ease;
   }
+  .fish svg { width: clamp(180px, 48vw, 230px); height: auto; display: block; }
   .fish:active { transform: scale(0.94); }
   .fish.hit { animation: knock 0.18s ease; }
   @keyframes knock {
@@ -114,7 +113,41 @@
 
   <div class="merit"><span id="merit">0</span><small> 功德</small></div>
 
-  <div class="fish" id="fish">🪵</div>
+  <div class="fish" id="fish" role="button" aria-label="敲木鱼">
+    <svg viewBox="0 0 260 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <radialGradient id="muyu-wood" cx="42%" cy="30%" r="85%">
+          <stop offset="0%" stop-color="#d9ad6b"/>
+          <stop offset="55%" stop-color="#a87a40"/>
+          <stop offset="100%" stop-color="#6b441e"/>
+        </radialGradient>
+        <linearGradient id="muyu-slot" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1f1004"/>
+          <stop offset="70%" stop-color="#3a2310"/>
+          <stop offset="100%" stop-color="#573818"/>
+        </linearGradient>
+      </defs>
+      <!-- 垫座 -->
+      <ellipse cx="132" cy="172" rx="94" ry="13" fill="#1c1206"/>
+      <ellipse cx="132" cy="169" rx="94" ry="13" fill="#2e1f0e"/>
+      <!-- 鱼身：团鱼形，昂首缩尾——头部（右）圆鼓上昂，背部斜坡向尾（左下）收，底部椭圆 -->
+      <path d="M 224 84
+               C 220 62 190 48 148 46
+               C 104 44 70 58 54 84
+               C 42 104 40 126 48 140
+               C 58 158 100 170 146 170
+               C 194 170 228 152 232 118
+               C 234 104 230 92 224 84 Z"
+            fill="url(#muyu-wood)" stroke="#4a3012" stroke-width="2.5"/>
+      <!-- 头部正中开口（音孔）：一道斜切进身体的深缝 -->
+      <path d="M 206 68 C 186 86 164 100 140 110" fill="none" stroke="#0d0701" stroke-width="13" stroke-linecap="round"/>
+      <!-- 开口下缘受光 -->
+      <path d="M 202 74 C 184 90 164 102 144 111" fill="none" stroke="rgba(255,232,190,0.28)" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- 表面柔光：光滑木器反光 -->
+      <ellipse cx="98" cy="84" rx="36" ry="18" fill="rgba(255,244,214,0.16)" transform="rotate(-16 98 84)"/>
+      <path d="M 74 128 Q 106 142 142 140" fill="none" stroke="rgba(255,232,190,0.1)" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+  </div>
   <p class="combo" id="combo"></p>
 
   <p class="say" id="say">敲下第一声，今晚就算修行了。</p>

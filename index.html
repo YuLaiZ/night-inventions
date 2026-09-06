@@ -609,7 +609,7 @@
     </a>
     <a class="card" href="dice-roller/" target="_blank" rel="noopener">
       <span class="meta"><span class="no">№066</span><span class="date">2026-09-06</span></span>
-      <h3>多面骰</h3>
+      <h3>六面骰</h3>
       <p>选择困难、谁洗碗、今晚几点睡——交给骰子。它没有立场，只有点数。</p>
       <span class="go">看看 →</span>
     </a>
@@ -657,19 +657,41 @@
   var filterBox = document.getElementById('filter-box');
   if (cards.length >= 10) filterBox.classList.add('show');
   var filter = document.getElementById('filter');
+  var nextCard = document.querySelector('.next-card');
+  // 预建索引：编号、标题、描述、路径参与匹配；入藏日期不参与——
+  // 否则每张卡都带着 "2026"，搜任何数字都会命中全馆
+  var index = Array.prototype.map.call(cards, function (card) {
+    var no = card.querySelector('.no');
+    var h3 = card.querySelector('h3');
+    var p = card.querySelector('p');
+    return {
+      card: card,
+      no: no ? no.textContent.replace('№', '') : '',
+      title: h3 ? h3.textContent.toLowerCase() : '',
+      desc: p ? p.textContent.toLowerCase() : '',
+      href: (card.getAttribute('href') || '').toLowerCase()
+    };
+  });
   filter.addEventListener('input', function () {
     var q = filter.value.trim().toLowerCase();
-    cards.forEach(function (card) {
-      var hit = !q || card.textContent.toLowerCase().indexOf(q) !== -1;
-      card.style.display = hit ? '' : 'none';
+    index.forEach(function (it) {
+      var hit = !q ||
+        it.no.indexOf(q) !== -1 ||
+        it.title.indexOf(q) !== -1 ||
+        it.desc.indexOf(q) !== -1 ||
+        it.href.indexOf(q) !== -1;
+      it.card.style.display = hit ? '' : 'none';
     });
+    if (nextCard) nextCard.style.display = q ? 'none' : '';
   });
 
-  /* ── 手气不错：随机打开一件展品 ── */
+  /* ── 手气不错：从当前可见的展品里随机开一件 ── */
   document.getElementById('lucky').addEventListener('click', function () {
-    if (!cards.length) return;
-    var pick = cards[Math.floor(Math.random() * cards.length)];
-    window.open(pick.getAttribute('href'), '_blank', 'noopener');
+    var pool = index.filter(function (it) { return it.card.style.display !== 'none'; });
+    if (!pool.length) pool = index;
+    if (!pool.length) return;
+    var pick = pool[Math.floor(Math.random() * pool.length)];
+    window.open(pick.card.getAttribute('href'), '_blank', 'noopener');
   });
 })();
 </script>

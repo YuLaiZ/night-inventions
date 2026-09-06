@@ -140,7 +140,7 @@
 
   <div class="goodnight">
     <div class="gn">晚安，今夜值班的都辛苦了。</div>
-    <div class="sub-gn">再按一次开关，灯就回来。</div>
+    <div class="sub-gn">轻轻点一下任意处，灯就回来。</div>
   </div>
   <div class="spark" id="spark"></div>
 
@@ -153,21 +153,34 @@
   'use strict';
 
   var off = false;
+  var switchBtn = document.getElementById('switch');
   var spark = document.getElementById('spark');
   var sparkX = window.innerWidth / 2, sparkY = window.innerHeight / 2;
   var targetX = sparkX, targetY = sparkY;
 
-  document.getElementById('switch').addEventListener('click', function () {
-    off = !off;
+  function setLights(nextOff) {
+    off = nextOff;
     document.body.classList.toggle('lightsout', off);
-    this.textContent = off ? '开 灯' : '熄 灯';
+    switchBtn.textContent = off ? '开 灯' : '熄 灯';
+  }
+
+  switchBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setLights(!off);
+  });
+
+  // 熄灯后开关随内容一起隐去，点任意处都能把灯叫回来
+  document.addEventListener('click', function () {
+    if (off) setLights(false);
   });
 
   // 微光跟随：弹性追踪（回前台时由 rAF 恢复，位置用墙钟差分自然接续）
-  document.addEventListener('pointermove', function (e) {
+  function chase(e) {
     targetX = e.clientX;
     targetY = e.clientY;
-  });
+  }
+  document.addEventListener('pointermove', chase);
+  document.addEventListener('pointerdown', chase);
 
   function loop() {
     sparkX += (targetX - sparkX) * 0.06;
