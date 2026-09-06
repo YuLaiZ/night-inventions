@@ -274,7 +274,7 @@
     var html = '<div class="time">' + c.time + ' · ' + c.ch + '</div>' +
       '<h2>' + c.theme + '</h2><ul>';
     c.items.forEach(function (it) {
-      html += '<li><span class="no">№' + it[0] + '</span><a href="../' + it[2] + '/" target="_blank" rel="noopener">' + it[1] + '</a></li>';
+      html += '<li><span class="no">№' + it[0] + '</span><a href="' + it[2] + '" target="_blank" rel="noopener">' + it[1] + '</a></li>';
     });
     html += '</ul>';
     if (c.extra) html += '<p class="extra"><span class="mark">本班注：</span>' + c.extra + '</p>';
