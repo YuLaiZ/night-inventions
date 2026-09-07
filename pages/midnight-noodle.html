@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜泡面</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: pointer; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜泡面</h1>
+  <p class="sub">水开了，面还没好。<em>这三分钟谁也跳不过去</em>——包括屏幕前的你。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">水声：关</button>
+  </div>
+  <p class="hint">点水壶倒热水，盖盖，等满三分钟。提前掀盖也行，面会替你记着这笔账。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var deskY = 0;
+  var cup = { x: 0, y: 0, w: 0, h: 0 };     // 杯身（顶宽底窄）
+  var kettle = { x: 0, y: 0, w: 0, h: 0 };
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(380, Math.min(520, Math.round(W * 0.8)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    deskY = Math.round(H * 0.72);
+    cup.w = Math.min(132, W * 0.24);
+    cup.h = cup.w * 1.28;
+    cup.x = W * 0.55 - cup.w / 2;
+    cup.y = deskY - cup.h;
+    kettle.w = Math.min(110, W * 0.2);
+    kettle.h = kettle.w * 1.05;
+    kettle.x = W * 0.2 - kettle.w / 2;
+    kettle.y = deskY - kettle.h;
+  }
+
+  /* ---------- 状态机 ---------- */
+  // idle → pour(1.4s) → waiting(180s) → ready；waiting 点一下=提前开吃，ready 点一下=趁热吃
+  var WAIT_MS = 180000, POUR_MS = 1400;
+  var state = 'idle', stateAt = 0;
+  var steam = [];            // {x, y, vy, sway, life, max, r}
+  var toast = null;          // {text, t0}
+  var rounds = 0;            // 完整吃完的碗数
+
+  function setState(s) {
+    state = s;
+    stateAt = Date.now();
+    if (s === 'waiting') pourSound(false);
+    if (s === 'pour') pourSound(true);
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var now = Date.now();
+    var r = cv.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    var hitKettle = x > kettle.x - 20 && x < kettle.x + kettle.w + 20 && y > kettle.y - 20 && y < kettle.y + kettle.h + 20;
+    var hitCup = x > cup.x - 24 && x < cup.x + cup.w + 24 && y > cup.y - 24 && y < deskY + 10;
+    if (state === 'idle' && hitKettle) {
+      setState('pour');
+    } else if (state === 'waiting' && (hitCup || hitKettle)) {
+      toast = { text: '面还硬着。有些事，急不来。', t0: now };
+      setState('idle');
+      rounds = 0;
+    } else if (state === 'ready' && hitCup) {
+      rounds++;
+      toast = { text: rounds === 1 ? '好了。三分钟的仪式，完成。' : '又好了。深夜的第二碗，也值得。', t0: now };
+      setState('idle');
+    }
+  });
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null, pourGain = null, pourSrc = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      var len = actx.sampleRate;
+      var buf = actx.createBuffer(1, len, actx.sampleRate);
+      var ch = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+      pourSrc = actx.createBufferSource();
+      pourSrc.buffer = buf; pourSrc.loop = true;
+      var bp = actx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
+      pourGain = actx.createGain();
+      pourGain.gain.value = 0;
+      pourSrc.connect(bp); bp.connect(pourGain); pourGain.connect(actx.destination);
+      pourSrc.start();
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function pourSound(on) {
+    if (!pourGain) return;
+    var target = soundOn && on ? 0.07 : 0;
+    pourGain.gain.setTargetAtTime(target, actx.currentTime, 0.12);
+  }
+  function updatePour() {
+    if (!pourGain) return;
+    var target = soundOn && state === 'pour' ? 0.07 : 0;
+    pourGain.gain.setTargetAtTime(target, actx.currentTime, 0.12);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '水声：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '水声：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 蒸汽 ---------- */
+  function stepSteam(now, dt) {
+    var making = (state === 'waiting' && Math.random() < 0.1) || (state === 'ready' && Math.random() < 0.4);
+    if (making && steam.length < 40) {
+      steam.push({
+        x: cup.x + cup.w * (0.2 + Math.random() * 0.6),
+        y: cup.y - 4,
+        vy: 14 + Math.random() * 12,
+        sway: Math.random() * 10,
+        life: 0, max: 2.2 + Math.random() * 1.6,
+        r: 5 + Math.random() * 7
+      });
+    }
+    for (var i = steam.length - 1; i >= 0; i--) {
+      var p = steam[i];
+      p.life += dt;
+      p.y -= p.vy * dt;
+      p.x += Math.sin(now / 600 + p.sway) * 7 * dt;
+      if (p.life > p.max) steam.splice(i, 1);
+    }
+  }
+
+  /* ---------- 绘制 ---------- */
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawRoom(now) {
+    var wall = ctx.createLinearGradient(0, 0, 0, deskY);
+    wall.addColorStop(0, '#04060c');
+    wall.addColorStop(1, '#0b1120');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, W, deskY);
+    // 一盏台灯光晕（右上）
+    var g = ctx.createRadialGradient(W * 0.82, H * 0.2, 0, W * 0.82, H * 0.2, 130);
+    g.addColorStop(0, 'rgba(242, 217, 150, 0.14)');
+    g.addColorStop(1, 'rgba(242, 217, 150, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(W * 0.82 - 130, H * 0.2 - 130, 260, 260);
+    ctx.fillStyle = 'rgba(242, 217, 150, 0.75)';
+    ctx.beginPath(); ctx.arc(W * 0.82, H * 0.2 - 6, 4, 0, Math.PI * 2); ctx.fill();
+    // 书桌
+    var desk = ctx.createLinearGradient(0, deskY, 0, H);
+    desk.addColorStop(0, '#2b2334');
+    desk.addColorStop(1, '#1c1626');
+    ctx.fillStyle = desk;
+    ctx.fillRect(0, deskY, W, H - deskY);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(0, deskY, W, 3);
+    // 桌面木纹
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.lineWidth = 1;
+    for (var i = 1; i < 4; i++) {
+      var wy = deskY + (H - deskY) / 4 * i;
+      ctx.beginPath(); ctx.moveTo(0, wy); ctx.lineTo(W, wy); ctx.stroke();
+    }
+  }
+
+  function drawKettle(now) {
+    var kx = kettle.x, ky = kettle.y, kw = kettle.w, kh = kettle.h;
+    // 壶影
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath(); ctx.ellipse(kx + kw / 2, deskY + 2, kw * 0.5, 4, 0, 0, Math.PI * 2); ctx.fill();
+    // 壶身
+    var body = ctx.createLinearGradient(kx, 0, kx + kw, 0);
+    body.addColorStop(0, '#39445e');
+    body.addColorStop(0.55, '#4a5a7d');
+    body.addColorStop(1, '#323d57');
+    ctx.fillStyle = body;
+    roundRect(kx, ky + kh * 0.28, kw, kh * 0.72, 9);
+    ctx.fill();
+    // 壶颈与盖
+    ctx.fillStyle = '#39445e';
+    roundRect(kx + kw * 0.24, ky + kh * 0.1, kw * 0.52, kh * 0.22, 5);
+    ctx.fill();
+    ctx.fillStyle = '#2a3450';
+    roundRect(kx + kw * 0.18, ky + kh * 0.04, kw * 0.64, kh * 0.09, 4);
+    ctx.fill();
+    // 壶嘴
+    ctx.strokeStyle = '#4a5a7d';
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(kx + kw * 0.86, ky + kh * 0.36);
+    ctx.quadraticCurveTo(kx + kw * 1.1, ky + kh * 0.3, kx + kw * 1.06, ky + kh * 0.16);
+    ctx.stroke();
+    // 把手
+    ctx.strokeStyle = '#2a3450';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(kx + kw * 0.06, ky + kh * 0.55, kh * 0.16, Math.PI * 0.7, Math.PI * 1.6);
+    ctx.stroke();
+    // 蒸汽（水开的呼吸）
+    var puff = (Math.sin(now / 300) + 1) / 2;
+    ctx.fillStyle = 'rgba(220, 228, 245, ' + (0.1 + 0.12 * puff).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.ellipse(kx + kw * 1.02, ky + kh * 0.08 - 6 - puff * 5, 3 + puff * 2, 6 + puff * 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textAlign = 'center';
+    if (state === 'idle') {
+      ctx.font = '12px ' + SANS;
+      ctx.fillStyle = 'rgba(242, 199, 110, ' + (0.55 + 0.35 * Math.sin(now / 520)).toFixed(2) + ')';
+      ctx.fillText('点我，倒热水', kx + kw / 2, ky - 8);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function drawPour(now) {
+    var t = Math.min(1, (now - stateAt) / POUR_MS);
+    var kx = kettle.x + kettle.w * 1.04, ky = kettle.y + kettle.h * 0.18;
+    var cx = cup.x + cup.w / 2, cy = cup.y + 14;
+    // 水流（弧线）
+    ctx.strokeStyle = 'rgba(160, 200, 240, 0.75)';
+    ctx.lineWidth = 3.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(kx, ky);
+    ctx.quadraticCurveTo((kx + cx) / 2 - 8, (ky + cy) / 2 + 30, cx, Math.min(cy + 6, cy + t * (cy + 6 - cy) + 6));
+    ctx.stroke();
+    // 水花点
+    ctx.fillStyle = 'rgba(190, 220, 250, 0.85)';
+    for (var i = 0; i < 3; i++) {
+      var px2 = cx + Math.sin(now / 40 + i * 2.1) * 6;
+      ctx.beginPath(); ctx.arc(px2, cy + 4, 1.4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function drawCup(now) {
+    var cx = cup.x, cy = cup.y, cw = cup.w, ch = cup.h;
+    // 杯影
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath(); ctx.ellipse(cx + cw / 2, deskY + 2, cw * 0.55, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+    // 杯身（上宽下窄）
+    var bodyGrad = ctx.createLinearGradient(cx, 0, cx + cw, 0);
+    bodyGrad.addColorStop(0, '#d8d2c2');
+    bodyGrad.addColorStop(0.5, '#efe9d8');
+    bodyGrad.addColorStop(1, '#c9c2b0');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.moveTo(cx + cw * 0.04, cy);
+    ctx.lineTo(cx + cw * 0.96, cy);
+    ctx.lineTo(cx + cw * 0.88, cy + ch);
+    ctx.lineTo(cx + cw * 0.12, cy + ch);
+    ctx.closePath();
+    ctx.fill();
+    // 品牌带
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx + cw * 0.03, cy + ch * 0.3);
+    ctx.lineTo(cx + cw * 0.97, cy + ch * 0.3);
+    ctx.lineTo(cx + cw * 0.95, cy + ch * 0.52);
+    ctx.lineTo(cx + cw * 0.05, cy + ch * 0.52);
+    ctx.closePath();
+    ctx.fillStyle = '#c65a50';
+    ctx.fill();
+    ctx.fillStyle = '#f2efe4';
+    ctx.font = '700 ' + Math.round(cw * 0.11) + 'px ' + SANS;
+    ctx.textAlign = 'center';
+    ctx.fillText('深夜面', cx + cw / 2, cy + ch * 0.45);
+    ctx.restore();
+    // 杯内水位/面
+    var level = 0;
+    if (state === 'pour') level = Math.min(0.72, ((now - stateAt) / POUR_MS) * 0.72);
+    else if (state === 'waiting' || state === 'ready') level = 0.72;
+    if (level > 0) {
+      var wy2 = cy + ch - ch * 0.86 * level;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx + cw * 0.04, cy);
+      ctx.lineTo(cx + cw * 0.96, cy);
+      ctx.lineTo(cx + cw * 0.88, cy + ch);
+      ctx.lineTo(cx + cw * 0.12, cy + ch);
+      ctx.closePath();
+      ctx.clip();
+      ctx.fillStyle = 'rgba(150, 180, 214, 0.5)';
+      ctx.fillRect(cx, wy2, cw, ch);
+      if (state === 'waiting' || state === 'ready') {
+        // 泡开的面（波浪线）
+        ctx.strokeStyle = 'rgba(222, 196, 140, 0.8)';
+        ctx.lineWidth = 1.6;
+        for (var n2 = 0; n2 < 3; n2++) {
+          ctx.beginPath();
+          for (var sx2 = 0; sx2 <= cw - 16; sx2 += 6) {
+            var yy = wy2 + 12 + n2 * 13 + Math.sin(sx2 / 9 + n2 * 2) * 2.4;
+            if (sx2 === 0) ctx.moveTo(cx + 8 + sx2, yy);
+            else ctx.lineTo(cx + 8 + sx2, yy);
+          }
+          ctx.stroke();
+        }
+      } else {
+        // 干面块
+        ctx.fillStyle = 'rgba(214, 186, 128, 0.85)';
+        roundRect(cx + cw * 0.14, wy2 + 4, cw * 0.72, ch * 0.2, 4);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // 盖子
+    if (state === 'idle' || state === 'pour') {
+      // 开着的盖斜靠杯边
+      ctx.save();
+      ctx.translate(cx + cw + 10, cy + ch * 0.34);
+      ctx.rotate(-0.5);
+      ctx.fillStyle = '#e4ddca';
+      ctx.beginPath(); ctx.ellipse(0, 0, cw * 0.52, cw * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else {
+      // 盖在杯口
+      ctx.fillStyle = '#e4ddca';
+      ctx.beginPath(); ctx.ellipse(cx + cw / 2, cy - 2, cw * 0.52, cw * 0.15, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // ready 时盖子弹开一半
+      if (state === 'ready') {
+        ctx.save();
+        ctx.translate(cx + cw * 0.88, cy - 6);
+        ctx.rotate(0.5);
+        ctx.fillStyle = '#e4ddca';
+        ctx.beginPath(); ctx.ellipse(0, 0, cw * 0.4, cw * 0.1, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawSteam(now) {
+    for (var i = 0; i < steam.length; i++) {
+      var p = steam[i];
+      var a = 0.3 * (1 - p.life / p.max);
+      ctx.fillStyle = 'rgba(222, 230, 245, ' + a.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r + p.life * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function fmt(ms) {
+    var s = Math.max(0, Math.ceil(ms / 1000));
+    return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  function drawTimer(now) {
+    if (state !== 'waiting' && state !== 'ready') return;
+    var remain = WAIT_MS - (now - stateAt);
+    if (state === 'ready') remain = 0;
+    // 桌面小计时牌
+    var bx = cup.x - 8, by = deskY + 14;
+    ctx.font = '13px ' + MONO;
+    var txt = state === 'ready' ? '0:00' : fmt(remain);
+    var w = ctx.measureText('0:00') .width + 30;
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.9)';
+    roundRect(bx, by, w, 26, 7);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(156, 200, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.95)';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, bx + w / 2, by + 18);
+    // 进度条
+    var prog = state === 'ready' ? 1 : Math.min(1, (now - stateAt) / WAIT_MS);
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.25)';
+    ctx.fillRect(bx + 4, by + 22 - 3, (w - 8) * prog, 2.4);
+    ctx.textAlign = 'left';
+  }
+
+  function drawHints(now) {
+    ctx.font = '12px ' + SANS;
+    ctx.textAlign = 'center';
+    if (state === 'waiting') {
+      ctx.fillStyle = 'rgba(139, 150, 173, 0.85)';
+      ctx.fillText('盖上了。点杯子就是提前开吃——想清楚。', W / 2, H - 8);
+    } else if (state === 'ready') {
+      ctx.fillStyle = 'rgba(242, 199, 110, ' + (0.6 + 0.35 * Math.sin(now / 500)).toFixed(2) + ')';
+      ctx.fillText('好了，趁热。点一下开吃。', W / 2, H - 8);
+    } else if (state === 'pour') {
+      ctx.fillStyle = 'rgba(139, 150, 173, 0.85)';
+      ctx.fillText('水注到七分满……', W / 2, H - 8);
+    } else {
+      ctx.fillStyle = 'rgba(139, 150, 173, 0.85)';
+      ctx.fillText('凌晨的一碗面，值得完整的三个分钟。', W / 2, H - 8);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function drawToast(now) {
+    if (!toast) return;
+    var age = now - toast.t0;
+    if (age > 3200) { toast = null; return; }
+    var alpha = age > 2600 ? Math.max(0, 1 - (age - 2600) / 600) : Math.min(1, age / 200);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = '14px ' + SANS;
+    var w = ctx.measureText(toast.text).width + 32;
+    var x = (W - w) / 2, y = H * 0.32;
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.95)';
+    roundRect(x, y, w, 34, 9);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(242, 199, 110, 0.5)';
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    ctx.fillStyle = '#f2c76e';
+    ctx.textAlign = 'left';
+    ctx.fillText(toast.text, x + 16, y + 22);
+    ctx.restore();
+  }
+
+  function drawScene(now) {
+    drawRoom(now);
+    drawKettle(now);
+    if (state === 'pour') drawPour(now);
+    drawCup(now);
+    drawSteam(now);
+    drawTimer(now);
+    drawHints(now);
+    drawToast(now);
+  }
+
+  /* ---------- 主循环（interval 驱动，墙钟推进；后台不冻） ---------- */
+  setInterval(function () {
+    var now = Date.now();
+    if (state === 'pour' && now - stateAt >= POUR_MS) setState('waiting');
+    if (state === 'waiting' && now - stateAt >= WAIT_MS) setState('ready');
+    var dt = Math.min((now - lastTick) / 1000, 0.12);
+    lastTick = now;
+    stepSteam(now, dt);
+    updatePour();
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+  var lastTick = Date.now();
+
+  resize();
+  window.addEventListener('resize', resize);
+})();
+</script>
+</body>
+</html>

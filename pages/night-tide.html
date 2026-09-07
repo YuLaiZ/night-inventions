@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜潮</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #060a14;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: pointer; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>夜潮</h1>
+  <p class="sub">潮水每晚从别处捎来一点消息，<em>退下去之前</em>留在湿沙上。捡走，或者目送它回去。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">潮声：关</button>
+  </div>
+  <p class="hint">点沙上的东西拾进口袋。不捡的话，两轮潮水之后就还给海了。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var horizon = 0;           // 海平线
+  var sandY = 0;             // 干沙起点（潮位上限）
+  var TIDE_MIN = 0, TIDE_MAX = 0;  // 潮缘上下界
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(380, Math.min(540, Math.round(W * 0.84)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    horizon = Math.round(H * 0.42);
+    TIDE_MIN = Math.round(H * 0.55);
+    TIDE_MAX = Math.round(H * 0.74);
+    sandY = TIDE_MIN;
+  }
+
+  /* ---------- 潮汐 ---------- */
+  // 周期 13s：涨 5.5s → 满潮停 1s → 退 5.5s → 干潮停 1s；开局即满潮后退
+  var TIDE_T = 13000;
+  var t0 = Date.now();
+  function tideEdge(now) {
+    var ph = ((now - t0) % TIDE_T) / TIDE_T;
+    var k;
+    if (ph < 0.077) k = 1;                        // 满潮停（edge 最大）
+    else if (ph < 0.5) k = 1 - (ph - 0.077) / 0.423;   // 退
+    else if (ph < 0.577) k = 0;                   // 干潮停
+    else k = (ph - 0.577) / 0.423;                // 涨
+    var e = Math.sin(k * Math.PI / 2);            // 两端缓入缓出
+    return TIDE_MAX - e * (TIDE_MAX - TIDE_MIN);
+  }
+
+  /* ---------- 拾物 ---------- */
+  var KINDS = [
+    { key: 'shell', name: '一枚贝壳', w: 10 },
+    { key: 'glass', name: '一块海玻璃', w: 8 },
+    { key: 'star', name: '一只小海星', w: 6 },
+    { key: 'crab', name: '一只小蟹', w: 5 },
+    { key: 'bottle', name: '一只瓶中信', w: 3, msg: true }
+  ];
+  var MESSAGES = [
+    '别急。海那边有人走得很慢，也很稳。',
+    '今天没钓到鱼的那位，把鱼竿收得很好。',
+    '「早点睡」——字迹被泡开了，只剩这三个字还算清楚。',
+    '一枚很旧的硬币从瓶里滑出来，面额看不清，心意是真的。'
+  ];
+  var items = [];            // {kind, x, y, washes, born, fly}
+  var collected = [];        // 已拾 key 名单
+  var trayFly = null;        // {kind, x0, y0, x1, y1, t0, name}
+  var toast = null;          // {text, t0}
+  var caught = 0;
+
+  function spawnItems(now) {
+    // 干潮后段在湿沙上留下 0-2 件；空滩时保底 1 件，不让海空手而归
+    var n = Math.random() < 0.28 ? 0 : (Math.random() < 0.6 ? 1 : 2);
+    if (items.length === 0) n = Math.max(1, n);
+    for (var i = 0; i < n; i++) {
+      var total = 0, k;
+      for (k = 0; k < KINDS.length; k++) total += KINDS[k].w;
+      var r = Math.random() * total;
+      var kind = KINDS[0];
+      for (k = 0; k < KINDS.length; k++) {
+        r -= KINDS[k].w;
+        if (r <= 0) { kind = KINDS[k]; break; }
+      }
+      items.push({
+        kind: kind.key,
+        name: kind.name,
+        msg: kind.msg ? MESSAGES[Math.floor(Math.random() * MESSAGES.length)] : null,
+        x: W * (0.12 + Math.random() * 0.76),
+        y: TIDE_MIN + 16 + Math.random() * (TIDE_MAX - TIDE_MIN - 26),
+        washes: 0, born: now
+      });
+    }
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var r = cv.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (Math.abs(x - it.x) < 26 && Math.abs(y - it.y) < 22) {
+        items.splice(i, 1);
+        caught++;
+        collected.push(it.kind);
+        if (collected.length > 8) collected.shift();
+        trayFly = { kind: it.kind, x0: it.x, y0: it.y, t0: Date.now(), name: it.name, msg: it.msg };
+        return;
+      }
+    }
+  });
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null, tideGain = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      var len = actx.sampleRate * 3;
+      var buf = actx.createBuffer(1, len, actx.sampleRate);
+      var ch = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+      var src = actx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var lp = actx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 760;
+      tideGain = actx.createGain();
+      tideGain.gain.value = 0;
+      src.connect(lp); lp.connect(tideGain); tideGain.connect(actx.destination);
+      src.start();
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function updateTideSound(now) {
+    if (!tideGain) return;
+    var ph = ((now - t0) % TIDE_T) / TIDE_T;
+    // 涨潮声渐强，退潮渐弱
+    var k = ph < 0.5 ? (1 - ph * 2) : (ph - 0.5) * 2;
+    var target = soundOn ? 0.02 + 0.05 * k : 0;
+    tideGain.gain.setTargetAtTime(target, actx.currentTime, 0.4);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '潮声：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '潮声：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 步进 ---------- */
+  var lastEdge = 0;
+  var spawnArmed = true;
+  function step(now) {
+    var edge = tideEdge(now);
+    // 潮缘扫过拾物 → 记一次冲刷
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      var covered = edge < it.y + 4;   // edge y 越小 = 潮水越往上
+      if (covered && lastEdge >= it.y + 4) {
+        it.washes++;
+        if (it.washes >= 2) {
+          items.splice(i, 1);
+          continue;
+        }
+      }
+      // 小蟹横着溜达
+      if (it.kind === 'crab') {
+        it.x += Math.sin(now / 900 + it.y) * 10 * dtSec(now);
+      }
+    }
+    // 潮缘越过湿沙带下沿 → 干潮后段撒新货
+    if (edge > TIDE_MAX - 24 && spawnArmed) {
+      spawnItems(now);
+      spawnArmed = false;
+    }
+    if (edge < TIDE_MIN + 24) spawnArmed = true;
+    lastEdge = edge;
+    if (toast && now - toast.t0 > 3200) toast = null;
+  }
+  var lastStep = Date.now();
+  function dtSec(now) {
+    var d = (now - lastStep) / 1000;
+    lastStep = now;
+    return Math.min(d, 0.12);
+  }
+
+  /* ---------- 绘制 ---------- */
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  function rnd2(a, b) {
+    var x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function drawSky(now) {
+    var sky = ctx.createLinearGradient(0, 0, 0, horizon);
+    sky.addColorStop(0, '#05080f');
+    sky.addColorStop(1, '#0c1322');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, horizon);
+    for (var i = 0; i < 34; i++) {
+      var sx = rnd2(i, 3) * W;
+      var sy = rnd2(i, 7) * horizon * 0.85;
+      var tw = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(now / 900 + i * 1.9));
+      ctx.globalAlpha = tw * 0.8;
+      ctx.fillStyle = '#cfd9ef';
+      ctx.fillRect(sx, sy, 1.4, 1.4);
+    }
+    ctx.globalAlpha = 1;
+    // 低垂的月亮
+    ctx.fillStyle = '#f4e9c8';
+    ctx.beginPath(); ctx.arc(W * 0.2, horizon - 64, 17, 0, Math.PI * 2); ctx.fill();
+    var halo = ctx.createRadialGradient(W * 0.2, horizon - 64, 12, W * 0.2, horizon - 64, 52);
+    halo.addColorStop(0, 'rgba(244, 233, 200, 0.25)');
+    halo.addColorStop(1, 'rgba(244, 233, 200, 0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(W * 0.2, horizon - 64, 52, 0, Math.PI * 2); ctx.fill();
+    // 海平线远光
+    ctx.fillStyle = 'rgba(242, 199, 110, 0.14)';
+    ctx.fillRect(0, horizon - 2, W, 2);
+  }
+
+  function drawSea(now, edge) {
+    var sea = ctx.createLinearGradient(0, horizon, 0, edge);
+    sea.addColorStop(0, '#0d1830');
+    sea.addColorStop(1, '#13234a');
+    ctx.fillStyle = sea;
+    ctx.fillRect(0, horizon, W, Math.max(0, edge - horizon));
+    // 月光倒影碎光
+    for (var k = 0; k < 10; k++) {
+      var ky = horizon + 8 + k * ((edge - horizon - 10) / 10);
+      if (ky < horizon) continue;
+      var wob = Math.sin(now / 800 + k * 1.9) * (2.5 + k * 0.4);
+      var kw = 4 + rnd2(k, Math.floor(now / 800)) * 13;
+      ctx.fillStyle = 'rgba(244, 233, 200, ' + Math.max(0, (0.4 - k * 0.032)).toFixed(3) + ')';
+      ctx.fillRect(W * 0.2 - kw / 2 + wob, ky, kw, 1.8);
+    }
+    // 浪带：两层推进的半透明水
+    for (var b = 0; b < 2; b++) {
+      var off = b * 26;
+      var be = edge + off * (b === 0 ? 0 : -1);
+      if (be <= horizon + 6) continue;
+      var band = ctx.createLinearGradient(0, be - 34, 0, be);
+      band.addColorStop(0, 'rgba(180, 205, 240, 0)');
+      band.addColorStop(1, 'rgba(190, 214, 245, ' + (0.22 - b * 0.07).toFixed(3) + ')');
+      ctx.fillStyle = band;
+      ctx.beginPath();
+      ctx.moveTo(0, be - 34);
+      for (var sx2 = 0; sx2 <= W; sx2 += 24) {
+        ctx.lineTo(sx2, be - 34 + Math.sin(sx2 / 60 + now / (700 - b * 200) + b * 2) * 2.5);
+      }
+      ctx.lineTo(W, be);
+      ctx.lineTo(0, be);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(226, 236, 248, 0.35)';
+    ctx.fillRect(0, edge - 1, W, 1.6);
+  }
+
+  function drawFoam(now, edge) {
+    // 泡沫缘：两排错落碎泡（天然颗粒）
+    for (var f = 0; f < W / 13 + 2; f++) {
+      var fxp = f * 13 - 6;
+      var fy = edge + Math.sin(fxp / 47 + now / 620) * 3 - rnd2(f, 3) * 5;
+      var fr = 1.6 + rnd2(f, Math.floor(now / 460)) * 3.4;
+      ctx.fillStyle = 'rgba(226, 236, 248, ' + (0.35 + rnd2(f, 3) * 0.4).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(fxp, fy, fr, 0, Math.PI * 2);
+      ctx.fill();
+      if (f % 2 === 0) {
+        ctx.beginPath();
+        ctx.arc(fxp + 6, fy + 7 + Math.sin(fxp / 30 + now / 700) * 2, fr * 0.6, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(226, 236, 248, ' + (0.2 + rnd2(f, 9) * 0.25).toFixed(2) + ')';
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawSand(now, edge) {
+    var sand = ctx.createLinearGradient(0, edge, 0, H);
+    sand.addColorStop(0, '#241f33');
+    sand.addColorStop(1, '#191527');
+    ctx.fillStyle = sand;
+    ctx.fillRect(0, Math.max(0, edge), W, H - edge);
+    // 湿沙反光带（刚被冲刷过的区域）
+    if (edge < H - 4) {
+      var wet = ctx.createLinearGradient(0, edge, 0, Math.min(H, edge + 60));
+      wet.addColorStop(0, 'rgba(150, 170, 205, 0.16)');
+      wet.addColorStop(1, 'rgba(150, 170, 205, 0)');
+      ctx.fillStyle = wet;
+      ctx.fillRect(0, edge, W, Math.min(H - edge, 60));
+    }
+    // 沙粒颗粒
+    for (var s = 0; s < 46; s++) {
+      var sx3 = rnd2(s, 11) * W;
+      var sy3 = edge + 6 + rnd2(s, 17) * Math.max(4, H - edge - 10);
+      ctx.fillStyle = 'rgba(210, 190, 160, ' + (0.05 + rnd2(s, 23) * 0.08).toFixed(3) + ')';
+      ctx.fillRect(sx3, sy3, 1.6, 1.2);
+    }
+  }
+
+  function drawShell(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#e8c9a8';
+    ctx.beginPath();
+    ctx.moveTo(0, 4);
+    ctx.arc(0, 4, 9, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(140, 100, 70, 0.6)';
+    ctx.lineWidth = 1;
+    for (var i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 3.2, 3);
+      ctx.lineTo(i * 4.4, -4.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawSeaGlass(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(0.4);
+    ctx.fillStyle = 'rgba(126, 193, 168, 0.9)';
+    ctx.beginPath();
+    ctx.moveTo(-7, 4); ctx.lineTo(0, -6); ctx.lineTo(7, 3); ctx.lineTo(2, 6); ctx.lineTo(-5, 6);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(1, -4); ctx.lineTo(3, -1); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function drawStar(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(0.5);
+    ctx.fillStyle = '#e0935a';
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var a = i * Math.PI / 5 - Math.PI / 2;
+      var rr = i % 2 === 0 ? 9 : 4;
+      ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function drawCrab(x, y, now) {
+    ctx.save();
+    ctx.translate(x, y);
+    var leg = Math.sin(now / 160) * 2;
+    ctx.strokeStyle = '#d95f4f';
+    ctx.lineWidth = 1.6;
+    for (var s = -1; s <= 1; s += 2) {
+      for (var l = 0; l < 3; l++) {
+        ctx.beginPath();
+        ctx.moveTo(s * 5, -2 + l * 2);
+        ctx.lineTo(s * (10 + l * 1.5), -4 + l * 2 + leg * s);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#e8695a';
+    ctx.beginPath(); ctx.ellipse(0, -1, 6.5, 4.6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e8695a';
+    ctx.beginPath(); ctx.arc(-6, -4, 2.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(6, -4, 2.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b2231';
+    ctx.beginPath(); ctx.arc(-2.4, -2, 1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(2.4, -2, 1, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  function drawBottle(x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-0.5);
+    ctx.fillStyle = 'rgba(170, 200, 180, 0.85)';
+    roundRect(-4, -11, 8, 20, 3); ctx.fill();
+    ctx.fillStyle = '#c8b46a';
+    ctx.fillRect(-2.4, -14, 4.8, 4);
+    ctx.fillStyle = '#e8e0c8';
+    ctx.fillRect(-2.6, -4, 5.2, 7);
+    ctx.restore();
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function drawItems(now, edge) {
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.y < edge + 2) continue;   // 被潮水盖住的先不画
+      var pop = Math.min(1, (now - it.born) / 300);
+      ctx.save();
+      ctx.globalAlpha = pop * (it.washes > 0 ? 0.75 : 1);
+      if (it.kind === 'shell') drawShell(it.x, it.y);
+      else if (it.kind === 'glass') drawSeaGlass(it.x, it.y);
+      else if (it.kind === 'star') drawStar(it.x, it.y);
+      else if (it.kind === 'crab') drawCrab(it.x, it.y, now);
+      else if (it.kind === 'bottle') drawBottle(it.x, it.y);
+      ctx.restore();
+    }
+  }
+
+  function drawTray(now) {
+    // 右上角口袋
+    var px = W - 14, py = 14;
+    ctx.font = '12px ' + SANS;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(199, 208, 226, 0.9)';
+    ctx.fillText('口袋里 ' + caught + ' 件', px, py + 12);
+    ctx.textAlign = 'left';
+    for (var i = 0; i < collected.length; i++) {
+      var k = collected[i];
+      var x = px - 8 - i * 20, y = py + 30;
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      if (k === 'shell') drawShell(x, y);
+      else if (k === 'glass') drawSeaGlass(x, y);
+      else if (k === 'star') drawStar(x, y);
+      else if (k === 'crab') drawCrab(x, y, now);
+      else if (k === 'bottle') drawBottle(x, y);
+      ctx.restore();
+    }
+  }
+
+  function drawFly(now) {
+    if (!trayFly) return;
+    var t = (now - trayFly.t0) / 620;
+    if (t >= 1) {
+      toast = trayFly.msg
+        ? { text: trayFly.name + '——' + trayFly.msg, t0: now }
+        : { text: '拾到：' + trayFly.name, t0: now };
+      trayFly = null;
+      return;
+    }
+    var ex = W - 60, ey = 44;
+    var ease = 1 - Math.pow(1 - t, 2);
+    var x = trayFly.x0 + (ex - trayFly.x0) * ease;
+    var y = trayFly.y0 + (ey - trayFly.y0) * ease - Math.sin(t * Math.PI) * 60;
+    ctx.save();
+    ctx.globalAlpha = 1 - t * 0.3;
+    if (trayFly.kind === 'shell') drawShell(x, y);
+    else if (trayFly.kind === 'glass') drawSeaGlass(x, y);
+    else if (trayFly.kind === 'star') drawStar(x, y);
+    else if (trayFly.kind === 'crab') drawCrab(x, y, now);
+    else if (trayFly.kind === 'bottle') drawBottle(x, y);
+    ctx.restore();
+  }
+
+  function drawToast(now) {
+    if (!toast) return;
+    var age = now - toast.t0;
+    var alpha = age > 2600 ? Math.max(0, 1 - (age - 2600) / 600) : Math.min(1, age / 200);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = '14px ' + SANS;
+    var w = ctx.measureText(toast.text).width + 32;
+    var x = (W - w) / 2, y = H - 64;
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.95)';
+    roundRect(x, y, w, 34, 9);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(242, 199, 110, 0.5)';
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    ctx.fillStyle = '#f2c76e';
+    ctx.textAlign = 'left';
+    ctx.fillText(toast.text, x + 16, y + 22);
+    ctx.restore();
+  }
+
+  function drawScene(now) {
+    var edge = tideEdge(now);
+    drawSky(now);
+    drawSea(now, edge);
+    drawSand(now, edge);
+    drawItems(now, edge);
+    drawFoam(now, edge);
+    drawTray(now);
+    drawFly(now);
+    drawToast(now);
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  setInterval(function () {
+    var now = Date.now();
+    step(now);
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+  t0 = Date.now();
+  // 开局满潮，先来两件给见面礼
+  spawnItems(Date.now());
+})();
+</script>
+</body>
+</html>

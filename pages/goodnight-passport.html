@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晚安护照</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stamp-zone {
+    margin: clamp(26px, 6vw, 40px) auto 0;
+    max-width: 460px;
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stamp {
+    position: relative;
+    width: min(86vw, 340px);
+    height: min(86vw, 340px);
+    border-radius: 50%;
+    border: 2.5px dashed rgba(242, 199, 110, 0.55);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 26px;
+    transition: transform 0.7s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  .stamp::before {
+    content: '';
+    position: absolute;
+    inset: 7px;
+    border-radius: 50%;
+    border: 1px solid rgba(242, 199, 110, 0.25);
+  }
+  .stamp .greet {
+    color: var(--ink-strong);
+    font-size: clamp(30px, 8vw, 44px);
+    font-weight: 700;
+    line-height: 1.25;
+    word-break: break-word;
+    transition: opacity 0.32s ease;
+  }
+  .stamp .lang {
+    color: var(--gold);
+    font-size: 14px;
+    letter-spacing: 0.22em;
+    text-indent: 0.22em;
+    transition: opacity 0.32s ease;
+  }
+  .stamp .note {
+    color: var(--ink-dim);
+    font-size: 12.5px;
+    line-height: 1.6;
+    transition: opacity 0.32s ease;
+  }
+  .stamp.swap { transform: rotate(-9deg) scale(0.97); }
+  .stamp.swap .greet, .stamp.swap .lang, .stamp.swap .note { opacity: 0; }
+
+  .count {
+    margin-top: 18px;
+    color: var(--ink-dim);
+    font-size: 13px;
+    letter-spacing: 0.06em;
+  }
+  .count b { color: var(--ice); font-weight: 600; }
+
+  .go-row { margin-top: clamp(18px, 4vw, 24px); }
+  button.flip {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 34px;
+    cursor: pointer;
+  }
+  button.flip:hover { filter: brightness(1.08); }
+  button.flip:active { transform: scale(0.97); }
+
+  .hint { margin-top: 14px; color: var(--ink-dim); font-size: 13px; }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>晚安护照</h1>
+  <p class="sub">夜班替你收集了世界各地的晚安。<em>睡不着的话</em>，随便借一国的，说给自己听。</p>
+
+  <div class="stamp-zone">
+    <div class="stamp" id="stamp">
+      <div class="greet" id="greet">晚安</div>
+      <div class="lang" id="lang">中 文</div>
+      <div class="note" id="note"></div>
+    </div>
+  </div>
+
+  <p class="count">已收 <b id="count">0</b> 种 · 还在路上</p>
+
+  <div class="go-row">
+    <button class="flip" id="flip" type="button">随机盖一枚</button>
+  </div>
+  <p class="hint">每一枚都会自己转着盖，不用动手也行。最后一枚是梦话。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  // 只收录有把握的写法；最后一枚留给自己
+  var PAGES = [
+    { lang: '中文', greet: '晚安' },
+    { lang: '粤语', greet: '早唞' },
+    { lang: 'English', greet: 'Good night' },
+    { lang: '日本語', greet: 'おやすみなさい' },
+    { lang: '한국어', greet: '안녕히 자세요' },
+    { lang: 'Français', greet: 'Bonne nuit' },
+    { lang: 'Español', greet: 'Buenas noches' },
+    { lang: 'Deutsch', greet: 'Gute Nacht' },
+    { lang: 'Italiano', greet: 'Buonanotte' },
+    { lang: 'Português', greet: 'Boa noite' },
+    { lang: 'Русский', greet: 'Спокойной ночи' },
+    { lang: 'Українська', greet: 'Добраніч' },
+    { lang: 'Polski', greet: 'Dobranoc' },
+    { lang: 'Čeština', greet: 'Dobrou noc' },
+    { lang: 'Slovenčina', greet: 'Dobrú noc' },
+    { lang: 'Magyar', greet: 'Jó éjszakát' },
+    { lang: 'Română', greet: 'Noapte bună' },
+    { lang: 'Български', greet: 'Лека нощ' },
+    { lang: 'Hrvatski', greet: 'Laku noć' },
+    { lang: 'Slovenščina', greet: 'Lahko noč' },
+    { lang: 'Nederlands', greet: 'Goedenacht' },
+    { lang: 'Svenska', greet: 'God natt' },
+    { lang: 'Dansk', greet: 'Godnat' },
+    { lang: 'Suomi', greet: 'Hyvää yötä' },
+    { lang: 'Íslenska', greet: 'Góða nótt' },
+    { lang: 'Eesti', greet: 'Head ööd' },
+    { lang: 'Latviešu', greet: 'Ar labunakti' },
+    { lang: 'Lietuvių', greet: 'Labanakt' },
+    { lang: 'Gaeilge', greet: 'Oíche mhaith' },
+    { lang: 'Cymraeg', greet: 'Nos da' },
+    { lang: 'Türkçe', greet: 'İyi geceler' },
+    { lang: 'Ελληνικά', greet: 'Καληνύχτα' },
+    { lang: 'עברית', greet: 'לילה טוב' },
+    { lang: 'فارسی', greet: 'شب بخیر' },
+    { lang: 'العربية', greet: 'تصبح على خير' },
+    { lang: 'हिन्दी', greet: 'शुभ रात्रि' },
+    { lang: 'नेपाली', greet: 'शुभ रात्री' },
+    { lang: 'ไทย', greet: 'ราตรีสวัสดิ์' },
+    { lang: 'ລາວ', greet: 'ຝັນດີ' },
+    { lang: 'Tiếng Việt', greet: 'Chúc ngủ ngon' },
+    { lang: 'Bahasa Indonesia', greet: 'Selamat tidur' },
+    { lang: 'Kiswahili', greet: 'Usiku mwema' },
+    { lang: 'Монгол', greet: 'Сайхан амраарай' },
+    { lang: 'Latine', greet: 'Bonam noctem' },
+    { lang: 'Esperanto', greet: 'Bonan nokton' },
+    { lang: '梦话', greet: '〰〰〰', note: '睡着的语言。听不懂就对了——说明已经睡着了。' }
+  ];
+
+  var greetEl = document.getElementById('greet');
+  var langEl = document.getElementById('lang');
+  var noteEl = document.getElementById('note');
+  var stampEl = document.getElementById('stamp');
+  var countEl = document.getElementById('count');
+  var flipBtn = document.getElementById('flip');
+  var cur = 0, timer = null;
+
+  countEl.textContent = String(PAGES.length);
+
+  function render(i) {
+    var p = PAGES[i];
+    greetEl.textContent = p.greet;
+    langEl.textContent = p.lang;
+    noteEl.textContent = p.note || '';
+  }
+
+  function goTo(i) {
+    cur = (i + PAGES.length) % PAGES.length;
+    stampEl.classList.add('swap');
+    setTimeout(function () {
+      render(cur);
+      stampEl.classList.remove('swap');
+    }, 320);
+  }
+
+  function autoNext() { goTo(cur + 1); }
+
+  function restartTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(autoNext, 3200);
+  }
+
+  flipBtn.addEventListener('click', function () {
+    var r = Math.floor(Math.random() * (PAGES.length - 1));
+    if (r === cur) r = (r + 1) % (PAGES.length - 1);
+    goTo(r);
+    restartTimer();
+  });
+
+  render(0);
+  restartTimer();
+})();
+</script>
+</body>
+</html>

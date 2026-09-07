@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜钓</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #060a14;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: pointer; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>夜钓</h1>
+  <p class="sub">池塘不说话，浮漂替它开口。<em>浮子往下沉的那一瞬</em>，记得抬手。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">水声：关</button>
+  </div>
+  <p class="hint">点水面抛竿，等浮漂点头的瞬间再点一下提竿。钓到什么都别嫌弃——都是池塘的心意。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1, yW = 0;
+  var rodBase = { x: 0, y: 0 }, rodTip = { x: 0, y: 0 };
+  var bobberHome = { x: 0, y: 0 };
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(340, Math.min(520, Math.round(W * 0.78)));
+    yW = Math.round(H * 0.52);
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    rodBase.x = W * 0.13; rodBase.y = H * 0.80;
+    rodTip.x = W * 0.42; rodTip.y = H * 0.30;
+    bobberHome.x = W * 0.58; bobberHome.y = yW + 10;
+  }
+
+  /* ---------- 状态机 ---------- */
+  // idle → cast(抛竿弧线) → wait(等口) → bite(咬口窗口) → catch(渔获卡) → idle
+  var state = 'idle', stateAt = 0;
+  var CAST_MS = 650, BITE_WINDOW = 1200;
+  var biteDelay = 0, firstCast = true;
+  var bobX = 0, bobY = 0;
+  var castFrom = { x: 0, y: 0 };
+  var ripples = [];         // {x, y, t0, big}
+  var floatMsg = null;      // {text, t0, x, y}
+  var catchItem = null;
+  var casts = 0, caught = 0;
+  var bobPhase = Math.random() * 10;
+
+  var CATCHES = [
+    { name: '一条小鱼', w: 35, line: '太小了。掰弯钩子放流——下回再见。' },
+    { name: '一撮水草', w: 25, line: '池塘寄来的信，字迹有点潦草。' },
+    { name: '一只旧鞋', w: 15, line: '鞋是旧的。另一只还在更深的夜里漂着。' },
+    { name: '半个瓶盖', w: 15, line: '兑不出汽水，能兑一个「叮」。' },
+    { name: '月亮的倒影', w: 10, line: '轻轻放回去——它还要照亮别人回家的路。', rare: true }
+  ];
+
+  function scheduleBite() {
+    biteDelay = firstCast ? (2200 + Math.random() * 1000) : (4000 + Math.random() * 5000);
+    firstCast = false;
+  }
+
+  function setState(s, now) {
+    state = s;
+    stateAt = now;
+    if (s === 'wait') scheduleBite();
+    if (s === 'bite') {
+      ripples.push({ x: bobX, y: yW, t0: now, big: true });
+      knock();
+    }
+  }
+
+  function pickCatch() {
+    var total = 0, i;
+    for (i = 0; i < CATCHES.length; i++) total += CATCHES[i].w;
+    var r = Math.random() * total;
+    for (i = 0; i < CATCHES.length; i++) {
+      r -= CATCHES[i].w;
+      if (r <= 0) return CATCHES[i];
+    }
+    return CATCHES[0];
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var now = Date.now();
+    if (state === 'idle') {
+      casts++;
+      castFrom = { x: rodTip.x, y: rodTip.y };
+      bobX = bobberHome.x; bobY = bobberHome.y;
+      setState('cast', now);
+      plop(720);
+    } else if (state === 'wait') {
+      floatMsg = { text: '还早呢。', t0: now };
+    } else if (state === 'bite') {
+      caught++;
+      catchItem = pickCatch();
+      setState('catch', now);
+      plop(240);
+    } else if (state === 'catch') {
+      if (now - stateAt > 600) {
+        catchItem = null;
+        setState('idle', now);
+      }
+    }
+  });
+
+  function step(now) {
+    if (state === 'cast' && now - stateAt >= CAST_MS) {
+      ripples.push({ x: bobX, y: yW, t0: now, big: false });
+      plop(0);
+      setState('wait', now);
+    } else if (state === 'wait' && now - stateAt >= biteDelay) {
+      setState('bite', now);
+    } else if (state === 'bite' && now - stateAt >= BITE_WINDOW) {
+      floatMsg = { text: '跑了——它回头看了你一眼。', t0: now };
+      setState('wait', now);
+    }
+    // 环境涟漪
+    if (Math.random() < 0.012) {
+      ripples.push({ x: Math.random() * W, y: yW + 14 + Math.random() * (H - yW - 40), t0: now, big: false });
+    }
+    var i;
+    for (i = ripples.length - 1; i >= 0; i--) {
+      if (now - ripples[i].t0 > 1600) ripples.splice(i, 1);
+    }
+    if (floatMsg && now - floatMsg.t0 > 1800) floatMsg = null;
+  }
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null, noiseBuf = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      var len = Math.floor(actx.sampleRate * 0.4);
+      noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+      var ch = noiseBuf.getChannelData(0);
+      for (var i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function plop(delayMs) {
+    if (!soundOn || !actx || !noiseBuf) return;
+    var t = actx.currentTime + (delayMs || 0) / 1000;
+    var o = actx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(420, t);
+    o.frequency.exponentialRampToValueAtTime(90, t + 0.12);
+    var g = actx.createGain();
+    g.gain.setValueAtTime(0.14, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.18);
+  }
+  function knock() {
+    if (!soundOn || !actx) return;
+    toneAt(300, 0, 0.09, 0.12);
+    toneAt(240, 0.12, 0.12, 0.14);
+  }
+  function toneAt(freq, at, dur, vol) {
+    var t = actx.currentTime + at;
+    var o = actx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    var g = actx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '水声：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '水声：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 月亮（离屏预画） ---------- */
+  var moonCv = document.createElement('canvas');
+  (function () {
+    var S = 96;
+    moonCv.width = S; moonCv.height = S;
+    var m = moonCv.getContext('2d');
+    m.beginPath(); m.arc(S / 2, S / 2, 24, 0, Math.PI * 2);
+    m.fillStyle = '#f4e9c8'; m.fill();
+    m.globalCompositeOperation = 'destination-out';
+    m.beginPath(); m.arc(S / 2 - 12, S / 2 - 5, 22, 0, Math.PI * 2);
+    m.fill();
+    m.globalCompositeOperation = 'source-over';
+    var g = m.createRadialGradient(S / 2, S / 2, 18, S / 2, S / 2, 46);
+    g.addColorStop(0, 'rgba(244, 233, 200, 0.26)');
+    g.addColorStop(1, 'rgba(244, 233, 200, 0)');
+    m.fillStyle = g;
+    m.beginPath(); m.arc(S / 2, S / 2, 46, 0, Math.PI * 2); m.fill();
+  })();
+
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+  function rnd2(a, b) {
+    var x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function drawSky(now) {
+    var sky = ctx.createLinearGradient(0, 0, 0, yW);
+    sky.addColorStop(0, '#060a15');
+    sky.addColorStop(1, '#0d1526');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, yW);
+
+    // 星
+    for (var i = 0; i < 40; i++) {
+      var sx = rnd2(i, 3) * W;
+      var sy = rnd2(i, 7) * yW * 0.8;
+      var tw = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(now / 800 + i * 2.1));
+      ctx.globalAlpha = tw * 0.8;
+      ctx.fillStyle = '#cfd9ef';
+      ctx.fillRect(sx, sy, 1.4, 1.4);
+    }
+    ctx.globalAlpha = 1;
+    ctx.drawImage(moonCv, W * 0.78, H * 0.06, 64, 64);
+  }
+
+  function drawWater(now) {
+    var wtr = ctx.createLinearGradient(0, yW, 0, H);
+    wtr.addColorStop(0, '#0c1428');
+    wtr.addColorStop(1, '#080d1a');
+    ctx.fillStyle = wtr;
+    ctx.fillRect(0, yW, W, H - yW);
+    // 岸线
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(0, yW, W, 2);
+
+    // 月光倒影：一列碎光，随噪声晃
+    var mx = W * 0.80;
+    for (var k = 0; k < 16; k++) {
+      var ky = yW + 8 + k * ((H - yW - 20) / 16);
+      var wob = Math.sin(now / 900 + k * 1.7) * (3 + k * 0.5);
+      var kw = 5 + rnd2(k, Math.floor(now / 700)) * 16;
+      var ka = (0.5 - k * 0.024) * (0.6 + 0.4 * Math.sin(now / 500 + k * 2.3));
+      ctx.fillStyle = 'rgba(244, 233, 200, ' + Math.max(0, ka).toFixed(3) + ')';
+      ctx.fillRect(mx - kw / 2 + wob, ky, kw, 2);
+    }
+    // 点点碎星
+    for (var s2 = 0; s2 < 10; s2++) {
+      var px2 = rnd2(s2, 13) * W;
+      var py2 = yW + 12 + rnd2(s2, 29) * (H - yW - 30);
+      var pa = 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(now / 600 + s2 * 3.1));
+      ctx.fillStyle = 'rgba(207, 217, 239, ' + pa.toFixed(3) + ')';
+      ctx.fillRect(px2, py2, 2, 1.2);
+    }
+
+    // 涟漪
+    for (var r = 0; r < ripples.length; r++) {
+      var rp = ripples[r];
+      var age = (now - rp.t0) / 1600;
+      if (age >= 1) continue;
+      var rr = 4 + age * (rp.big ? 46 : 26);
+      ctx.globalAlpha = (1 - age) * (rp.big ? 0.55 : 0.3);
+      ctx.strokeStyle = 'rgba(207, 217, 239, 1)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(rp.x, rp.y, rr, rr * 0.32, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (rp.big) {
+        ctx.beginPath();
+        ctx.ellipse(rp.x, rp.y, rr * 0.55, rr * 0.18, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawReeds(now) {
+    // 远岸芦苇剪影
+    ctx.fillStyle = '#0a0f1d';
+    for (var i = 0; i < 9; i++) {
+      var bx = W * (0.03 + i * 0.115) + (rnd2(i, 5) - 0.5) * 18;
+      var sway = Math.sin(now / 1600 + i * 1.3) * 3;
+      var h = yW * (0.24 + rnd2(i, 9) * 0.22);
+      ctx.strokeStyle = '#0a0f1d';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bx, yW + 1);
+      ctx.quadraticCurveTo(bx + sway * 0.4, yW - h * 0.6, bx + sway, yW - h);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(bx + sway, yW - h - 4, 2.2, 6, sway * 0.03, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#0a0f1d';
+    ctx.fillRect(0, yW - 3, W, 4);
+  }
+
+  function drawPier() {
+    var py = H * 0.78;
+    ctx.fillStyle = '#241d2c';
+    ctx.fillRect(0, py, W * 0.34, H - py);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.lineWidth = 2;
+    for (var i = 1; i < 4; i++) {
+      var sy = py + (H - py) / 4 * i;
+      ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W * 0.34, sy); ctx.stroke();
+    }
+    ctx.fillStyle = '#1b1522';
+    ctx.fillRect(W * 0.30, py, 8, H - py);
+    ctx.fillRect(W * 0.08, py, 8, H - py);
+  }
+
+  function drawRodAndLine(now) {
+    // 鱼竿
+    ctx.strokeStyle = '#8a7a5e';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(rodBase.x, rodBase.y);
+    ctx.quadraticCurveTo(rodBase.x + (rodTip.x - rodBase.x) * 0.4, rodBase.y - (rodBase.y - rodTip.y) * 0.85, rodTip.x, rodTip.y);
+    ctx.stroke();
+    if (state === 'idle') return;
+    // 钓线（微垂）
+    var sag = state === 'bite' ? 4 : 12;
+    ctx.strokeStyle = 'rgba(207, 217, 239, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rodTip.x, rodTip.y);
+    ctx.quadraticCurveTo((rodTip.x + bobX) / 2, (rodTip.y + bobY) / 2 + sag, bobX, bobY - 8);
+    ctx.stroke();
+  }
+
+  function drawBobber(now) {
+    var x = bobX, y = bobY;
+    if (state === 'cast') {
+      // 抛物线飞行
+      var t = Math.min(1, (now - stateAt) / CAST_MS);
+      x = castFrom.x + (bobberHome.x - castFrom.x) * t;
+      y = castFrom.y + (bobberHome.y - castFrom.y) * t - Math.sin(t * Math.PI) * 70;
+      bobX = x; bobY = y;
+    } else if (state === 'wait') {
+      y += Math.sin(now / 700 + bobPhase) * 1.6;
+    } else if (state === 'bite') {
+      y += 9 + Math.sin(now / 60) * 2.5;
+    }
+    ctx.save();
+    ctx.translate(x, y);
+    if (state === 'bite') ctx.rotate(Math.sin(now / 90) * 0.18);
+    ctx.fillStyle = '#e8e4da';
+    ctx.beginPath(); ctx.arc(0, 2, 5.5, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = '#e05a4e';
+    ctx.beginPath(); ctx.arc(0, 2, 5.5, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e05a4e';
+    ctx.fillRect(-1, -11, 2, 9);
+    ctx.restore();
+    // 咬口提示
+    if (state === 'bite') {
+      var blink = 0.55 + 0.45 * Math.sin(now / 90);
+      ctx.font = '700 16px ' + SANS;
+      ctx.fillStyle = 'rgba(242, 199, 110, ' + blink.toFixed(2) + ')';
+      ctx.textAlign = 'center';
+      ctx.fillText('口了！快提竿', x, y - 26);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function drawMessages(now) {
+    if (floatMsg) {
+      var age = (now - floatMsg.t0) / 1800;
+      ctx.globalAlpha = Math.max(0, 1 - age) * 0.9;
+      ctx.font = '14px ' + SANS;
+      ctx.fillStyle = '#c7d0e2';
+      ctx.textAlign = 'center';
+      ctx.fillText(floatMsg.text, W / 2, yW - 18);
+      ctx.textAlign = 'left';
+      ctx.globalAlpha = 1;
+    }
+    if (state === 'idle') {
+      ctx.font = '14px ' + SANS;
+      ctx.fillStyle = 'rgba(242, 199, 110, 0.85)';
+      ctx.textAlign = 'center';
+      var pulse = 0.7 + 0.3 * Math.sin(now / 500);
+      ctx.globalAlpha = pulse;
+      ctx.fillText('点一下水面，抛竿', W * 0.6, yW + 44);
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function drawCatchCard(now) {
+    if (state !== 'catch' || !catchItem) return;
+    var cx = W / 2, cy = H * 0.42;
+    var pw = Math.min(W * 0.78, 320), ph = 132;
+    var t = Math.min(1, (now - stateAt) / 240);
+    var scale = 0.92 + 0.08 * t;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = 0.94;
+    ctx.fillStyle = '#101828';
+    ctx.strokeStyle = catchItem.rare ? 'rgba(244, 233, 200, 0.9)' : 'rgba(242, 199, 110, 0.65)';
+    ctx.lineWidth = 1.6;
+    roundRect(-pw / 2, -ph / 2, pw, ph, 12);
+    ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.9)';
+    ctx.font = '12px ' + SANS;
+    ctx.fillText('钓 到 了', 0, -ph / 2 + 24);
+    ctx.fillStyle = catchItem.rare ? '#f4e9c8' : '#edf1fa';
+    ctx.font = '700 21px ' + SANS;
+    ctx.fillText(catchItem.name, 0, -ph / 2 + 52);
+    ctx.fillStyle = 'rgba(199, 208, 226, 0.95)';
+    ctx.font = '13px ' + SANS;
+    wrapText(catchItem.line, 0, -ph / 2 + 78, pw - 44, 19);
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.7)';
+    ctx.font = '11.5px ' + SANS;
+    ctx.fillText('点一下继续', 0, ph / 2 - 14);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+
+  function wrapText(text, x, y, maxW, lh) {
+    var lines = [], cur = '';
+    for (var i = 0; i < text.length; i++) {
+      var test = cur + text[i];
+      if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = text[i]; }
+      else cur = test;
+    }
+    if (cur) lines.push(cur);
+    for (var j = 0; j < lines.length; j++) ctx.fillText(lines[j], x, y + j * lh);
+  }
+
+  function drawCounter(now) {
+    ctx.font = '12px ' + SANS;
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.85)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    var part1 = '今晚 ';
+    var part2 = ' 竿 · 收获 ';
+    var part3 = ' 件';
+    var x = 14, y = H - 16;
+    ctx.fillText(part1, x, y);
+    x += ctx.measureText(part1).width;
+    ctx.font = '12px ' + MONO;
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.9)';
+    ctx.fillText(String(casts), x, y);
+    x += ctx.measureText(String(casts)).width;
+    ctx.font = '12px ' + SANS;
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.85)';
+    ctx.fillText(part2, x, y);
+    x += ctx.measureText(part2).width;
+    ctx.font = '12px ' + MONO;
+    ctx.fillStyle = 'rgba(242, 199, 110, 0.9)';
+    ctx.fillText(String(caught), x, y);
+    x += ctx.measureText(String(caught)).width;
+    ctx.font = '12px ' + SANS;
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.85)';
+    ctx.fillText(part3, x, y);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawScene(now) {
+    drawSky(now);
+    drawWater(now);
+    drawReeds(now);
+    drawPier();
+    drawRodAndLine(now);
+    drawBobber(now);
+    drawMessages(now);
+    drawCatchCard(now);
+    drawCounter(now);
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  var lastTick = Date.now();
+  setInterval(function () {
+    var now = Date.now();
+    var dt = Math.min((now - lastTick) / 1000, 0.12);
+    lastTick = now;
+    step(now);
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+  bobX = bobberHome.x; bobY = bobberHome.y;
+})();
+</script>
+</body>
+</html>

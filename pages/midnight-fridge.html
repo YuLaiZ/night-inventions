@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜冰箱</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: pointer; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜冰箱</h1>
+  <p class="sub">凌晨的冰箱，一半是白天的废墟，一半是<em>明天的粮仓</em>。开开门，跟它们说说话。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">冰箱嗡鸣：关</button>
+  </div>
+  <p class="hint">点冰箱门开关门，点架子上的存货，听它们讲一句深夜心事。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var fx, fy, fw, fh;        // 冰箱外框
+  var ix, iy, iw, ih;        // 内腔
+  var shelfY = [];           // 两层搁架 + 底
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(360, Math.min(540, Math.round(W * 0.95)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fw = Math.min(W * 0.66, 400);
+    fx = (W - fw) / 2;
+    fy = H * 0.05;
+    fh = H * 0.90;
+    ix = fx + 13; iy = fy + 13;
+    iw = fw - 26; ih = fh - 26;
+    shelfY = [iy + ih * 0.36, iy + ih * 0.68, iy + ih - 8];
+    layoutItems();
+  }
+
+  /* ---------- 存货 ---------- */
+  var ITEMS = [
+    { key: 'melon', zone: 0, fx2: 0.28, name: '半个西瓜', msg: '昨晚吃剩的一半。籽都睡在里面，别吵醒它们。' },
+    { key: 'eggs', zone: 0, fx2: 0.68, name: '鸡蛋盒', msg: '还剩四枚。每一枚都在等一个煎得漂亮的早晨。' },
+    { key: 'cola', zone: 1, fx2: 0.24, name: '半瓶可乐', msg: '气跑了一半，甜还在。深夜的可乐不需要那么气。' },
+    { key: 'beer', zone: 1, fx2: 0.52, name: '没开的啤酒', msg: '它在等一个值得的进球，或者一场很大的雨。' },
+    { key: 'jam', zone: 1, fx2: 0.80, name: '草莓酱', msg: '去年夏天被关进了罐子，打开还是甜的。' },
+    { key: 'bowl', zone: 2, fx2: 0.26, name: '昨晚的剩菜', msg: '麻辣香锅。睡前热两分钟，梦会更香。' },
+    { key: 'cake', zone: 2, fx2: 0.58, name: '一角蛋糕', msg: '不知道是谁的生日。奶油记得，蜡烛还剩三根。' },
+    { key: 'tofu', zone: 2, fx2: 0.86, name: '一块豆腐', msg: '软得像凌晨三点的决心。' }
+  ];
+  var items = [];            // 运行时坐标
+  function layoutItems() {
+    items = ITEMS.map(function (it) {
+      var ground = shelfY[it.zone];
+      var h = ih * (it.zone === 2 ? 0.22 : 0.26);
+      return {
+        key: it.key, name: it.name, msg: it.msg,
+        x: ix + iw * it.fx2, ground: ground, h: h,
+        w: h * 1.5
+      };
+    });
+  }
+
+  /* ---------- 门与留言 ---------- */
+  var doorP = 1;             // 0=关 1=开，缓动逼近 doorTarget
+  var doorTarget = 1;
+  var doorMovingUntil = 0;
+  var bubble = null;         // {msg, name, x, y, t0}
+  var lastTap = 0;
+
+  cv.addEventListener('pointerdown', function (e) {
+    var now = Date.now();
+    if (now - lastTap < 250) return;   // 防双击缩放连点
+    lastTap = now;
+    var r = cv.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    if (doorP > 0.6) {
+      // 先看是否点中存货：命中框收紧，并取横向最近者（框互有重叠）
+      var best = -1, bestD = 1e9;
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var dx = Math.abs(x - it.x);
+        if (dx < it.w * 0.38 && y > it.ground - it.h - 8 && y < it.ground + 6 && dx < bestD) {
+          bestD = dx; best = i;
+        }
+      }
+      if (best >= 0) {
+        var hit = items[best];
+        bubble = { msg: hit.msg, name: hit.name, x: hit.x, y: hit.ground - hit.h - 12, t0: now };
+        return;
+      }
+      if (bubble) { bubble = null; return; }
+    }
+    // 门区域：整个冰箱都算门把手（点空白即开关门）
+    if (x > fx - 10 && x < fx + fw + 10 && y > fy - 10 && y < fy + fh + 10) {
+      doorTarget = doorTarget > 0.5 ? 0 : 1;
+      doorMovingUntil = now + 560;
+      bubble = null;
+      clunk();
+    }
+  });
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null, humGain = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      var o = actx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = 96;
+      var lp = actx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 220;
+      humGain = actx.createGain();
+      humGain.gain.value = 0;
+      o.connect(lp); lp.connect(humGain); humGain.connect(actx.destination);
+      o.start();
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function clunk() {
+    if (!soundOn || !actx) return;
+    var t = actx.currentTime;
+    var o = actx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.1);
+    var g = actx.createGain();
+    g.gain.setValueAtTime(0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.14);
+  }
+  function updateHum() {
+    if (!humGain) return;
+    var target = soundOn ? 0.022 : 0;
+    humGain.gain.setTargetAtTime(target, actx.currentTime, 0.3);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '冰箱嗡鸣：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '冰箱嗡鸣：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 物件绘制 ---------- */
+  function drawMelon(it, jig) {
+    var r = it.h * 0.55;
+    ctx.save();
+    ctx.translate(it.x, it.ground - r + jig);
+    ctx.fillStyle = '#7fae5a';
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e8636f';
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.78, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2b2231';
+    for (var i = 0; i < 4; i++) {
+      var a = i * 1.7 + 0.6;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * r * 0.4, Math.sin(a) * r * 0.4, 1.6, 2.6, a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 1, -2.6, -1.2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function drawEggs(it, jig) {
+    var w = it.w * 0.9, h = it.h * 0.6;
+    ctx.save();
+    ctx.translate(it.x, it.ground + jig);
+    ctx.fillStyle = '#c9b98f';
+    roundRect(-w / 2, -h, w, h, 4); ctx.fill();
+    ctx.fillStyle = '#efe3c8';
+    for (var i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.ellipse(-w / 2 + w * (0.16 + i * 0.22), -h, w * 0.09, h * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  function drawBottle(it, jig, body, cap, label) {
+    var h = it.h * 1.15, w = it.h * 0.42;
+    ctx.save();
+    ctx.translate(it.x, it.ground + jig);
+    ctx.fillStyle = body;
+    roundRect(-w / 2, -h, w, h - w * 0.5, 4); ctx.fill();
+    ctx.fillRect(-w * 0.28, -h - w * 0.4, w * 0.56, w * 0.5);
+    ctx.fillStyle = cap;
+    ctx.fillRect(-w * 0.3, -h - w * 0.55, w * 0.6, w * 0.22);
+    if (label) {
+      ctx.fillStyle = label;
+      ctx.fillRect(-w / 2, -h * 0.55, w, h * 0.3);
+    }
+    ctx.restore();
+  }
+  function drawJam(it, jig) {
+    var w = it.h * 0.75, h = it.h * 0.85;
+    ctx.save();
+    ctx.translate(it.x, it.ground + jig);
+    ctx.fillStyle = '#c2545f';
+    roundRect(-w / 2, -h, w, h, 5); ctx.fill();
+    ctx.fillStyle = '#e8e4da';
+    ctx.fillRect(-w / 2 - 1, -h - h * 0.16, w + 2, h * 0.2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.font = '700 ' + Math.round(h * 0.26) + 'px ' + SANS;
+    ctx.textAlign = 'center';
+    ctx.fillText('酱', 0, -h * 0.32);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+  function drawBowl(it, jig) {
+    var w = it.w, h = it.h * 0.7;
+    ctx.save();
+    ctx.translate(it.x, it.ground + jig);
+    ctx.fillStyle = '#7f8ba3';
+    ctx.beginPath();
+    ctx.ellipse(0, -h * 0.5, w * 0.5, h * 0.55, 0, 0, Math.PI);
+    ctx.fill();
+    ctx.fillStyle = '#a34a4f';
+    ctx.beginPath();
+    ctx.ellipse(0, -h * 0.5, w * 0.44, h * 0.4, 0, 0, Math.PI);
+    ctx.fill();
+    ctx.fillStyle = '#5f7a4f';
+    for (var i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(-w * 0.15 + i * w * 0.15, -h * 0.62, w * 0.05, h * 0.16, i, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  function drawCake(it, jig) {
+    var w = it.w * 0.95, h = it.h * 0.75;
+    ctx.save();
+    ctx.translate(it.x, it.ground + jig);
+    ctx.fillStyle = '#f0e3d0';
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, 0); ctx.lineTo(w / 2, 0); ctx.lineTo(-w / 2, -h);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e8a5b0';
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -h * 0.55); ctx.lineTo(w * 0.28, -h * 0.55); ctx.lineTo(w * 0.06, -h * 0.18); ctx.lineTo(-w / 2, -h * 0.18);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e05a4e';
+    ctx.beginPath();
+    ctx.arc(-w * 0.28, -h - 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  function drawTofu(it, jig) {
+    var w = it.w * 0.8, h = it.h * 0.55;
+    ctx.save();
+    ctx.translate(it.x, it.ground + jig);
+    ctx.fillStyle = '#f2efe4';
+    roundRect(-w / 2, -h, w, h, 3); ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-w / 2 + 2, -h + 2, w - 4, h - 4);
+    ctx.restore();
+  }
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  function drawItem(it, jig) {
+    if (it.key === 'melon') drawMelon(it, jig);
+    else if (it.key === 'eggs') drawEggs(it, jig);
+    else if (it.key === 'cola') drawBottle(it, jig, '#3a2b1d', '#b03a35', '#c8a86a');
+    else if (it.key === 'beer') drawBottle(it, jig, '#3f5233', '#c8b46a', null);
+    else if (it.key === 'jam') drawJam(it, jig);
+    else if (it.key === 'bowl') drawBowl(it, jig);
+    else if (it.key === 'cake') drawCake(it, jig);
+    else if (it.key === 'tofu') drawTofu(it, jig);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  /* ---------- 场景 ---------- */
+  function drawScene(now) {
+    // 厨房夜墙
+    var wall = ctx.createLinearGradient(0, 0, 0, H);
+    wall.addColorStop(0, '#05070d');
+    wall.addColorStop(1, '#0c1120');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, W, H);
+
+    // 冰箱壳体
+    ctx.fillStyle = '#232c42';
+    roundRect(fx, fy, fw, fh, 16);
+    ctx.fill();
+
+    // 内腔（亮度随门开度）
+    var L = doorP;
+    if (L > 0.01) {
+      ctx.save();
+      roundRect(ix, iy, iw, ih, 8);
+      ctx.clip();
+      var inner = ctx.createLinearGradient(0, iy, 0, iy + ih);
+      inner.addColorStop(0, 'rgba(196, 208, 224, ' + (0.92 * L).toFixed(3) + ')');
+      inner.addColorStop(1, 'rgba(150, 165, 188, ' + (0.9 * L).toFixed(3) + ')');
+      ctx.fillStyle = inner;
+      ctx.fillRect(ix, iy, iw, ih);
+      // 顶灯辉光
+      var lamp = ctx.createRadialGradient(ix + iw / 2, iy + 6, 4, ix + iw / 2, iy + 6, ih * 0.9);
+      lamp.addColorStop(0, 'rgba(255, 250, 235, ' + (0.5 * L).toFixed(3) + ')');
+      lamp.addColorStop(1, 'rgba(255, 250, 235, 0)');
+      ctx.fillStyle = lamp;
+      ctx.fillRect(ix, iy, iw, ih);
+      // 搁架
+      ctx.fillStyle = 'rgba(232, 237, 243, ' + (0.95 * L).toFixed(3) + ')';
+      ctx.fillRect(ix, shelfY[0], iw, 6);
+      ctx.fillRect(ix, shelfY[1], iw, 6);
+      ctx.fillStyle = 'rgba(148, 160, 178, ' + (0.9 * L).toFixed(3) + ')';
+      ctx.fillRect(ix, shelfY[0] + 6, iw, 2);
+      ctx.fillRect(ix, shelfY[1] + 6, iw, 2);
+
+      // 存货（门在动时轻微晃动）
+      var moving = now < doorMovingUntil;
+      for (var i = 0; i < items.length; i++) {
+        var jig = moving ? Math.sin(now / 40 + i * 2.1) * 1.6 * (1 - Math.abs(doorP - doorTarget)) : 0;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, L * 1.1);
+        drawItem(items[i], jig);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // 内腔描边
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = 2;
+    roundRect(ix, iy, iw, ih, 8);
+    ctx.stroke();
+
+    // 滑门（doorP=1 全开收在右侧外，0 全关）
+    var doorW = iw * (1 - doorP * 0.94);
+    if (doorW > 2) {
+      var dgrad = ctx.createLinearGradient(fx + 6, 0, fx + 6 + doorW, 0);
+      dgrad.addColorStop(0, '#39445e');
+      dgrad.addColorStop(1, '#2a3450');
+      ctx.fillStyle = dgrad;
+      roundRect(fx + 8, iy, doorW, ih, 8);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // 门内侧储物格影子
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      for (var g = 0; g < 3; g++) {
+        ctx.fillRect(fx + 14, iy + 14 + g * (ih - 20) / 3, doorW * 0.7, 5);
+      }
+    }
+
+    // 门缝光（半开时的经典一条光）
+    if (doorP > 0.05 && doorP < 0.95) {
+      ctx.fillStyle = 'rgba(255, 250, 235, ' + (0.75 * (1 - Math.abs(doorP - 0.5) * 1.6)).toFixed(3) + ')';
+      ctx.fillRect(fx + 8 + doorW, iy + 4, 2.5, ih - 8);
+    }
+
+    // 门把手（外侧右缘）
+    ctx.fillStyle = '#9aa5b8';
+    roundRect(fx + fw - 20, fy + fh * 0.34, 7, fh * 0.3, 4);
+    ctx.fill();
+
+    // 开关门提示
+    ctx.font = '12px ' + SANS;
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.75)';
+    ctx.textAlign = 'center';
+    ctx.fillText(doorTarget > 0.5 ? '点冰箱身关门' : '点冰箱身开门', fx + fw / 2, fy + fh + 20);
+    ctx.textAlign = 'left';
+
+    // 留言气泡
+    if (bubble) drawBubble(now);
+  }
+
+  function drawBubble(now) {
+    var age = now - bubble.t0;
+    if (age > 3400) { bubble = null; return; }
+    var alpha = age > 2800 ? Math.max(0, 1 - (age - 2800) / 600) : Math.min(1, age / 200);
+    var bw = Math.min(W * 0.78, 250);
+    var lines = wrapLines(bubble.msg, bw - 28);
+    var bh = 26 + lines.length * 20;
+    var bx = Math.max(8, Math.min(W - bw - 8, bubble.x - bw / 2));
+    var by = bubble.y - bh - 14;
+    if (by < 8) by = 8;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.96)';
+    ctx.strokeStyle = 'rgba(242, 199, 110, 0.55)';
+    ctx.lineWidth = 1.4;
+    roundRect(bx, by, bw, bh, 10);
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(bubble.x - 6, by + bh);
+    ctx.lineTo(bubble.x + 6, by + bh);
+    ctx.lineTo(bubble.x, by + bh + 8);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.96)';
+    ctx.fill();
+    ctx.fillStyle = '#f2c76e';
+    ctx.font = '700 12.5px ' + SANS;
+    ctx.textAlign = 'left';
+    ctx.fillText(bubble.name, bx + 14, by + 20);
+    ctx.fillStyle = '#edf1fa';
+    ctx.font = '13px ' + SANS;
+    for (var i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], bx + 14, by + 42 + i * 20);
+    }
+    ctx.restore();
+  }
+  function wrapLines(text, maxW) {
+    ctx.font = '13px ' + SANS;
+    var lines = [], cur = '';
+    for (var i = 0; i < text.length; i++) {
+      var test = cur + text[i];
+      if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = text[i]; }
+      else cur = test;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  setInterval(function () {
+    var now = Date.now();
+    doorP += (doorTarget - doorP) * 0.16;
+    if (Math.abs(doorP - doorTarget) < 0.004) doorP = doorTarget;
+    updateHum();
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+})();
+</script>
+</body>
+</html>

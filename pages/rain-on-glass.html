@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>玻璃上的雨</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #060a14;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: crosshair; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>玻璃上的雨</h1>
+  <p class="sub">楼下的城市失了焦，成了玻璃外的一滩灯。<em>雨点落到哪</em>，哪就有一道往下流的痕。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">雨声：关</button>
+  </div>
+  <p class="hint">对着玻璃点一下，那里就会落几滴。大水珠追上小水珠，会把它们并进自己身体里。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(380, Math.min(540, Math.round(W * 0.82)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    seedBokeh();
+  }
+
+  /* ---------- 失焦城市光斑 ---------- */
+  var bokeh = [];
+  function seedBokeh() {
+    bokeh = [];
+    var n = 26;
+    for (var i = 0; i < n; i++) {
+      bokeh.push({
+        x: Math.random() * W,
+        y: H * (0.18 + Math.random() * 0.8),
+        r: 10 + Math.random() * 26,
+        warm: Math.random() < 0.62,
+        a: 0.16 + Math.random() * 0.3,
+        ph: Math.random() * 10
+      });
+    }
+  }
+
+  /* ---------- 雨滴：挂壁为主，偶发下滑 ---------- */
+  var drops = [];
+  var trails = [];   // {x, y0, y1, w, a}
+  function spawnDrop(x, y, r) {
+    if (drops.length > 52) return;
+    var rr = r || (2 + Math.random() * 1.8);
+    // 大水珠更沉得住气：挂壁更久，才不会满屏都是流星
+    var t0 = rr > 4 ? 2 + Math.random() * 4 : 0.5 + Math.random() * 2.6;
+    drops.push({
+      x: x, y: y,
+      r: rr,
+      vy: 0, wobble: Math.random() * 10,
+      st: 'stick', t: t0
+    });
+  }
+  function rainTick() {
+    // 凝露：玻璃各处随机冒出小水珠，上密下疏
+    if (drops.length < 44 && Math.random() < 0.4) {
+      spawnDrop(Math.random() * W, Math.random() * H * 0.8);
+    }
+  }
+  function stepDrops(dt, now) {
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+      if (d.st === 'stick') {
+        d.t -= dt;
+        // 挂壁微颤
+        d.x += Math.sin(now / 300 + d.wobble) * 0.25 * dt * 60;
+        if (d.t <= 0) {
+          if (d.r > 3.2) { d.st = 'slide'; d.vy = 60 + d.r * 9; d.slideT = 0.3 + Math.random() * 0.55; }
+          else d.t = 0.8 + Math.random() * 2.4;
+        }
+      } else {
+        // 下滑：加速、摆动、沿途留下水痕并变小
+        d.vy += 70 * dt;
+        d.y += d.vy * dt;
+        d.x += Math.sin(now / 240 + d.wobble) * 9 * dt;
+        d.r -= d.r * 0.11 * dt;
+        trails.push({ x: d.x, y0: d.y - Math.min(34, d.vy * 0.28), y1: d.y + d.r, w: Math.max(1.4, d.r * 0.7), a: 0.26 });
+        if (trails.length > 140) trails.shift();
+        d.slideT -= dt;
+        if (d.slideT <= 0 || d.r < 1.9) {
+          if (d.r < 1.9) { drops.splice(i, 1); continue; }
+          d.st = 'stick';
+          d.t = 1 + Math.random() * 2.6;
+          d.vy = 0;
+        }
+      }
+      if (d.y > H + 14) { drops.splice(i, 1); continue; }
+      // 合并：路过的水珠吞掉挨着的
+      for (var j = drops.length - 1; j >= 0; j--) {
+        if (j === i) continue;
+        var o = drops[j];
+        var dx = d.x - o.x, dy = d.y - o.y;
+        if (dx * dx + dy * dy < Math.pow((d.r + o.r) * 0.7, 2)) {
+          d.r = Math.min(13, Math.sqrt(d.r * d.r + o.r * o.r) * 0.95);
+          d.x = d.r > o.r * 1.4 ? d.x : o.x;
+          if (j < i) i--;
+          drops.splice(j, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var r = cv.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    for (var i = 0; i < 4; i++) {
+      var nd = {
+        x: Math.max(6, Math.min(W - 6, x + (Math.random() - 0.5) * 50)),
+        y: Math.max(6, Math.min(H - 6, y + (Math.random() - 0.5) * 64)),
+        r: 2.4 + Math.random() * 2.4,
+        vy: 0, wobble: Math.random() * 10,
+        st: 'stick', t: 0.3 + Math.random() * 1.4
+      };
+      drops.push(nd);
+    }
+    pitter();
+  });
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null, rainGain = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      var len = actx.sampleRate * 2;
+      var buf = actx.createBuffer(1, len, actx.sampleRate);
+      var ch = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+      var src = actx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var hp = actx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 900;
+      var lp = actx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 5200;
+      rainGain = actx.createGain();
+      rainGain.gain.value = 0;
+      src.connect(hp); hp.connect(lp); lp.connect(rainGain); rainGain.connect(actx.destination);
+      src.start();
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function pitter() {
+    if (!soundOn || !actx) return;
+    var t = actx.currentTime;
+    var o = actx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = 900 + Math.random() * 500;
+    var g = actx.createGain();
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.08);
+  }
+  function updateRain() {
+    if (!rainGain) return;
+    var target = soundOn ? 0.05 : 0;
+    rainGain.gain.setTargetAtTime(target, actx.currentTime, 0.4);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '雨声：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '雨声：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 绘制 ---------- */
+  function drawBokeh(now) {
+    // 夜幕
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#05080f');
+    bg.addColorStop(0.55, '#0a1122');
+    bg.addColorStop(1, '#0e1626');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // 失焦灯斑
+    for (var i = 0; i < bokeh.length; i++) {
+      var b = bokeh[i];
+      var a = b.a * (0.75 + 0.25 * Math.sin(now / 1300 + b.ph));
+      var g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+      g.addColorStop(0, b.warm ? 'rgba(240, 179, 92, ' + a.toFixed(3) + ')' : 'rgba(156, 200, 255, ' + a.toFixed(3) + ')');
+      g.addColorStop(0.7, b.warm ? 'rgba(240, 179, 92, ' + (a * 0.4).toFixed(3) + ')' : 'rgba(156, 200, 255, ' + (a * 0.4).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawTrails() {
+    for (var i = 0; i < trails.length; i++) {
+      var t = trails[i];
+      t.a -= 0.006;
+      if (t.a <= 0) continue;
+      var g = ctx.createLinearGradient(0, t.y0, 0, t.y1);
+      g.addColorStop(0, 'rgba(214, 226, 245, 0)');
+      g.addColorStop(1, 'rgba(214, 226, 245, ' + t.a.toFixed(3) + ')');
+      ctx.fillStyle = g;
+      ctx.fillRect(t.x - t.w / 2, t.y0, t.w, t.y1 - t.y0);
+    }
+  }
+
+  function drawDrops() {
+    for (var i = 0; i < drops.length; i++) {
+      var d = drops[i];
+      var g = ctx.createRadialGradient(d.x - d.r * 0.3, d.y - d.r * 0.35, d.r * 0.1, d.x, d.y, d.r);
+      g.addColorStop(0, 'rgba(235, 243, 255, 0.85)');
+      g.addColorStop(0.65, 'rgba(190, 210, 238, 0.4)');
+      g.addColorStop(1, 'rgba(170, 195, 230, 0.12)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.r * 0.82, d.r, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 高光点：随水珠变小而变暗，免得小凝露像满天星
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + Math.min(0.7, d.r * 0.13).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(d.x - d.r * 0.3, d.y - d.r * 0.4, Math.max(0.6, d.r * 0.16), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawGlass(now) {
+    // 玻璃斜向反光
+    var sheen = ctx.createLinearGradient(0, 0, W * 0.6, H);
+    sheen.addColorStop(0.3, 'rgba(255, 255, 255, 0)');
+    sheen.addColorStop(0.48, 'rgba(255, 255, 255, 0.035)');
+    sheen.addColorStop(0.54, 'rgba(255, 255, 255, 0)');
+    sheen.addColorStop(0.76, 'rgba(255, 255, 255, 0.028)');
+    sheen.addColorStop(0.82, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(0, 0, W, H);
+    // 玻璃边框内侧
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, W - 4, H - 4);
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  var lastTick = Date.now();
+  setInterval(function () {
+    var now = Date.now();
+    var dt = Math.min((now - lastTick) / 1000, 0.12);
+    lastTick = now;
+    rainTick();
+    stepDrops(dt, now);
+    updateRain();
+    ctx.clearRect(0, 0, W, H);
+    drawBokeh(now);
+    drawTrails();
+    drawDrops();
+    drawGlass(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+  // 开场先落一层凝露，大小错落，玻璃才不显干净
+  for (var s = 0; s < 18; s++) {
+    spawnDrop(Math.random() * W, Math.random() * H * 0.75);
+  }
+  for (var big = 0; big < 5; big++) {
+    spawnDrop(Math.random() * W, Math.random() * H * 0.7, 5 + Math.random() * 3.5);
+  }
+})();
+</script>
+</body>
+</html>

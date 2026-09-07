@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>放纸船</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .write {
+    margin-top: clamp(18px, 4vw, 26px);
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  input.word {
+    font-family: var(--sans);
+    font-size: 15px;
+    color: var(--ink-strong);
+    background: rgba(16, 24, 40, 0.7);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    width: min(100%, 260px);
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+  input.word:focus { border-color: rgba(242, 199, 110, 0.55); }
+  input.word::placeholder { color: #5d6883; }
+  button.fold {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 10px;
+    padding: 10px 24px;
+    cursor: pointer;
+  }
+  button.fold:hover { filter: brightness(1.08); }
+  button.fold:active { transform: scale(0.97); }
+
+  .frame {
+    margin-top: clamp(14px, 3vw, 20px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #060a14;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>放纸船</h1>
+  <p class="sub">写下一个想放走的小词——折成船，放进月光的水道，<em>让它替你捎走</em>。</p>
+
+  <div class="write">
+    <input class="word" id="word" type="text" maxlength="8" placeholder="一个词，比如「明天」" autocomplete="off">
+    <button class="fold" id="fold" type="button">折一只，放下水</button>
+  </div>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <p class="hint">水道通向海。船小，字大——大字的烦恼，小船也驮得动。已放走 0 只。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var wordEl = document.getElementById('word');
+  var foldBtn = document.getElementById('fold');
+  var hintEl = document.querySelector('.hint');
+  var sent = 0;
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var flowY = 0;             // 水道中心线
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(300, Math.min(420, Math.round(W * 0.6)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    flowY = H * 0.58;
+  }
+
+  /* ---------- 纸船队列 ---------- */
+  // {word, t0}：t0 为下水时刻；沿水道从左往右漂
+  var boats = [];
+  var FLOW_MS = 11000;       // 全程约 11 秒
+  function release(word) {
+    boats.push({ word: word, t0: Date.now() });
+    if (boats.length > 5) boats.shift();
+  }
+
+  foldBtn.addEventListener('click', function () {
+    var w = wordEl.value.trim();
+    if (!w) {
+      w = '算了';
+    }
+    release(w);
+    sent++;
+    hintEl.textContent = '已放走 ' + sent + ' 只。水道通向海，放心，字泡不烂。';
+    wordEl.value = '';
+    wordEl.placeholder = '再写一个，或者「晚安」';
+  });
+  wordEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') foldBtn.click();
+  });
+
+  /* ---------- 水面粒子 ---------- */
+  var streaks = [];
+  function seedStreaks() {
+    streaks = [];
+    for (var i = 0; i < 22; i++) {
+      streaks.push({
+        x: Math.random() * (W + 120), y: flowY - 40 + Math.random() * 80,
+        len: 10 + Math.random() * 26, sp: 0.6 + Math.random() * 0.8,
+        a: 0.05 + Math.random() * 0.1
+      });
+    }
+  }
+  function stepStreaks(dt) {
+    for (var i = 0; i < streaks.length; i++) {
+      var s = streaks[i];
+      s.x += s.sp * 90 * dt;
+      if (s.x - s.len > W) s.x = -20 - Math.random() * 80;
+    }
+  }
+
+  /* ---------- 绘制 ---------- */
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  function rnd2(a, b) {
+    var x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function drawBackdrop(now) {
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#04060c');
+    bg.addColorStop(0.45, '#0a1120');
+    bg.addColorStop(1, '#0d1424');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // 岸与栏杆的剪影
+    ctx.fillStyle = '#0b101d';
+    ctx.fillRect(0, flowY - 92, W, 26);
+    ctx.fillStyle = '#101828';
+    for (var p = 0; p < W / 46 + 1; p++) {
+      ctx.fillRect(p * 46 - 6, flowY - 104, 9, 14);
+    }
+    ctx.fillStyle = 'rgba(242, 199, 110, 0.5)';
+    for (var l = 0; l < W / 150 + 1; l++) {
+      var lx = 60 + l * 150;
+      ctx.beginPath(); ctx.arc(lx, flowY - 96, 2.2, 0, Math.PI * 2); ctx.fill();
+      var g = ctx.createRadialGradient(lx, flowY - 96, 0, lx, flowY - 96, 30);
+      g.addColorStop(0, 'rgba(242, 199, 110, 0.22)');
+      g.addColorStop(1, 'rgba(242, 199, 110, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(lx - 30, flowY - 126, 60, 60);
+      ctx.fillStyle = 'rgba(242, 199, 110, 0.5)';
+    }
+    // 水道
+    var water = ctx.createLinearGradient(0, flowY - 60, 0, H);
+    water.addColorStop(0, '#0d1730');
+    water.addColorStop(1, '#0a0f1f');
+    ctx.fillStyle = water;
+    ctx.fillRect(0, flowY - 60, W, H - flowY + 60);
+    // 水道远缘
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(0, flowY - 60, W, 2);
+  }
+
+  function drawStreaks() {
+    for (var i = 0; i < streaks.length; i++) {
+      var s = streaks[i];
+      var g = ctx.createLinearGradient(s.x - s.len, 0, s.x, 0);
+      g.addColorStop(0, 'rgba(180, 205, 240, 0)');
+      g.addColorStop(1, 'rgba(180, 205, 240, ' + s.a.toFixed(3) + ')');
+      ctx.fillStyle = g;
+      ctx.fillRect(s.x - s.len, s.y, s.len, 1.3);
+    }
+  }
+
+  function drawMoonpath(now) {
+    // 月光在水道里铺出的一条碎光带
+    var mx = W * 0.62;
+    for (var k = 0; k < 8; k++) {
+      var ky = flowY - 44 + k * ((H - flowY + 40) / 8);
+      var wob = Math.sin(now / 850 + k * 1.6) * (3 + k);
+      var kw = 6 + rnd2(k, Math.floor(now / 750)) * 18;
+      ctx.fillStyle = 'rgba(244, 233, 200, ' + Math.max(0, (0.3 - k * 0.03)).toFixed(3) + ')';
+      ctx.fillRect(mx - kw / 2 + wob, ky, kw, 1.6);
+    }
+  }
+
+  function drawBoat(word, x, y, scale, rock) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rock);
+    ctx.scale(scale * 1.15, scale * 1.15);
+    // 经典纸船剪影：下宽上收的梯形船身 + 中央高三角
+    ctx.fillStyle = '#f2efe4';
+    ctx.beginPath();
+    ctx.moveTo(-24, 0);
+    ctx.lineTo(24, 0);
+    ctx.lineTo(15, -9);
+    ctx.lineTo(-15, -9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#f7f4ea';
+    ctx.beginPath();
+    ctx.moveTo(-10, -9);
+    ctx.lineTo(10, -9);
+    ctx.lineTo(0, -21);
+    ctx.closePath();
+    ctx.fill();
+    // 侧面折痕阴影
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+    ctx.beginPath();
+    ctx.moveTo(4, 0);
+    ctx.lineTo(24, 0);
+    ctx.lineTo(15, -9);
+    ctx.lineTo(4, -9);
+    ctx.closePath();
+    ctx.fill();
+    // 船身的词
+    ctx.fillStyle = '#4a4335';
+    ctx.font = '700 7.5px ' + SANS;
+    ctx.textAlign = 'center';
+    ctx.fillText(word.slice(0, 6), 0, -3);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+
+  function drawBoats(now) {
+    for (var i = boats.length - 1; i >= 0; i--) {
+      var b = boats[i];
+      var t = (now - b.t0) / FLOW_MS;
+      if (t >= 1) { boats.splice(i, 1); continue; }
+      // 入水缓入（前 12% 航程），之后匀速
+      var p;
+      if (t < 0.12) {
+        var e = t / 0.12;
+        p = 0.12 * (e * e * (3 - 2 * e));
+      } else {
+        p = t;
+      }
+      var x = -40 + (W + 90) * p;
+      var y = flowY + 14 + Math.sin(t * 9) * 5;
+      var scale = 1 - t * 0.55;
+      var rock = Math.sin(now / 300 + b.t0 % 10) * 0.09;
+      drawBoat(b.word, x, y, Math.max(0.4, scale), rock);
+    }
+  }
+
+  function drawScene(now) {
+    drawBackdrop(now);
+    drawMoonpath(now);
+    drawStreaks();
+    drawBoats(now);
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  var lastTick = Date.now();
+  setInterval(function () {
+    var now = Date.now();
+    var dt = Math.min((now - lastTick) / 1000, 0.12);
+    lastTick = now;
+    stepStreaks(dt);
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+  seedStreaks();
+  // 开场先漂一只示例船，示意玩法
+  release('晚安');
+})();
+</script>
+</body>
+</html>

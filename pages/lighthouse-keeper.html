@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>守灯塔</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: pointer; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>守灯塔</h1>
+  <p class="sub">灯塔不追船，它只是规律地亮。<em>光扫过谁</em>，谁就知道岸还在。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">雾笛：关</button>
+  </div>
+  <p class="hint">光束自己会转。点一下灯塔，替迷路的船多打一个信号——它看见了，会回你两下灯。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var horizon = 0;
+  var lamp = { x: 0, y: 0 };     // 灯室光源
+  var tower = { x: 0, y: 0, w: 0, h: 0 };  // 塔身命中区
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(380, Math.min(540, Math.round(W * 0.8)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    horizon = Math.round(H * 0.56);
+    tower.w = Math.min(56, W * 0.1);
+    tower.h = H * 0.34;
+    tower.x = W * 0.16 - tower.w / 2;
+    tower.y = H * 0.2;
+    lamp.x = W * 0.16;
+    lamp.y = tower.y + 2;
+  }
+
+  /* ---------- 光束与船 ---------- */
+  var beamAngle = 0;             // 弧度，顺时针
+  var BEAM_SPEED = Math.PI / 4;  // 8 秒一圈
+  var flashUntil = 0;            // 手动双闪
+  var ships = [];
+  function seedShips() {
+    ships = [
+      { x: W * 0.45, sp: 5.2, dir: 1, lastLit: -1e9, respondAt: -1e9, blinkUntil: 0, hornDone: true },
+      { x: W * 0.8, sp: 3.6, dir: -1, lastLit: -1e9, respondAt: -1e9, blinkUntil: 0, hornDone: true }
+    ];
+  }
+
+  function wrapAngle(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var r = cv.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    if (x > tower.x - 16 && x < tower.x + tower.w + 16 && y > tower.y - 16 && y < tower.y + tower.h) {
+      flashUntil = Date.now() + 650;
+      horn();
+      // 最近的一艘船安排回应
+      var best = null, bd = 1e9;
+      for (var i = 0; i < ships.length; i++) {
+        var d = Math.abs(ships[i].x - lamp.x);
+        if (d < bd) { bd = d; best = ships[i]; }
+      }
+      if (best) best.respondAt = Date.now() + 850;
+    }
+  });
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function horn() {
+    if (!soundOn || !actx) return;
+    var t = actx.currentTime;
+    var o = actx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(112, t);
+    o.frequency.linearRampToValueAtTime(98, t + 0.7);
+    var g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.12, t + 0.08);
+    g.gain.setValueAtTime(0.12, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + 0.8);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '雾笛：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '雾笛：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  function stepShips(now, dt) {
+    for (var i = 0; i < ships.length; i++) {
+      var s = ships[i];
+      s.x += s.sp * s.dir * dt;
+      if (s.x < -70) { s.x = W + 60; }
+      if (s.x > W + 70) { s.x = -60; }
+      // 光束扫过：灯塔到船的方位角与任一光束夹角足够小
+      var sa = Math.atan2(horizon + 4 - lamp.y, s.x - lamp.x);
+      var d1 = Math.abs(wrapAngle(beamAngle - sa));
+      var d2 = Math.abs(wrapAngle(beamAngle + Math.PI - sa));
+      var lit = Math.min(d1, d2) < 0.1 && now - s.lastLit > 2600;
+      if (lit) {
+        s.lastLit = now;
+        s.respondAt = now + 700;
+        s.hornDone = false;
+      }
+      if (now >= s.respondAt && !s.hornDone) {
+        s.blinkUntil = now + 1100;
+        s.hornDone = true;
+        horn();
+      }
+    }
+  }
+
+  /* ---------- 月亮（离屏预画） ---------- */
+  var moonCv = document.createElement('canvas');
+  (function () {
+    var S = 84;
+    moonCv.width = S; moonCv.height = S;
+    var m = moonCv.getContext('2d');
+    m.beginPath(); m.arc(S / 2, S / 2, 22, 0, Math.PI * 2);
+    m.fillStyle = '#f4e9c8'; m.fill();
+    m.globalCompositeOperation = 'destination-out';
+    m.beginPath(); m.arc(S / 2 - 11, S / 2 - 5, 20, 0, Math.PI * 2);
+    m.fill();
+    m.globalCompositeOperation = 'source-over';
+    var g = m.createRadialGradient(S / 2, S / 2, 16, S / 2, S / 2, 42);
+    g.addColorStop(0, 'rgba(244, 233, 200, 0.25)');
+    g.addColorStop(1, 'rgba(244, 233, 200, 0)');
+    m.fillStyle = g;
+    m.beginPath(); m.arc(S / 2, S / 2, 42, 0, Math.PI * 2); m.fill();
+  })();
+
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  function rnd2(a, b) {
+    var x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function drawSky(now) {
+    var sky = ctx.createLinearGradient(0, 0, 0, horizon);
+    sky.addColorStop(0, '#04060c');
+    sky.addColorStop(1, '#0b1220');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, horizon);
+    for (var i = 0; i < 40; i++) {
+      var sx = rnd2(i, 3) * W;
+      var sy = rnd2(i, 7) * horizon * 0.9;
+      var tw = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(now / 850 + i * 2.2));
+      ctx.globalAlpha = tw * 0.8;
+      ctx.fillStyle = '#cfd9ef';
+      ctx.fillRect(sx, sy, 1.4, 1.4);
+    }
+    ctx.globalAlpha = 1;
+    ctx.drawImage(moonCv, W * 0.74, horizon * 0.22, 62, 62);
+  }
+
+  function drawSea(now) {
+    var sea = ctx.createLinearGradient(0, horizon, 0, H);
+    sea.addColorStop(0, '#0c1526');
+    sea.addColorStop(1, '#080d19');
+    ctx.fillStyle = sea;
+    ctx.fillRect(0, horizon, W, H - horizon);
+    // 碎光
+    for (var i = 0; i < 18; i++) {
+      var px2 = rnd2(i, 13) * W;
+      var py2 = horizon + 8 + rnd2(i, 29) * (H - horizon - 20);
+      var pa = 0.08 + 0.12 * (0.5 + 0.5 * Math.sin(now / 700 + i * 2.7));
+      ctx.fillStyle = 'rgba(207, 217, 239, ' + pa.toFixed(3) + ')';
+      ctx.fillRect(px2, py2, 2, 1.2);
+    }
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillRect(0, horizon, W, 2);
+  }
+
+  function drawBeamFlash(now, coreOnly) {
+    // 旋转双光束（半透明长扇形）
+    var len = Math.hypot(W, H) * 1.1;
+    var half = 0.085;
+    if (!coreOnly) {
+      for (var k = 0; k < 2; k++) {
+        var a = beamAngle + k * Math.PI;
+        var pulse = 1;
+        if (now < flashUntil) {
+          var ft = (flashUntil - now) % 300;
+          pulse = ft < 150 ? 1.7 : 1.15;
+        }
+        var ex = lamp.x + Math.cos(a) * len;
+        var ey = lamp.y + Math.sin(a) * len;
+        // 宽而淡的光晕锥 + 主光锥，主锥 alpha 拉平让出画前的长段都读得出
+        var glow = ctx.createLinearGradient(lamp.x, lamp.y, ex, ey);
+        glow.addColorStop(0, 'rgba(255, 246, 214, ' + (0.14 * pulse).toFixed(3) + ')');
+        glow.addColorStop(0.6, 'rgba(255, 246, 214, ' + (0.08 * pulse).toFixed(3) + ')');
+        glow.addColorStop(1, 'rgba(255, 246, 214, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.moveTo(lamp.x, lamp.y);
+        ctx.lineTo(ex - Math.sin(a) * len * 0.2, ey + Math.cos(a) * len * 0.2);
+        ctx.lineTo(ex + Math.sin(a) * len * 0.2, ey - Math.cos(a) * len * 0.2);
+        ctx.closePath();
+        ctx.fill();
+        var g = ctx.createLinearGradient(lamp.x, lamp.y, ex, ey);
+        g.addColorStop(0, 'rgba(255, 246, 214, ' + Math.min(0.65, 0.55 * pulse).toFixed(3) + ')');
+        g.addColorStop(0.35, 'rgba(255, 246, 214, ' + (0.32 * pulse).toFixed(3) + ')');
+        g.addColorStop(0.7, 'rgba(255, 246, 214, ' + (0.18 * pulse).toFixed(3) + ')');
+        g.addColorStop(1, 'rgba(255, 246, 214, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(lamp.x, lamp.y);
+        ctx.lineTo(ex - Math.sin(a) * len * half, ey + Math.cos(a) * len * half);
+        ctx.lineTo(ex + Math.sin(a) * len * half, ey - Math.cos(a) * len * half);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    // 灯室亮核
+    var core = ctx.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, 26);
+    core.addColorStop(0, 'rgba(255, 250, 230, 0.95)');
+    core.addColorStop(0.4, 'rgba(255, 240, 190, 0.5)');
+    core.addColorStop(1, 'rgba(255, 240, 190, 0)');
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(lamp.x, lamp.y, 26, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawLighthouse(now) {
+    // 悬崖
+    ctx.fillStyle = '#0b101c';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(0, H * 0.4);
+    ctx.lineTo(W * 0.06, H * 0.34);
+    ctx.lineTo(W * 0.13, H * 0.27);
+    ctx.lineTo(W * 0.28, H * 0.3);
+    ctx.lineTo(W * 0.3, H);
+    ctx.closePath();
+    ctx.fill();
+    // 悬崖棱线
+    ctx.strokeStyle = 'rgba(120, 140, 180, 0.15)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.4);
+    ctx.lineTo(W * 0.06, H * 0.34);
+    ctx.lineTo(W * 0.13, H * 0.27);
+    ctx.stroke();
+    // 塔身（白身两道红箍）
+    var tx = tower.x, ty = tower.y, tw = tower.w, th = tower.h;
+    ctx.fillStyle = '#e8e2d4';
+    ctx.beginPath();
+    ctx.moveTo(tx + tw * 0.08, ty + 10);
+    ctx.lineTo(tx + tw * 0.92, ty + 10);
+    ctx.lineTo(tx + tw, ty + th);
+    ctx.lineTo(tx, ty + th);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#c65a50';
+    ctx.beginPath();
+    ctx.moveTo(tx + tw * 0.16, ty + th * 0.34);
+    ctx.lineTo(tx + tw * 0.84, ty + th * 0.34);
+    ctx.lineTo(tx + tw * 0.88, ty + th * 0.5);
+    ctx.lineTo(tx + tw * 0.12, ty + th * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(tx + tw * 0.1, ty + th * 0.68);
+    ctx.lineTo(tx + tw * 0.9, ty + th * 0.68);
+    ctx.lineTo(tx + tw * 0.95, ty + th * 0.84);
+    ctx.lineTo(tx + tw * 0.05, ty + th * 0.84);
+    ctx.closePath();
+    ctx.fill();
+    // 塔身受光面（靠灯室一端微亮）
+    var lit = ctx.createLinearGradient(tx, ty, tx + tw, ty);
+    lit.addColorStop(0, 'rgba(255, 248, 225, 0.14)');
+    lit.addColorStop(1, 'rgba(0, 0, 0, 0.12)');
+    ctx.fillStyle = lit;
+    ctx.beginPath();
+    ctx.moveTo(tx + tw * 0.08, ty + 10);
+    ctx.lineTo(tx + tw * 0.92, ty + 10);
+    ctx.lineTo(tx + tw, ty + th);
+    ctx.lineTo(tx, ty + th);
+    ctx.closePath();
+    ctx.fill();
+    // 灯室与廊台
+    ctx.fillStyle = '#2a3450';
+    ctx.fillRect(tx + tw * 0.14, ty - 6, tw * 0.72, 16);
+    ctx.fillStyle = 'rgba(255, 246, 214, 0.85)';
+    ctx.fillRect(tx + tw * 0.22, ty - 2, tw * 0.56, 8);
+    ctx.fillStyle = '#39445e';
+    ctx.beginPath();
+    ctx.moveTo(tx + tw * 0.06, ty - 6);
+    ctx.lineTo(tx + tw * 0.94, ty - 6);
+    ctx.lineTo(tx + tw * 0.5, ty - 20);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawShips(now) {
+    for (var i = 0; i < ships.length; i++) {
+      var s = ships[i];
+      var y = horizon + 6;
+      // 船体剪影
+      ctx.fillStyle = '#141c30';
+      ctx.fillRect(s.x - 11, y - 3, 22, 4);
+      ctx.fillRect(s.x - 7, y - 7, 14, 4);
+      // 桅杆
+      ctx.strokeStyle = '#141c30';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(s.x, y - 7);
+      ctx.lineTo(s.x, y - 17);
+      ctx.stroke();
+      // 桅灯：平时微亮，回应时双闪
+      var a = 0.5;
+      if (now < s.blinkUntil) {
+        var bt = (now - (s.blinkUntil - 1100)) / 1100;
+        a = (Math.floor(bt * 4) % 2 === 0) ? 1 : 0.25;
+      }
+      ctx.fillStyle = 'rgba(255, 216, 130, ' + a.toFixed(2) + ')';
+      ctx.beginPath(); ctx.arc(s.x, y - 19, 2.2, 0, Math.PI * 2); ctx.fill();
+      var g = ctx.createRadialGradient(s.x, y - 19, 0, s.x, y - 19, 12);
+      g.addColorStop(0, 'rgba(255, 216, 130, ' + (a * 0.4).toFixed(2) + ')');
+      g.addColorStop(1, 'rgba(255, 216, 130, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(s.x, y - 19, 12, 0, Math.PI * 2); ctx.fill();
+      // 倒影
+      ctx.fillStyle = 'rgba(255, 216, 130, ' + (a * 0.2).toFixed(2) + ')';
+      ctx.fillRect(s.x - 1.2, y + 2, 2.4, 7);
+    }
+  }
+
+  function drawScene(now) {
+    drawSky(now);
+    drawSea(now);
+    drawBeamFlash(now, false);
+    drawShips(now);
+    drawLighthouse(now);
+    drawBeamFlash(now, true);
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  var lastTick = Date.now();
+  setInterval(function () {
+    var now = Date.now();
+    var dt = Math.min((now - lastTick) / 1000, 0.12);
+    lastTick = now;
+    beamAngle = (beamAngle + BEAM_SPEED * dt) % (Math.PI * 2);
+    stepShips(now, dt);
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+  seedShips();
+})();
+</script>
+</body>
+</html>

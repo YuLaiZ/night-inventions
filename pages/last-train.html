@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>末班车</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --cabin: #1a2130;
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  /* 车厢广播屏 */
+  .led {
+    margin: clamp(18px, 4vw, 26px) auto 10px;
+    max-width: 560px;
+    background: #0b0e16;
+    border: 1px solid rgba(242, 199, 110, 0.18);
+    border-radius: 8px;
+    padding: 9px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+  }
+  .led .dot {
+    flex: none;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 8px 2px rgba(242, 199, 110, 0.5);
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  .led .txt {
+    color: var(--gold);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity 0.28s ease;
+  }
+  .led .txt.swap { opacity: 0; }
+
+  .coach {
+    margin-top: 12px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: var(--cabin);
+  }
+  canvas { display: block; width: 100%; touch-action: none; cursor: grab; }
+  canvas.grabbing { cursor: grabbing; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>末班车</h1>
+  <p class="sub">往天亮方向的末班车，现在发车。你只管<em>靠窗坐好</em>——窗外的夜色，由它替你赶路。</p>
+
+  <div class="led"><span class="dot"></span><span class="txt" id="led">正在联挂车厢，请稍候……</span></div>
+
+  <div class="coach"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">广播：关</button>
+  </div>
+  <p class="hint">试试拉一下头顶的吊环，再松手。列车会自己进站，广播一句比一句困。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var ledEl = document.getElementById('led');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, winH = 0, cabinTop = 0, dpr = 1;
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth;
+    if (!cssW) cssW = 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    winH = Math.max(240, Math.min(380, Math.round(W * 0.62)));
+    var cabinH = Math.max(118, Math.min(150, Math.round(W * 0.22)));
+    cabinTop = winH;
+    H = winH + cabinH;
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    placeStraps();
+  }
+
+  /* ---------- 确定性随机 ---------- */
+  function fract(x) { return x - Math.floor(x); }
+  function rnd(seed) { return fract(Math.sin(seed * 127.1 + 311.7) * 43758.5453); }
+  function rnd2(a, b) { return rnd(a * 12.9898 + b * 78.233); }
+
+  /* ---------- 线路：站名与广播 ---------- */
+  var STATIONS = [
+    { name: '晚风', dwellNote: '晚风站到了。下车的乘客，请把今天的烦恼交给风。' },
+    { name: '路灯与影子', dwellNote: '路灯与影子站到了。一盏灯配一个影子，不多也不少。' },
+    { name: '回声胡同', dwellNote: '回声胡同到了。刚才那句晚安，胡同替你多说了一遍。' },
+    { name: '月亮不打烊', dwellNote: '月亮不打烊站到了。它整夜营业，只接待睡不着的人。' },
+    { name: '半梦桥', dwellNote: '半梦桥到了。过桥请轻一点，桥下有人刚睡着。' },
+    { name: '好梦', dwellNote: '终点站，好梦，到了。今晚的夜车到此收班——我们明晚，老时间见。', terminal: true }
+  ];
+  var stationIdx = 0;
+
+  /* ---------- 列车状态机 ---------- */
+  var V_CRUISE = 400, A_BRAKE = 115, A_ACC = 92;
+  var DWELL_MS = 8000, TERMINAL_EXTRA_MS = 4200;
+  var state = 'depart';           // depart → cruise → brake → dwell → accel → …
+  var stateAt = Date.now();
+  var d = 0;                      // 里程（近景像素）
+  var v = 0;
+  var aTrain = 0;                 // 当前纵向加速度（驱动吊环）
+  var cruiseUntil = 0;            // 墙钟
+  var dwellNoteShowAt = 0;
+  var ledPhase = '';              // 当前 LED 文案 key
+
+  function setState(s) {
+    state = s;
+    stateAt = Date.now();
+    if (s === 'depart') { cruiseUntil = Date.now() + 6000; }
+    if (s === 'cruise') {
+      cruiseUntil = Date.now() + 9000 + Math.random() * 5000;
+      var stC = STATIONS[stationIdx];
+      setLed('下一站 · ' + stC.name + (stC.terminal ? '（终点站）' : ''));
+    }
+    if (s === 'dwell') {
+      var st = STATIONS[stationIdx];
+      var extra = st.terminal ? TERMINAL_EXTRA_MS : 0;
+      dwellNoteShowAt = Date.now() + 200;
+      setTimeout(function () { setLed(st.dwellNote); }, 200);
+      chime();
+      setTimeout(function () {
+        if (Date.now() - stateAt >= DWELL_MS - 400 && st.terminal) {
+          setLed('临时通知：加开一班，继续开往晚风。');
+        }
+      }, DWELL_MS + extra - 3800);
+      var wait = DWELL_MS + extra;
+      setTimeout(function () {
+        if (Date.now() - stateAt < wait - 400) return; // 已被重置
+        if (st.terminal) stationIdx = 0; else stationIdx++;
+        scheduleNextStop();
+        setState('accel');
+      }, wait);
+    }
+  }
+
+  function step(now) {
+    var dt = Math.min((now - lastTick) / 1000, 0.12);
+    lastTick = now;
+    aTrain = 0;
+    if (state === 'depart') {
+      v = Math.min(V_CRUISE, v + A_ACC * dt);
+      aTrain = A_ACC;
+      if (now >= cruiseUntil && v >= V_CRUISE - 1) setState('cruise');
+    } else if (state === 'cruise') {
+      v += (V_CRUISE - v) * Math.min(1, dt * 2);
+      aTrain = Math.sin(now / 900) * 5 + (Math.random() - 0.5) * 8;
+      var st = STATIONS[stationIdx];
+      var stopD = stopDistance();
+      var brakeDist = (v * v) / (2 * A_BRAKE) + 30;
+      if (stopD <= brakeDist) setState('brake');
+    } else if (state === 'brake') {
+      v = Math.max(0, v - A_BRAKE * dt);
+      aTrain = -A_BRAKE;
+      if (v <= 0.5) {
+        v = 0;
+        d = nextStopD;
+        setState('dwell');
+      }
+    } else if (state === 'dwell') {
+      v = 0;
+    } else if (state === 'accel') {
+      v = Math.min(V_CRUISE, v + A_ACC * dt);
+      aTrain = A_ACC;
+      if (v >= V_CRUISE - 1) setState('cruise');
+    }
+    d += v * dt;
+    stepStraps(dt);
+    if (soundOn) updateRumble();
+  }
+
+  var nextStopD = 0;
+  function stopDistance() { return nextStopD - d; }
+  function scheduleNextStop() {
+    nextStopD = d + 3200 + Math.random() * 2600;
+  }
+
+  /* ---------- LED ---------- */
+  function setLed(text) {
+    if (ledEl.textContent === text) return;
+    ledEl.classList.add('swap');
+    setTimeout(function () {
+      ledEl.textContent = text;
+      ledEl.classList.remove('swap');
+    }, 280);
+  }
+
+  /* ---------- 吊环 ---------- */
+  var straps = [];
+  var G = 900, FORCE_GAIN = 2.6, DAMP = 1.5, TH_MAX = 1.15;
+  function placeStraps() {
+    var fx = [0.18, 0.39, 0.61, 0.82];
+    var lens = [0.42, 0.56, 0.48, 0.62];
+    if (!straps.length) {
+      for (var i = 0; i < 4; i++) {
+        straps.push({ fx: fx[i], flen: lens[i], th: 0, om: 0 });
+      }
+    }
+    for (var j = 0; j < straps.length; j++) {
+      straps[j].px = straps[j].fx * W;
+      straps[j].py = cabinTop + 8;
+      straps[j].len = straps[j].flen * (H - cabinTop);
+    }
+  }
+  function strapPos(s) {
+    var hx = s.px + Math.sin(s.th) * s.len;
+    var hy = s.py + Math.cos(s.th) * s.len;
+    return [hx, hy];
+  }
+  function stepStraps(dt) {
+    for (var i = 0; i < straps.length; i++) {
+      var s = straps[i];
+      if (dragIdx === i) continue;
+      var alpha = -(G / s.len) * Math.sin(s.th)
+                - (FORCE_GAIN * aTrain / s.len) * Math.cos(s.th)
+                - DAMP * s.om;
+      s.om += alpha * dt;
+      s.th += s.om * dt;
+      if (s.th > TH_MAX) { s.th = TH_MAX; s.om *= -0.35; }
+      if (s.th < -TH_MAX) { s.th = -TH_MAX; s.om *= -0.35; }
+    }
+  }
+
+  /* ---------- 拖拽 ---------- */
+  var dragIdx = -1, dragPrev = null;
+  function pointerPos(e) {
+    var r = cv.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    var p = pointerPos(e);
+    var best = -1, bestD = 40;
+    for (var i = 0; i < straps.length; i++) {
+      var hp = strapPos(straps[i]);
+      var dist = Math.hypot(p[0] - hp[0], p[1] - hp[1]);
+      if (dist < bestD) { bestD = dist; best = i; }
+    }
+    if (best >= 0) {
+      dragIdx = best;
+      dragPrev = { p: p, t: performance.now() };
+      cv.classList.add('grabbing');
+      cv.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (dragIdx < 0) return;
+    var p = pointerPos(e);
+    var s = straps[dragIdx];
+    var dx = p[0] - s.px, dy = p[1] - s.py;
+    var target = Math.atan2(dx, Math.max(20, dy));
+    target = Math.max(-TH_MAX, Math.min(TH_MAX, target));
+    var now = performance.now();
+    if (dragPrev) {
+      var dtm = Math.max(8, now - dragPrev.t) / 1000;
+      var vel = (target - s.th) / dtm;
+      s.om = vel * 0.55;
+    }
+    s.th = target;
+    dragPrev = { p: p, t: now };
+    e.preventDefault();
+  });
+  function endDrag() {
+    if (dragIdx < 0) return;
+    var s = straps[dragIdx];
+    s.om = Math.max(-9, Math.min(9, s.om));
+    dragIdx = -1;
+    dragPrev = null;
+    cv.classList.remove('grabbing');
+  }
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+
+  /* ---------- 声音（全部本地合成） ---------- */
+  var soundOn = false, actx = null, rumbleGain = null, rumbleSrc = null;
+  var lastClack = 0;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      var len = actx.sampleRate;
+      var buf = actx.createBuffer(1, len, actx.sampleRate);
+      var ch = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+      rumbleSrc = actx.createBufferSource();
+      rumbleSrc.buffer = buf;
+      rumbleSrc.loop = true;
+      var lp = actx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 130;
+      rumbleGain = actx.createGain();
+      rumbleGain.gain.value = 0;
+      rumbleSrc.connect(lp); lp.connect(rumbleGain); rumbleGain.connect(actx.destination);
+      rumbleSrc.start();
+      noiseBuf = buf;
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  var noiseBuf = null;
+  function tone(freq, at, dur, vol) {
+    var o = actx.createOscillator();
+    var g = actx.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0, actx.currentTime + at);
+    g.gain.linearRampToValueAtTime(vol, actx.currentTime + at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + at + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(actx.currentTime + at);
+    o.stop(actx.currentTime + at + dur + 0.05);
+  }
+  function chime() {
+    if (!soundOn || !actx) return;
+    tone(659, 0, 0.5, 0.16);
+    tone(523, 0.28, 0.7, 0.16);
+  }
+  function clack() {
+    if (!soundOn || !actx || !noiseBuf) return;
+    var src = actx.createBufferSource();
+    src.buffer = noiseBuf;
+    var bp = actx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 420;
+    bp.Q.value = 1.2;
+    var g = actx.createGain();
+    var t = actx.currentTime;
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    src.connect(bp); bp.connect(g); g.connect(actx.destination);
+    src.start(t, Math.random() * 0.5, 0.1);
+    src.stop(t + 0.12);
+  }
+  function updateRumble() {
+    if (!rumbleGain) return;
+    var target = Math.min(0.07, (v / V_CRUISE) * 0.07);
+    rumbleGain.gain.setTargetAtTime(target, actx.currentTime, 0.25);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '广播：开';
+      soundBtn.classList.add('on');
+    } else {
+      if (rumbleGain) rumbleGain.gain.setTargetAtTime(0, actx.currentTime, 0.1);
+      soundBtn.textContent = '广播：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 月亮（离屏预画，上弦月） ---------- */
+  var moonCv = document.createElement('canvas');
+  (function () {
+    var S = 96;
+    moonCv.width = S; moonCv.height = S;
+    var m = moonCv.getContext('2d');
+    m.beginPath(); m.arc(S / 2, S / 2, 26, 0, Math.PI * 2);
+    m.fillStyle = '#f4e9c8'; m.fill();
+    m.globalCompositeOperation = 'destination-out';
+    m.beginPath(); m.arc(S / 2 - 13, S / 2 - 6, 24, 0, Math.PI * 2);
+    m.fill();
+    m.globalCompositeOperation = 'source-over';
+    var g = m.createRadialGradient(S / 2, S / 2, 20, S / 2, S / 2, 48);
+    g.addColorStop(0, 'rgba(244, 233, 200, 0.28)');
+    g.addColorStop(1, 'rgba(244, 233, 200, 0)');
+    m.fillStyle = g;
+    m.beginPath(); m.arc(S / 2, S / 2, 48, 0, Math.PI * 2); m.fill();
+  })();
+
+  /* ---------- 流星 ---------- */
+  var meteor = null, nextMeteor = Date.now() + 14000;
+  function stepMeteor(now) {
+    if (!meteor && now > nextMeteor) {
+      meteor = {
+        x: W * (0.15 + Math.random() * 0.5),
+        y: winH * (0.08 + Math.random() * 0.25),
+        vx: 320 + Math.random() * 160,
+        vy: 120 + Math.random() * 60,
+        t0: now
+      };
+      nextMeteor = now + 22000 + Math.random() * 24000;
+    }
+    if (meteor && now - meteor.t0 > 900) meteor = null;
+  }
+
+  /* ---------- 绘制 ---------- */
+  function drawWindow(now) {
+    var horizon = winH * 0.74;
+    // 夜空
+    var sky = ctx.createLinearGradient(0, 0, 0, horizon);
+    sky.addColorStop(0, '#070b16');
+    sky.addColorStop(0.72, '#0d1424');
+    sky.addColorStop(1, '#1a2033');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, horizon);
+
+    // 星（慢速漂移 + 闪烁）
+    for (var i = 0; i < 46; i++) {
+      var sx = ((i * 137.5 - d * 0.05) % (W + 40) + (W + 40)) % (W + 40) - 20;
+      var sy = rnd2(i, 7) * horizon * 0.8;
+      var tw = 0.35 + 0.5 * (0.5 + 0.5 * Math.sin(now / 700 + i * 2.4));
+      var r = rnd2(i, 13) < 0.16 ? 1.6 : 1;
+      ctx.globalAlpha = tw * 0.85;
+      ctx.fillStyle = '#cfd9ef';
+      ctx.fillRect(sx, sy, r, r);
+    }
+    ctx.globalAlpha = 1;
+
+    // 月亮（远景，近乎不动）
+    ctx.drawImage(moonCv, W * 0.76, winH * 0.10, 72, 72);
+
+    // 流星
+    if (meteor) {
+      var mt = (now - meteor.t0) / 900;
+      var mx = meteor.x + meteor.vx * mt;
+      var my = meteor.y + meteor.vy * mt;
+      var fade = mt < 0.15 ? mt / 0.15 : (1 - (mt - 0.15) / 0.85);
+      var grad = ctx.createLinearGradient(mx - meteor.vx * 0.13, my - meteor.vy * 0.13, mx, my);
+      grad.addColorStop(0, 'rgba(230, 238, 255, 0)');
+      grad.addColorStop(1, 'rgba(230, 238, 255, ' + (0.9 * fade).toFixed(3) + ')');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(mx - meteor.vx * 0.13, my - meteor.vy * 0.13);
+      ctx.lineTo(mx, my);
+      ctx.stroke();
+    }
+
+    // 远景天际线（慢）
+    var fFar = 0.16, segFar = 260;
+    var offFar = ((d * fFar) % segFar + segFar) % segFar;
+    var startFar = Math.floor((d * fFar - offFar) / segFar);
+    ctx.fillStyle = '#0c1120';
+    for (var k = -1; k < W / segFar + 2; k++) {
+      var idxF = startFar + k;
+      var bxF = k * segFar - offFar;
+      var bwF = segFar * (0.5 + rnd(idxF * 3.1) * 0.4);
+      var bhF = horizon * (0.22 + rnd(idxF * 7.7) * 0.3);
+      ctx.fillRect(bxF, horizon - bhF, bwF, bhF);
+      // 楼顶细节：水塔或天线
+      if (rnd(idxF * 5.3) < 0.4) {
+        ctx.fillRect(bxF + bwF * 0.3, horizon - bhF - 10, 8, 10);
+      } else {
+        ctx.fillRect(bxF + bwF * 0.6, horizon - bhF - 18, 1.5, 18);
+      }
+    }
+
+    // 中景楼房（带亮窗，窗火随时间缓慢变化）
+    var fMid = 0.45, segMid = 190;
+    var offMid = ((d * fMid) % segMid + segMid) % segMid;
+    var startMid = Math.floor((d * fMid - offMid) / segMid);
+    var tWin = Math.floor(now / 16000);
+    for (var m = -1; m < W / segMid + 2; m++) {
+      var idxM = startMid + m;
+      var bx = m * segMid - offMid;
+      var bw = segMid * (0.62 + rnd(idxM * 2.3) * 0.3);
+      var bh = horizon * (0.3 + rnd(idxM * 9.1) * 0.34);
+      ctx.fillStyle = '#111a2e';
+      ctx.fillRect(bx, horizon + 26 - bh, bw, bh);
+      // 亮窗
+      var cols = 3, rows = Math.max(2, Math.floor(bh / 34));
+      for (var c = 0; c < cols; c++) {
+        for (var r2 = 0; r2 < rows; r2++) {
+          var seedL = rnd(idxM * 13.37 + c * 7.7 + r2 * 3.3 + tWin * 1.7);
+          if (seedL < 0.34) {
+            var warm = rnd(idxM * 5.5 + c * 11 + r2 * 2.2) < 0.75;
+            ctx.fillStyle = warm ? 'rgba(240, 179, 92, 0.85)' : 'rgba(156, 200, 255, 0.7)';
+            ctx.fillRect(bx + 8 + c * ((bw - 16) / cols), horizon + 34 - bh + r2 * (bh - 16) / rows, 7, 9);
+          }
+        }
+      }
+    }
+
+    // 地面
+    ctx.fillStyle = '#0a0e1a';
+    ctx.fillRect(0, horizon, W, winH - horizon);
+
+    // 近景灯杆（快速掠过的光痕）
+    var fNear = 1, segNear = 300;
+    var offNear = ((d * fNear) % segNear + segNear) % segNear;
+    var startNear = Math.floor((d * fNear - offNear) / segNear);
+    var streak = Math.min(60, v * 0.16);
+    for (var p = -1; p < W / segNear + 2; p++) {
+      var idxN = startNear + p;
+      var lx = p * segNear - offNear;
+      // 光痕（速度感）
+      if (v > 40) {
+        var lg = ctx.createLinearGradient(lx, 0, lx + streak, 0);
+        lg.addColorStop(0, 'rgba(242, 199, 110, 0)');
+        lg.addColorStop(1, 'rgba(242, 199, 110, 0.35)');
+        ctx.strokeStyle = lg;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(lx, horizon + 16);
+        ctx.lineTo(lx + streak, horizon + 16);
+        ctx.stroke();
+      }
+      // 杆与灯头
+      ctx.fillStyle = '#232c42';
+      ctx.fillRect(lx, horizon + 10, 3, winH - horizon - 10);
+      ctx.fillStyle = 'rgba(242, 199, 110, 0.9)';
+      ctx.beginPath(); ctx.arc(lx + 1.5, horizon + 8, 3, 0, Math.PI * 2); ctx.fill();
+      var halo = ctx.createRadialGradient(lx + 1.5, horizon + 8, 0, lx + 1.5, horizon + 8, 22);
+      halo.addColorStop(0, 'rgba(242, 199, 110, 0.3)');
+      halo.addColorStop(1, 'rgba(242, 199, 110, 0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(lx - 22, horizon - 16, 46, 46);
+    }
+
+    // 枕木（最近，最快）
+    var fTie = 1.2, segTie = 84;
+    var offTie = ((d * fTie) % segTie + segTie) % segTie;
+    ctx.fillStyle = 'rgba(58, 68, 96, 0.55)';
+    for (var tI = -1; tI < W / segTie + 1; tI++) {
+      var tX = tI * segTie - offTie;
+      ctx.fillRect(tX, winH - 14, 40, 4);
+    }
+
+    // 站台（临近车站时出现）
+    var distStop = stopDistance();
+    if (distStop < 1400 && v < 460) {
+      drawPlatform(distStop, horizon, now);
+    }
+  }
+
+  function drawPlatform(distStop, horizon, now) {
+    // 列车停稳时：d === nextStopD，站牌落在窗中右侧
+    var worldToScreen = function (wx) { return wx - nextStopD; };
+    var signX = W * 0.56;             // 站牌停稳后的屏幕位置
+    var platformOff = distStop;       // 停稳时为 0
+    var floorY = winH - 26;
+
+    // 站台地面亮带
+    var pf = ctx.createLinearGradient(0, floorY - 6, 0, winH);
+    pf.addColorStop(0, 'rgba(90, 84, 70, 0.0)');
+    pf.addColorStop(0.4, 'rgba(122, 112, 92, 0.5)');
+    pf.addColorStop(1, 'rgba(96, 88, 74, 0.75)');
+    ctx.fillStyle = pf;
+    ctx.fillRect(0, floorY - 6, W, winH - floorY + 6);
+
+    // 站台边缘安全线（黄）
+    ctx.fillStyle = 'rgba(242, 199, 110, 0.65)';
+    ctx.fillRect(0, floorY - 8, W, 3);
+
+    // 立柱（世界坐标固定间隔）
+    var segP = 170;
+    var baseIdx = Math.floor((-platformOff - segP * 2) / segP);
+    for (var pi = 0; pi < W / segP + 5; pi++) {
+      var idxP = baseIdx + pi;
+      var px2 = idxP * segP + platformOff;
+      if (px2 < -60 || px2 > W + 60) continue;
+      ctx.fillStyle = '#2a3248';
+      ctx.fillRect(px2 - 5, horizon + 40, 10, floorY - horizon - 40);
+      // 柱顶灯与地面光池
+      var pool = ctx.createRadialGradient(px2, floorY, 0, px2, floorY, 60);
+      pool.addColorStop(0, 'rgba(242, 217, 150, 0.22)');
+      pool.addColorStop(1, 'rgba(242, 217, 150, 0)');
+      ctx.fillStyle = pool;
+      ctx.fillRect(px2 - 60, floorY - 40, 120, 70);
+      ctx.fillStyle = 'rgba(242, 217, 150, 0.85)';
+      ctx.beginPath(); ctx.arc(px2, horizon + 38, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 站牌（世界锚定，随车滑入）
+    var st = STATIONS[stationIdx];
+    var signW = Math.max(96, st.name.length * 24 + 28);
+    var sx0 = signX + platformOff - signW / 2;
+    var sy0 = horizon - 2;
+    // 吊杆
+    ctx.strokeStyle = '#2a3248';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(sx0 + signW / 2, sy0 - 26);
+    ctx.lineTo(sx0 + signW / 2, sy0);
+    ctx.stroke();
+    // 牌体
+    ctx.fillStyle = '#141b2c';
+    ctx.strokeStyle = 'rgba(242, 199, 110, 0.55)';
+    ctx.lineWidth = 1.5;
+    roundRect(sx0, sy0, signW, 44, 8);
+    ctx.fill(); ctx.stroke();
+    // 字
+    var fs = st.name.length > 4 ? 20 : 26;
+    ctx.fillStyle = '#f2c76e';
+    ctx.font = '600 ' + fs + 'px ' + SANS;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(st.name, sx0 + signW / 2, sy0 + 23);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+
+    // 停稳后：屏蔽门上的「好梦」贴纸式小灯牌 & 站台长椅（装饰，滑入）
+    if (distStop < 60) {
+      // 长椅
+      var bx3 = W * 0.16 + platformOff * 0.9;
+      ctx.fillStyle = '#31405e';
+      ctx.fillRect(bx3, floorY - 22, 58, 5);
+      ctx.fillRect(bx3 + 4, floorY - 17, 4, 17);
+      ctx.fillRect(bx3 + 50, floorY - 17, 4, 17);
+    }
+  }
+
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawCabin(now) {
+    // 车厢内壁
+    var wall = ctx.createLinearGradient(0, cabinTop, 0, H);
+    wall.addColorStop(0, '#20293c');
+    wall.addColorStop(1, '#161d2c');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, cabinTop, W, H - cabinTop);
+
+    // 窗框（包住窗外景）
+    ctx.strokeStyle = '#2a3248';
+    ctx.lineWidth = 12;
+    ctx.strokeRect(6, 6, W - 12, winH - 6);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(12, 12, W - 24, winH - 14);
+
+    // 玻璃斜向反光
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(12, 12, W - 24, winH - 18);
+    ctx.clip();
+    var sheen = ctx.createLinearGradient(0, 0, W * 0.55, winH);
+    sheen.addColorStop(0.32, 'rgba(255, 255, 255, 0)');
+    sheen.addColorStop(0.5, 'rgba(255, 255, 255, 0.045)');
+    sheen.addColorStop(0.56, 'rgba(255, 255, 255, 0)');
+    sheen.addColorStop(0.78, 'rgba(255, 255, 255, 0.03)');
+    sheen.addColorStop(0.84, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(12, 12, W - 24, winH - 18);
+    ctx.restore();
+
+    // 吊环轨道杆
+    ctx.fillStyle = '#2e3850';
+    ctx.fillRect(0, cabinTop + 3, W, 4);
+
+    // 吊环
+    for (var i = 0; i < straps.length; i++) {
+      var s = straps[i];
+      var hp = strapPos(s);
+      // 带
+      ctx.strokeStyle = '#cfc4a4';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(s.px, s.py + 5);
+      ctx.lineTo(hp[0], hp[1] - 10);
+      ctx.stroke();
+      // 提手环
+      ctx.strokeStyle = '#d8b56a';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.arc(hp[0], hp[1], 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(hp[0], hp[1], 15.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 车厢时钟（纯数字，等宽）与方向牌
+    var now2 = new Date();
+    var hh = ('0' + now2.getHours()).slice(-2);
+    var mm = ('0' + now2.getMinutes()).slice(-2);
+    ctx.font = '13px ' + MONO;
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.8)';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(hh + ':' + mm, W - 18, cabinTop + 26);
+    ctx.font = '11px ' + SANS;
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.9)';
+    ctx.fillText('开往天亮', W - 18, cabinTop + 46);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  /* ---------- 主循环（interval 驱动，墙钟推进；rAF 在后台标签停摆会让画面定格，
+     故模拟与绘制同在一个 33ms interval 里，后台也不冻） ---------- */
+  var lastTick = Date.now();
+  setInterval(function () {
+    var now = Date.now();
+    step(now);
+    stepMeteor(now);
+    // 轨道哐当声
+    if (soundOn && v > 260 && now - lastClack > 1150) { lastClack = now; clack(); }
+    ctx.clearRect(0, 0, W, H);
+    drawWindow(now);
+    drawCabin(now);
+  }, 33);
+
+  /* ---------- 启动 ---------- */
+  resize();
+  window.addEventListener('resize', resize);
+  setState('depart');
+  scheduleNextStop();
+  setLed('本次列车开往天亮方向，请坐稳扶好。');
+})();
+</script>
+</body>
+</html>

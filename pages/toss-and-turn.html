@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>翻身计数器</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+    text-align: center;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .bed {
+    margin: clamp(22px, 5vw, 34px) auto 0;
+    max-width: 380px;
+    background: rgba(16, 24, 40, 0.6);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: clamp(20px, 5vw, 30px) 20px clamp(16px, 3vw, 22px);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: border-color 0.2s ease;
+  }
+  .bed:hover { border-color: rgba(156, 200, 255, 0.3); }
+  .bed:active { transform: scale(0.99); }
+  .flipbox {
+    width: 150px;
+    height: 92px;
+    margin: 0 auto;
+  }
+  #figure {
+    transition: transform 0.55s cubic-bezier(0.3, 0.9, 0.4, 1.05);
+  }
+  .count {
+    margin-top: 10px;
+    font-size: 40px;
+    font-weight: 700;
+    color: var(--ink-strong);
+    font-family: var(--mono);
+    line-height: 1.2;
+  }
+  .count .unit {
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--ink-dim);
+    margin-left: 6px;
+  }
+  .msg {
+    min-height: 52px;
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gold);
+    font-size: 15px;
+    transition: opacity 0.3s ease;
+  }
+  .msg.swap { opacity: 0; }
+
+  .reset-row { margin-top: clamp(14px, 3vw, 18px); }
+  button.reset {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    letter-spacing: 0.1em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 20px;
+    cursor: pointer;
+  }
+  button.reset:hover { color: var(--ink); border-color: rgba(156, 200, 255, 0.35); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>翻身计数器</h1>
+  <p class="sub">睡不着的时候，每翻一次身，<em>点一下床</em>。剩下的交给本计数器陪你说废话。</p>
+
+  <div class="bed" id="bed">
+    <div class="flipbox" id="flipbox">
+      <svg viewBox="0 0 150 92" width="150" height="92" aria-hidden="true">
+        <!-- 床垫 -->
+        <rect x="8" y="64" width="134" height="20" rx="8" fill="#2a3450"/>
+        <rect x="8" y="58" width="134" height="10" rx="5" fill="#34405f"/>
+        <rect x="14" y="50" width="34" height="14" rx="6" fill="#4a5578"/>
+        <!-- 小人：以床中心翻转 -->
+        <g id="figure" style="transform-origin: 75px 56px;">
+          <circle cx="52" cy="52" r="7" fill="#e8cba0"/>
+          <rect x="58" y="48" width="44" height="9" rx="4.5" fill="#8a93ad"/>
+          <rect x="99" y="47" width="16" height="6" rx="3" fill="#e8cba0"/>
+        </g>
+      </svg>
+    </div>
+    <div class="count"><span id="n">0</span><span class="unit">次</span></div>
+    <div class="msg" id="msg">躺平，是今晚的第一个动作。</div>
+  </div>
+
+  <div class="reset-row">
+    <button class="reset" id="reset" type="button">天亮了，重新躺</button>
+  </div>
+
+  <p class="hint">这些节点全部取材于深夜失眠现场。数到某个数还睡不着，就去喝口温水。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var n = 0;
+  var bed = document.getElementById('bed');
+  var flipbox = document.getElementById('flipbox');
+  var figure = document.getElementById('figure');
+  var nEl = document.getElementById('n');
+  var msgEl = document.getElementById('msg');
+  var flipDeg = 0;
+
+  var MILESTONES = [
+    [5,   '第 5 次：睡意正在路上，堵车。'],
+    [10,  '第 10 次：你和枕头进入冷战，谁都不肯先睡。'],
+    [16,  '第 16 次：床垫开始默默记下你所有的形状。'],
+    [24,  '第 24 次：左边凉、右边热，你陷入人生的存在主义抉择。'],
+    [35,  '第 35 次：恭喜，你已经翻转出一个崭新的自己。'],
+    [50,  '第 50 次：数到这儿还睡不着的话——去喝口温水，回来接着躺，不丢人。']
+  ];
+
+  var CHATTER = [
+    '翻。', '再翻。', '换个姿势，换个人生。', '被子表示压力很大。',
+    '这一翻，翻掉了三件烦心事。', '枕头说：要不还是和好吧。',
+    '据说厉害的人睡前也要翻身，你挺厉害的。', '又翻。夜还长，不急。'
+  ];
+
+  function say(text) {
+    msgEl.classList.add('swap');
+    setTimeout(function () {
+      msgEl.textContent = text;
+      msgEl.classList.remove('swap');
+    }, 300);
+  }
+
+  function milestoneFor(v) {
+    var found = null;
+    for (var i = 0; i < MILESTONES.length; i++) {
+      if (MILESTONES[i][0] === v) found = MILESTONES[i][1];
+    }
+    return found;
+  }
+
+  bed.addEventListener('click', function (e) {
+    if (e.target.id === 'reset') return;
+    n++;
+    nEl.textContent = String(n);
+    flipDeg += 180;
+    figure.style.transform = 'rotate(' + (flipDeg % 360) + 'deg)';
+    var m = milestoneFor(n);
+    if (m) say(m);
+    else if (n >= 51) say('第 ' + n + ' 次：本计数器已经词穷，但它还陪着。');
+    else say(CHATTER[Math.floor(Math.random() * CHATTER.length)]);
+  });
+
+  document.getElementById('reset').addEventListener('click', function () {
+    n = 0;
+    flipDeg = 0;
+    nEl.textContent = '0';
+    flipbox.style.transform = 'rotate(0deg)';
+    say('天亮了。旧的形状清空，今晚接着翻。');
+  });
+})();
+</script>
+</body>
+</html>

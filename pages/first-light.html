@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>破晓</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 660px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; touch-action: none; cursor: ew-resize; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>破晓</h1>
+  <p class="sub">天亮只需要二十分钟，却没人全程看完。<em>按住左右拖</em>，替自己把这段补上。</p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <p class="hint">从 05:30 拖到 06:30：星星下班，月亮回家，城市的灯一盏一盏熄，然后太阳从楼后面爬上来。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var skylineY = 0;      // 城市天际线基准
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(380, Math.min(520, Math.round(W * 0.78)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    skylineY = Math.round(H * 0.68);
+  }
+
+  /* ---------- 时间（0=05:30, 1=06:30） ---------- */
+  var t = 0.08;          // 当前
+  var tTarget = 0.08;
+  var dragging = false;
+
+  function xToT(x) {
+    var m = W * 0.07;
+    return Math.max(0, Math.min(1, (x - m) / (W - m * 2)));
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+    var r = cv.getBoundingClientRect();
+    tTarget = xToT(e.clientX - r.left);
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var r = cv.getBoundingClientRect();
+    tTarget = xToT(e.clientX - r.left);
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+
+  /* ---------- 天空关键帧（13 档） ---------- */
+  var SKY = [
+    [[5, 8, 15], [12, 18, 36]],      // 0 深夜
+    [[6, 9, 17], [16, 23, 44]],      // 1
+    [[8, 11, 21], [24, 30, 56]],     // 2
+    [[14, 16, 32], [40, 42, 74]],    // 3 靛
+    [[26, 26, 48], [70, 62, 96]],    // 4 紫起
+    [[44, 38, 62], [122, 92, 122]],  // 5 mauve
+    [[70, 52, 68], [186, 128, 128]], // 6 粉紫
+    [[104, 70, 64], [226, 160, 118]],// 7 橙起
+    [[138, 88, 56], [244, 186, 108]],// 8 金
+    [[168, 108, 48], [248, 206, 130]],//9 盛金
+    [[146, 118, 74], [238, 216, 164]],//10 化开
+    [[116, 130, 108], [210, 224, 196]],//11 晨蓝绿
+    [[92, 122, 148], [178, 208, 232]] // 12 晨
+  ];
+  function skyColors(k) {
+    var f = k * (SKY.length - 1);
+    var i = Math.min(SKY.length - 2, Math.floor(f));
+    var u = f - i;
+    function mix(a, b) {
+      var A = SKY[i][a], B = SKY[i + 1][a];
+      return [0, 1, 2].map(function (c) { return Math.round(A[c] + (B[c] - A[c]) * u); });
+    }
+    var top = mix(0, 0), bot = mix(1, 0);
+    return {
+      top: 'rgb(' + top[0] + ',' + top[1] + ',' + top[2] + ')',
+      bot: 'rgb(' + bot[0] + ',' + bot[1] + ',' + bot[2] + ')'
+    };
+  }
+
+  /* ---------- 城市与屋顶 ---------- */
+  function rnd2(a, b) {
+    var x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  var buildings = [];
+  function seedCity() {
+    buildings = [];
+    var x = -10;
+    var i = 0;
+    while (x < W + 20) {
+      var bw = 34 + rnd2(i, 1) * 52;
+      var bh = 30 + rnd2(i, 2) * 92;
+      buildings.push({ x: x, w: bw, h: bh, idx: i });
+      x += bw + 2 + rnd2(i, 3) * 8;
+      i++;
+    }
+  }
+
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+  function drawScene(now) {
+    var sky = skyColors(t);
+    var sg = ctx.createLinearGradient(0, 0, 0, skylineY + 40);
+    sg.addColorStop(0, sky.top);
+    sg.addColorStop(1, sky.bot);
+    ctx.fillStyle = sg;
+    ctx.fillRect(0, 0, W, skylineY + 40);
+
+    // 星星（前 40% 退场）
+    var starA = Math.max(0, 1 - t / 0.4);
+    if (starA > 0.01) {
+      for (var i = 0; i < 46; i++) {
+        var sx = rnd2(i, 3) * W;
+        var sy = rnd2(i, 7) * skylineY * 0.75;
+        ctx.globalAlpha = starA * (0.3 + 0.5 * rnd2(i, 11));
+        ctx.fillStyle = '#cfd9ef';
+        ctx.fillRect(sx, sy, 1.4, 1.4);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // 月亮：西沉
+    if (t < 0.62) {
+      var my = H * 0.14 + (t / 0.62) * (skylineY - H * 0.14);
+      var ma = t < 0.45 ? 1 : 1 - (t - 0.45) / 0.17;
+      ctx.globalAlpha = Math.max(0, ma);
+      ctx.drawImage(moonCv, W * 0.78 - t * W * 0.1, my, 58, 58);
+      ctx.globalAlpha = 1;
+    }
+
+    // 云（染色）
+    var cloudA = Math.max(0, Math.min(1, (t - 0.3) / 0.3)) * Math.max(0, 1 - Math.max(0, (t - 0.92) / 0.08));
+    if (cloudA > 0.01) {
+      for (var c = 0; c < 3; c++) {
+        var cx = W * (0.18 + c * 0.3) + Math.sin(now / 4000 + c) * 6;
+        var cy = skylineY * (0.32 + c * 0.14);
+        var cw = W * (0.14 + c * 0.05);
+        var g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, cw);
+        g2.addColorStop(0, 'rgba(246, 205, 185, ' + (0.3 * cloudA).toFixed(3) + ')');
+        g2.addColorStop(1, 'rgba(246, 205, 185, 0)');
+        ctx.fillStyle = g2;
+        ctx.beginPath(); ctx.arc(cx, cy, cw, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // 日出金光
+    if (t > 0.68) {
+      var sk = (t - 0.68) / 0.32;
+      var sx3 = W * 0.085;
+      var g3 = ctx.createRadialGradient(sx3, skylineY + 10, 0, sx3, skylineY + 10, W * (0.2 + sk * 0.55));
+      g3.addColorStop(0, 'rgba(255, 214, 130, ' + (0.5 * sk).toFixed(3) + ')');
+      g3.addColorStop(1, 'rgba(255, 214, 130, 0)');
+      ctx.fillStyle = g3;
+      ctx.fillRect(0, 0, W, skylineY + 20);
+      // 太阳从楼群后爬上来，最后探到楼顶以上的天空
+      if (t > 0.9) {
+        var sy2 = skylineY + 8 - (t - 0.9) / 0.1 * 158;
+        ctx.fillStyle = '#ffe9b8';
+        ctx.beginPath(); ctx.arc(sx3, sy2, 12, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // 城市天际线
+    var cityA = Math.min(1, t / 0.18);   // 剪影随天色变清晰
+    var base = Math.max(0, Math.min(1, (t - 0.22) / 0.5));  // 灯熄进度
+    for (var b = 0; b < buildings.length; b++) {
+      var bd = buildings[b];
+      var shade = 10 + cityA * (8 + rnd2(bd.idx, 5) * 14);
+      ctx.fillStyle = 'rgb(' + Math.round(shade) + ',' + Math.round(shade + 4) + ',' + Math.round(shade + 12) + ')';
+      ctx.fillRect(bd.x, skylineY - bd.h, bd.w, bd.h + 4);
+      // 窗灯：每扇窗有各自的熄灯阈值
+      var cols = Math.max(1, Math.floor(bd.w / 16));
+      var rows = Math.max(1, Math.floor(bd.h / 22));
+      for (var wc = 0; wc < cols; wc++) {
+        for (var wr = 0; wr < rows; wr++) {
+          var th = rnd2(bd.idx * 31 + wc * 7 + wr * 13, 17);
+          if (th < 0.5) {
+            var stillOn = base < th * 2;
+            if (!stillOn) continue;
+            var wx = bd.x + 6 + wc * ((bd.w - 12) / cols);
+            var wy = skylineY - bd.h + 8 + wr * ((bd.h - 14) / rows);
+            ctx.fillStyle = 'rgba(240, 179, 92, ' + (0.7 * (1 - base)).toFixed(2) + ')';
+            ctx.fillRect(wx, wy, 5, 6);
+          }
+        }
+      }
+    }
+
+    // 屋顶前景（观察者所在的楼顶）
+    ctx.fillStyle = '#070a12';
+    ctx.fillRect(0, skylineY + 4, W, H - skylineY - 4);
+    ctx.fillStyle = '#090d17';
+    ctx.fillRect(0, skylineY + 4, W, 10);
+    // 水塔与天线剪影
+    ctx.fillStyle = '#070a12';
+    ctx.fillRect(W * 0.78, skylineY - 26, 34, 30);
+    ctx.beginPath(); ctx.arc(W * 0.78 + 17, skylineY - 26, 17, Math.PI, 0); ctx.fill();
+    ctx.fillRect(W * 0.83, skylineY - 60, 3, 60);
+    ctx.beginPath(); ctx.arc(W * 0.845, skylineY - 60, 4, 0, Math.PI * 2); ctx.fill();
+
+    // 鸟（最后 15% 才出现）
+    if (t > 0.85) {
+      var bt = (t - 0.85) / 0.15;
+      for (var bi = 0; bi < 4; bi++) {
+        var bx = -40 + bt * (W + 80) - bi * 34;
+        var by = skylineY * (0.3 + bi * 0.12) + Math.sin(now / 300 + bi) * 3;
+        var flap = Math.sin(now / 130 + bi * 1.7) * 3;
+        ctx.strokeStyle = 'rgba(30, 36, 52, 0.9)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(bx - 5, by + flap);
+        ctx.quadraticCurveTo(bx, by - 3, bx + 5, by + flap);
+        ctx.stroke();
+      }
+    }
+
+    // 拖动轨
+    var m = W * 0.07;
+    var ty = H - 26;
+    ctx.strokeStyle = 'rgba(199, 208, 226, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(m, ty); ctx.lineTo(W - m, ty); ctx.stroke();
+    var knobX = m + t * (W - m * 2);
+    ctx.fillStyle = '#f2c76e';
+    ctx.beginPath(); ctx.arc(knobX, ty, 6, 0, Math.PI * 2); ctx.fill();
+    // 时间标签
+    var mins = 330 + Math.round(t * 60);
+    var hh = Math.floor(mins / 60), mm = mins % 60;
+    ctx.font = '600 15px ' + MONO;
+    ctx.fillStyle = 'rgba(237, 241, 250, 0.95)';
+    ctx.textAlign = 'left';
+    ctx.fillText('0' + hh + ':' + ('0' + mm).slice(-2), m, ty - 12);
+    ctx.font = '12px ' + SANS;
+    ctx.fillStyle = 'rgba(139, 150, 173, 0.9)';
+    ctx.textAlign = 'right';
+    ctx.fillText(t < 0.02 ? '夜还深着' : t < 0.3 ? '星星在下班' : t < 0.6 ? '城市的灯一盏盏熄' : t < 0.85 ? '金光在楼后头攒着' : '早。', W - m, ty - 12);
+    ctx.textAlign = 'left';
+  }
+
+  var moonCv = document.createElement('canvas');
+  (function () {
+    var S = 72;
+    moonCv.width = S; moonCv.height = S;
+    var m = moonCv.getContext('2d');
+    m.beginPath(); m.arc(S / 2, S / 2, 20, 0, Math.PI * 2);
+    m.fillStyle = '#f4e9c8'; m.fill();
+    m.globalCompositeOperation = 'destination-out';
+    m.beginPath(); m.arc(S / 2 - 10, S / 2 - 4, 18, 0, Math.PI * 2);
+    m.fill();
+  })();
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  setInterval(function () {
+    var now = Date.now();
+    t += (tTarget - t) * 0.18;
+    if (Math.abs(t - tTarget) < 0.001) t = tTarget;
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', function () { resize(); seedCity(); });
+  seedCity();
+})();
+</script>
+</body>
+</html>

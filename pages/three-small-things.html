@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日份的三件小事</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .report {
+    margin-top: clamp(20px, 5vw, 30px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+  }
+  .item { margin-top: 14px; }
+  .item:first-child { margin-top: 0; }
+  .item .no {
+    display: inline-block;
+    color: var(--gold);
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    margin-bottom: 2px;
+  }
+  .item .txt {
+    color: var(--ink-strong);
+    font-size: 15.5px;
+  }
+  .fade { transition: opacity 0.3s ease; }
+  .fade.swap { opacity: 0; }
+
+  .go-row { margin-top: clamp(18px, 4vw, 24px); text-align: center; }
+  button.again {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    border-radius: 999px;
+    padding: 11px 36px;
+    cursor: pointer;
+  }
+  button.again:hover { filter: brightness(1.08); }
+  button.again:active { transform: scale(0.97); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>今日份的三件小事</h1>
+  <p class="sub">夜班下班前，替你抽了<em>今天值得留意的小事</em>。做完一件算一件，不做也行。</p>
+
+  <div class="report fade" id="report">
+    <div class="item"><span class="no">一</span><div class="txt" id="t1"></div></div>
+    <div class="item"><span class="no">二</span><div class="txt" id="t2"></div></div>
+    <div class="item"><span class="no">三</span><div class="txt" id="t3"></div></div>
+  </div>
+
+  <div class="go-row">
+    <button class="again" id="again" type="button">换一批</button>
+  </div>
+  <p class="hint">都不是要紧事。可要紧的日子，多半是被这些不要紧的事串起来的。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var THINGS = [
+    '留意今早第一口热饮的温度——它比闹钟温柔。',
+    '出门前看一眼云的形状，给它随口起个名字。',
+    '中午挑一样从没点过的菜，允许它难吃。',
+    '下午三点站起来望窗外三十秒，数一数有几辆红色的车。',
+    '记住今天听到的第一句笑话，睡前再想一遍。',
+    '摸一样有纹理的东西：毛衣、桌面，或者猫。',
+    '给镜子里的人打一句评分，只评发型。',
+    '留意夕阳照在哪栋楼上——那是今天最后的金光。',
+    '记住今天闻到的一种气味，晚饭的也算。',
+    '排队的时候听完一整首歌，不快进。',
+    '对今天第一个跟你说话的人，多问一句。',
+    '抬头找一次月亮——白天它也在的，只是不吭声。',
+    '留意自己今天走路的速度，试着慢百分之十。',
+    '晚饭后走十步，就十步，多了算加班。',
+    '睡前想一件今天没搞砸的事，哪怕特别小。',
+    '把手机屏保换成本季最想吃的食物。'
+  ];
+
+  function pick3() {
+    var pool = THINGS.slice();
+    var out = [];
+    for (var i = 0; i < 3; i++) {
+      var k = Math.floor(Math.random() * pool.length);
+      out.push(pool.splice(k, 1)[0]);
+    }
+    return out;
+  }
+
+  var reportEl = document.getElementById('report');
+  function fill() {
+    var three = pick3();
+    document.getElementById('t1').textContent = three[0];
+    document.getElementById('t2').textContent = three[1];
+    document.getElementById('t3').textContent = three[2];
+  }
+  function next() {
+    reportEl.classList.add('swap');
+    setTimeout(function () {
+      fill();
+      reportEl.classList.remove('swap');
+    }, 300);
+  }
+
+  document.getElementById('again').addEventListener('click', next);
+  fill();
+})();
+</script>
+</body>
+</html>

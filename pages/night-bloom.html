@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>昙花</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .frame {
+    margin-top: clamp(18px, 4vw, 26px);
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    line-height: 0;
+    background: #05070d;
+  }
+  canvas { display: block; width: 100%; touch-action: manipulation; cursor: pointer; }
+
+  .row {
+    margin-top: clamp(16px, 3vw, 22px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  button.sound {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+  }
+  button.sound:hover { color: var(--gold); border-color: rgba(242, 199, 110, 0.5); }
+  button.sound.on { color: var(--gold); border-color: rgba(242, 199, 110, 0.55); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>昙花</h1>
+  <p class="sub">昙花一现不是遗憾——它把开和谢都安排好了。<em>你只需要恰好在。</em></p>
+
+  <div class="frame"><canvas id="cv"></canvas></div>
+
+  <div class="row">
+    <button class="sound" id="soundBtn" type="button">花开声：关</button>
+  </div>
+  <p class="hint">枝头有三枚花苞。点一枚，它就开始开：十八秒绽放，满开十秒，然后谢幕。明晚再来。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var soundBtn = document.getElementById('soundBtn');
+
+  /* ---------- 尺寸 ---------- */
+  var W = 0, H = 0, dpr = 1;
+  function resize() {
+    var cssW = cv.clientWidth || cv.parentElement.clientWidth || 600;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cssW;
+    H = Math.max(380, Math.min(520, Math.round(W * 0.82)));
+    cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /* ---------- 三枚花苞 ---------- */
+  // state: closed → opening(18s) → full(10s) → wilt(8s) → gone
+  var OPEN_MS = 18000, FULL_MS = 10000, WILT_MS = 8000;
+  var buds = [];
+  function seedBuds() {
+    buds = [
+      { fx: 0.34, fy: 0.40, s: 1.0,  state: 'closed', t0: 0 },
+      { fx: 0.54, fy: 0.55, s: 0.85, state: 'closed', t0: 0 },
+      { fx: 0.73, fy: 0.36, s: 1.12, state: 'closed', t0: 0 }
+    ];
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    var r = cv.getBoundingClientRect();
+    var x = e.clientX - r.left, y = e.clientY - r.top;
+    for (var i = 0; i < buds.length; i++) {
+      var b = buds[i];
+      var bx = b.fx * W, by = b.fy * H;
+      if (b.state === 'closed' && Math.abs(x - bx) < 34 && Math.abs(y - by) < 40) {
+        b.state = 'opening';
+        b.t0 = Date.now();
+        chime();
+        return;
+      }
+    }
+  });
+
+  /* ---------- 声音（本地合成，默认关） ---------- */
+  var soundOn = false, actx = null;
+  function ensureAudio() {
+    if (actx) return true;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = new AC();
+      return true;
+    } catch (err) { actx = null; return false; }
+  }
+  function chime() {
+    if (!soundOn || !actx) return;
+    toneAt(523, 0, 0.5, 0.08);
+    toneAt(659, 0.18, 0.6, 0.07);
+  }
+  function fullChime() {
+    if (!soundOn || !actx) return;
+    toneAt(659, 0, 0.7, 0.08);
+    toneAt(784, 0.2, 0.9, 0.07);
+    toneAt(988, 0.42, 1.1, 0.05);
+  }
+  function toneAt(freq, at, dur, vol) {
+    var t = actx.currentTime + at;
+    var o = actx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    var g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  soundBtn.addEventListener('click', function () {
+    soundOn = !soundOn;
+    if (soundOn) {
+      if (!ensureAudio()) { soundOn = false; return; }
+      if (actx.state === 'suspended') actx.resume();
+      soundBtn.textContent = '花开声：开';
+      soundBtn.classList.add('on');
+    } else {
+      soundBtn.textContent = '花开声：关';
+      soundBtn.classList.remove('on');
+    }
+  });
+
+  /* ---------- 花开进度 ---------- */
+  function budProgress(b, now) {
+    var e = now - b.t0;
+    if (b.state === 'opening') {
+      if (e >= OPEN_MS) { b.state = 'full'; b.t0 = now; fullChime(); }
+    } else if (b.state === 'full') {
+      if (e >= FULL_MS) { b.state = 'wilt'; b.t0 = now; }
+    } else if (b.state === 'wilt') {
+      if (e >= WILT_MS) { b.state = 'gone'; }
+    }
+    var open, glow = 0, droop = 0, fade = 1;
+    if (b.state === 'closed') return { open: 0, glow: 0, droop: 0, fade: 1 };
+    if (b.state === 'opening') {
+      open = Math.min(1, e / OPEN_MS);
+      var q = open * open * (3 - 2 * open);
+      glow = q * 0.8;
+      return { open: q, glow: glow, droop: 0, fade: 1 };
+    }
+    if (b.state === 'full') {
+      return { open: 1, glow: 0.8 + 0.2 * Math.sin((now - b.t0) / 600), droop: 0, fade: 1 };
+    }
+    if (b.state === 'wilt') {
+      var w = e / WILT_MS;
+      return { open: 1 - w * 0.15, glow: 0.8 * (1 - w), droop: w, fade: 1 - w * 0.45 };
+    }
+    return null;
+  }
+
+  /* ---------- 绘制 ---------- */
+  var SANS = 'system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif';
+  function drawBud(b, now) {
+    var x = b.fx * W, y = b.fy * H;
+    var s = b.s;
+    // 枝条：从左缘伸进来的一条弯枝
+    ctx.strokeStyle = '#243020';
+    ctx.lineWidth = 5 * s;
+    ctx.beginPath();
+    ctx.moveTo(0, y - 60 * s);
+    ctx.quadraticCurveTo(x * 0.5, y - 78 * s, x - 6 * s, y - 26 * s);
+    ctx.stroke();
+    // 垂柄
+    ctx.lineWidth = 3 * s;
+    ctx.beginPath();
+    ctx.moveTo(x - 6 * s, y - 26 * s);
+    ctx.quadraticCurveTo(x + 2 * s, y - 10 * s, x, y - 2 * s);
+    ctx.stroke();
+
+    var p = budProgress(b, now);
+    if (!p) {
+      // 谢幕后只剩垂柄与一枚落瓣
+      ctx.fillStyle = 'rgba(226, 216, 190, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(x + 10 * s, y + 26 * s, 6 * s, 2.4 * s, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = '12px ' + SANS;
+      ctx.fillStyle = 'rgba(139, 150, 173, 0.8)';
+      ctx.textAlign = 'center';
+      ctx.fillText('谢了，明晚见', x, y + 48 * s);
+      ctx.textAlign = 'left';
+      return;
+    }
+    var open = p.open, glow = p.glow, droop = p.droop, fade = p.fade;
+
+    // 花辉
+    if (glow > 0.01) {
+      var g = ctx.createRadialGradient(x, y - 6 * s, 2, x, y - 6 * s, 60 * s);
+      g.addColorStop(0, 'rgba(250, 240, 210, ' + (0.32 * glow).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(250, 240, 210, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y - 6 * s, 60 * s, 0, Math.PI * 2); ctx.fill();
+    }
+
+    if (b.state === 'closed') {
+      // 含苞：垂头的小泪滴
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(0.12);
+      ctx.fillStyle = '#cfd4bd';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 6.5 * s, 13 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(150, 160, 120, 0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -10 * s); ctx.lineTo(0, 10 * s); ctx.stroke();
+      ctx.restore();
+      // 提示
+      ctx.font = '12px ' + SANS;
+      ctx.fillStyle = 'rgba(242, 199, 110, ' + (0.55 + 0.35 * Math.sin(now / 520)).toFixed(2) + ')';
+      ctx.textAlign = 'center';
+      ctx.fillText('点我开始开', x, y + 34 * s);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    // 绽放/满开/垂谢：两层花瓣 + 花蕊
+    var petalColors = wiltTint(p.droop);
+    drawPetalLayer(x, y - 2 * s, s * 46, 7, 0, open, droop, fade, petalColors.outer, 1);
+    if (open > 0.35) {
+      var q = Math.min(1, (open - 0.35) / 0.65);
+      drawPetalLayer(x, y - 2 * s, s * 32, 6, Math.PI / 6, q, droop, fade, petalColors.inner, 0.8);
+    }
+    if (open > 0.7) {
+      var st = Math.min(1, (open - 0.7) / 0.3);
+      ctx.save();
+      ctx.globalAlpha = st * fade;
+      for (var tI = 0; tI < 8; tI++) {
+        var ta = tI * (Math.PI * 2 / 8) + 0.4;
+        ctx.strokeStyle = 'rgba(240, 225, 190, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 2 * s);
+        ctx.lineTo(x + Math.cos(ta) * 9 * s, y - 2 * s + Math.sin(ta) * 9 * s - 4 * s);
+        ctx.stroke();
+        ctx.fillStyle = '#e8b84a';
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(ta) * 9 * s, y - 2 * s + Math.sin(ta) * 9 * s - 4 * s, 1.6 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // 满开标一句
+    if (b.state === 'full') {
+      ctx.font = '12px ' + SANS;
+      ctx.fillStyle = 'rgba(244, 233, 200, ' + (0.5 + 0.3 * Math.sin(now / 600)).toFixed(2) + ')';
+      ctx.textAlign = 'center';
+      ctx.fillText('开着呢。', x, y + 34 * s);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function wiltTint(droop) {
+    return {
+      outer: droop > 0 ? blend('#f5eede', '#cfc0a0', droop) : '#f5eede',
+      inner: droop > 0 ? blend('#fbf6e8', '#d8cbae', droop) : '#fbf6e8'
+    };
+  }
+  function blend(c1, c2, k) {
+    function px(c) { return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]; }
+    var a = px(c1), b2 = px(c2);
+    var r = a.map(function (v, i) { return Math.round(v + (b2[i] - v) * k); });
+    return 'rgb(' + r[0] + ',' + r[1] + ',' + r[2] + ')';
+  }
+
+  function drawPetalLayer(x, y, L, n, offset, open, droop, fade, color, shadeK) {
+    var ease = open * open * (3 - 2 * open);
+    for (var i = 0; i < n; i++) {
+      var target = offset + i * (Math.PI * 2 / n);
+      var dir = -Math.PI / 2 + (target + Math.PI / 2) * ease;
+      if (droop > 0) dir = dir + droop * 0.5 * Math.sin(dir + Math.PI / 2);
+      var len = L * (0.4 + 0.6 * ease);
+      var wid = L * (0.14 + 0.34 * ease);
+      var tipX = x + Math.cos(dir) * len;
+      var tipY = y + Math.sin(dir) * len;
+      var nx = Math.cos(dir + Math.PI / 2), ny = Math.sin(dir + Math.PI / 2);
+      var c1x = x + Math.cos(dir) * len * 0.4 + nx * wid, c1y = y + Math.sin(dir) * len * 0.4 + ny * wid;
+      var c2x = x + Math.cos(dir) * len * 0.85 + nx * wid * 0.55, c2y = y + Math.sin(dir) * len * 0.85 + ny * wid * 0.55;
+      var d1x = x + Math.cos(dir) * len * 0.85 - nx * wid * 0.55, d1y = y + Math.sin(dir) * len * 0.85 - ny * wid * 0.55;
+      var d2x = x + Math.cos(dir) * len * 0.4 - nx * wid, d2y = y + Math.sin(dir) * len * 0.4 - ny * wid;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(c1x, c1y, tipX, tipY);
+      ctx.quadraticCurveTo(c2x, c2y, x + Math.cos(dir) * len * 0.72, y + Math.sin(dir) * len * 0.72);
+      ctx.quadraticCurveTo(d1x, d1y, x, y);
+      ctx.closePath();
+      ctx.fill();
+      if (shadeK > 0) {
+        ctx.strokeStyle = 'rgba(150, 140, 110, ' + (0.22 * fade).toFixed(3) + ')';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawScene(now) {
+    // 夜墙与阳台栏杆
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#04060c');
+    bg.addColorStop(1, '#0b1020');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0d1424';
+    ctx.fillRect(0, H - 26, W, 26);
+    ctx.fillStyle = '#131c30';
+    for (var pI = 0; pI < W / 42 + 1; pI++) {
+      ctx.fillRect(pI * 42 - 4, H - 26, 6, 26);
+    }
+    ctx.fillStyle = 'rgba(156, 200, 255, 0.06)';
+    ctx.fillRect(0, H - 30, W, 4);
+    // 一点城市远光
+    for (var cI = 0; cI < 7; cI++) {
+      var cx = rnd2(cI, 5) * W;
+      var cy = H - 60 - rnd2(cI, 9) * 60;
+      ctx.fillStyle = 'rgba(240, 179, 92, ' + (0.05 + 0.05 * Math.sin(now / 1100 + cI)).toFixed(3) + ')';
+      ctx.fillRect(cx, cy, 3, 3);
+    }
+
+    for (var i = 0; i < buds.length; i++) drawBud(buds[i], now);
+  }
+  function rnd2(a, b) {
+    var x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  /* ---------- 主循环（interval 驱动，后台不冻） ---------- */
+  setInterval(function () {
+    var now = Date.now();
+    ctx.clearRect(0, 0, W, H);
+    drawScene(now);
+  }, 33);
+
+  resize();
+  window.addEventListener('resize', resize);
+  seedBuds();
+})();
+</script>
+</body>
+</html>
