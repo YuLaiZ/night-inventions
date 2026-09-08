@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>露珠</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stage {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .stage canvas { display: block; width: 100%; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>露珠</h1>
+  <p class="sub">昨晚的水汽没走成，<em>就挂在了草叶尖上</em>。等它重到抓不住草，就滑进土里去了。</p>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <p class="hint">点一下草叶，露珠会提前滑落。别心疼——落下去的那颗，会成为另一株草的露。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+  var W = 0, H = 0;
+
+  var blades = [];         /* 草叶：贝塞尔曲线 */
+  var dew = null;          /* {blade, size(0..1), slideT|null} */
+  var slides = [];         /* 滑落中的露珠 */
+  var dropAcc = 0;
+  var lastFrame = Date.now();
+
+  function resize() {
+    var w = stage.clientWidth;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.72)));
+    cv.width = w;
+    cv.height = h;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    plant();
+  }
+
+  function plant() {
+    blades = [];
+    var n = 7;
+    for (var i = 0; i < n; i++) {
+      var bx = W * (0.08 + 0.84 * i / (n - 1)) + (Math.random() - 0.5) * 18;
+      var bh = H * (0.42 + Math.random() * 0.30);
+      var lean = (i - (n - 1) / 2) * W * 0.035 + (Math.random() - 0.5) * 14;
+      blades.push({
+        x: bx, y: H + 6, h: bh, lean: lean,
+        w: 2.2 + Math.random() * 2.2,
+        col: 'rgba(' + (52 + Math.random() * 30 | 0) + ',' + (96 + Math.random() * 40 | 0) + ',' + (66 + Math.random() * 26 | 0) + ',0.95)'
+      });
+    }
+  }
+
+  /* 草叶上参数 t(0 底 1 尖) 的坐标（二次贝塞尔：底-控-尖） */
+  function bladePoint(b, t) {
+    var tipX = b.x + b.lean, tipY = b.y - b.h;
+    var cxp = b.x + b.lean * 0.25, cyp = b.y - b.h * 0.55;
+    var u = 1 - t;
+    return {
+      x: u * u * b.x + 2 * u * t * cxp + t * t * tipX,
+      y: u * u * b.y + 2 * u * t * cyp + t * t * tipY
+    };
+  }
+
+  function newDew(bladeIdx) {
+    var idx = bladeIdx === undefined ? Math.floor(Math.random() * blades.length) : bladeIdx;
+    dew = { blade: idx, size: 0.18, slideT: null };
+  }
+
+  function step(dt) {
+    if (dew && dew.slideT === null) {
+      dew.size += dt * 0.055;                 /* 缓慢凝结 */
+      if (dew.size >= 1) {
+        dew.size = 1;
+        dew.slideT = 0;                       /* 重到抓不住：开始滑 */
+      }
+    }
+    /* 滑落中的露珠（沿草叶加速下滑） */
+    for (var i = slides.length - 1; i >= 0; i--) {
+      var s = slides[i];
+      s.v += dt * 1.1;
+      s.slideT += s.v * dt * 0.5;
+      if (s.slideT >= 1) slides.splice(i, 1);
+    }
+  }
+
+  function drawDewDot(x, y, r) {
+    /* 珠体：近透明的蓝绿+高光 */
+    var g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r);
+    g.addColorStop(0, 'rgba(214, 238, 255, 0.95)');
+    g.addColorStop(0.55, 'rgba(150, 200, 230, 0.72)');
+    g.addColorStop(1, 'rgba(120, 170, 205, 0.45)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 6.29);
+    ctx.fill();
+    /* 高光点 */
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.beginPath();
+    ctx.arc(x - r * 0.32, y - r * 0.38, r * 0.2, 0, 6.29);
+    ctx.fill();
+  }
+
+  function draw(now) {
+    /* 晨光天色 */
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#15202e');
+    g.addColorStop(0.55, '#223243');
+    g.addColorStop(1, '#2e4152');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 草叶 */
+    for (var i = 0; i < blades.length; i++) {
+      var b = blades[i];
+      var tip = bladePoint(b, 1);
+      var mid = bladePoint(b, 0.5);
+      ctx.strokeStyle = b.col;
+      ctx.lineWidth = b.w;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.quadraticCurveTo(mid.x, mid.y, tip.x, tip.y);
+      ctx.stroke();
+    }
+
+    /* 挂着的露珠：贴在叶尖附近，随 size 长大 */
+    if (dew) {
+      var b = blades[dew.blade];
+      var t = dew.slideT === null ? 1 : 1 - dew.slideT * 0.92;
+      var pos = bladePoint(b, t);
+      var r = 4 + dew.size * 10;
+      /* 露珠把草叶压弯一点点：视觉向叶弯方向偏 */
+      drawDewDot(pos.x + b.lean * 0.02, pos.y + r * 0.28, r);
+    }
+
+    /* 滑落中的露珠 */
+    for (var s = 0; s < slides.length; s++) {
+      var sl = slides[s];
+      var b2 = blades[sl.blade];
+      var p = bladePoint(b2, 1 - sl.slideT * 0.92);
+      drawDewDot(p.x, p.y, sl.r);
+    }
+  }
+
+  var timer = null;
+  function loop() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    step(dt);
+    draw(now);
+    setTimeout(loop, 60);
+  }
+
+  stage.addEventListener('pointerdown', function (ev) {
+    if (!dew || dew.slideT !== null) return;
+    /* 点草叶：露珠提前滑落 */
+    slides.push({ blade: dew.blade, slideT: 0, v: 0.8, r: 4 + dew.size * 10 });
+    dew = null;
+    setTimeout(function () { newDew(); }, 1800);
+  });
+
+  window.addEventListener('resize', function () { resize(); });
+  resize();
+  newDew();
+  loop();
+})();
+</script>
+</body>
+</html>

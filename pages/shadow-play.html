@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>影子游戏</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stage {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: crosshair;
+    touch-action: manipulation;
+  }
+  .stage canvas { display: block; width: 100%; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>影子游戏</h1>
+  <p class="sub">深夜路灯下，谁都在练习自己的影子。<em>灯举得越高，影子越老实。</em></p>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <p class="hint">你的鼠标就是那盏灯：拉到头顶，影子缩成一小片；放低放远，影子能拖出画框。点一下，换一个姿势。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+  var W = 0, H = 0;
+
+  var lamp = { x: 0, y: 0 };
+  var hasMouse = false;
+  /* 小人（剪影）几何：站在地面中线上 */
+  var GROUND = 0, PERSON_X = 0, PERSON_H = 0;
+  /* 姿势：0 站立 1 迈步 2 张开手臂 */
+  var pose = 0;
+  var lastFrame = Date.now();
+
+  function resize() {
+    var w = stage.clientWidth;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.72)));
+    cv.width = w;
+    cv.height = h;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    GROUND = H * 0.72;
+    PERSON_X = W * 0.5;
+    PERSON_H = H * 0.30;
+    if (!hasMouse) { lamp.x = W * 0.5; lamp.y = H * 0.12; }
+  }
+
+  function personTop() { return GROUND - PERSON_H; }
+
+  /* 投影：灯光 L 过人头顶 T 的直线与地面 y=GROUND 的交点 */
+  function shadowEnd() {
+    var lx = lamp.x, ly = lamp.y;
+    var tx = PERSON_X, ty = personTop();
+    if (Math.abs(ly - ty) < 2) return { x: PERSON_X + (W - PERSON_X) * 2, off: true };
+    var t = (GROUND - ty) / (ty - ly);
+    return { x: tx + (tx - lx) * t, off: false };
+  }
+
+  function drawPerson(x, baseY, h, poseIdx) {
+    ctx.fillStyle = '#1d2638';
+    var headR = h * 0.11;
+    ctx.beginPath();
+    ctx.arc(x, baseY - h + headR, headR, 0, 6.29);
+    ctx.fill();
+    ctx.lineWidth = h * 0.075;
+    ctx.strokeStyle = '#1d2638';
+    ctx.lineCap = 'round';
+    var shoulderY = baseY - h + headR * 2.6;
+    var hipY = baseY - h * 0.42;
+    ctx.beginPath();
+    ctx.moveTo(x, baseY - h + headR * 1.8);
+    ctx.lineTo(x, hipY);
+    ctx.stroke();
+    /* 手臂与腿按姿势 */
+    var swing = poseIdx === 1 ? h * 0.13 : 0;
+    var armUp = poseIdx === 2 ? h * 0.20 : 0;
+    ctx.beginPath();
+    ctx.moveTo(x, shoulderY);
+    ctx.lineTo(x - h * 0.11, shoulderY + h * 0.16 - armUp);
+    ctx.moveTo(x, shoulderY);
+    ctx.lineTo(x + h * 0.11, shoulderY + h * 0.16 - armUp);
+    ctx.moveTo(x, hipY);
+    ctx.lineTo(x - h * 0.10 - swing * 0.6, baseY);
+    ctx.moveTo(x, hipY);
+    ctx.lineTo(x + h * 0.10 + swing * 0.6, baseY);
+    ctx.stroke();
+  }
+
+  /* 影子：把人形关键点沿灯-点连线投到地面 */
+  function shadowPoint(px, py) {
+    var ly = lamp.y, lx = lamp.x;
+    if (Math.abs(py - ly) < 2) return { x: px + (px - lx) * 8, y: GROUND };
+    var t = (GROUND - py) / (py - ly);
+    return { x: px + (px - lx) * t, y: GROUND };
+  }
+
+  function drawShadow() {
+    var h = PERSON_H;
+    var baseY = GROUND;
+    var x = PERSON_X;
+    var headR = h * 0.11;
+    var pts = {
+      head: shadowPoint(x, baseY - h + headR),
+      shoulderL: shadowPoint(x - h * 0.11, baseY - h + headR * 2.6),
+      shoulderR: shadowPoint(x + h * 0.11, baseY - h + headR * 2.6),
+      hip: shadowPoint(x, baseY - h * 0.42),
+      footL: shadowPoint(x - h * 0.10, baseY),
+      footR: shadowPoint(x + h * 0.10, baseY),
+      bodyTop: shadowPoint(x, baseY - h + headR * 1.8)
+    };
+    /* 影子透明度：影长越长越淡 */
+    var len = Math.abs(pts.footL.x - x) + Math.abs(pts.footR.x - x);
+    var alpha = Math.max(0.14, Math.min(0.42, 0.42 - len / (W * 3)));
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#060a12';
+    /* 影子躯干（肩-髋 连线在地面上的四边形） */
+    ctx.beginPath();
+    ctx.moveTo(pts.shoulderL.x, GROUND);
+    ctx.lineTo(pts.shoulderR.x, GROUND);
+    ctx.lineTo(pts.hip.x + (pts.footR.x - x) * 0.3, GROUND);
+    ctx.lineTo(pts.hip.x + (pts.footL.x - x) * 0.3, GROUND);
+    ctx.closePath();
+    ctx.fill();
+    /* 影子头（椭圆） */
+    ctx.beginPath();
+    ctx.ellipse(pts.head.x, GROUND + headR * 0.4, headR * 1.15, headR * 0.55, 0, 0, 6.29);
+    ctx.fill();
+    /* 影子腿：两条从髋到足影 */
+    ctx.lineWidth = h * 0.06;
+    ctx.strokeStyle = '#060a12';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pts.hip.x, GROUND);
+    ctx.lineTo(pts.footL.x, GROUND);
+    ctx.moveTo(pts.hip.x, GROUND);
+    ctx.lineTo(pts.footR.x, GROUND);
+    ctx.stroke();
+    /* 影子手臂 */
+    ctx.lineWidth = h * 0.045;
+    var swing = pose === 1 ? h * 0.13 : 0;
+    var armUp = pose === 2 ? h * 0.20 : 0;
+    ctx.beginPath();
+    ctx.moveTo(pts.shoulderL.x, GROUND);
+    ctx.lineTo(shadowPoint(x - h * 0.11, shoulderYOf(h)).x, GROUND);
+    ctx.moveTo(pts.shoulderR.x, GROUND);
+    ctx.lineTo(shadowPoint(x + h * 0.11, shoulderYOf(h)).x, GROUND);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  function shoulderYOf(h) { return GROUND - h + h * 0.11 * 2.6; }
+
+  function draw(now) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#070b12');
+    g.addColorStop(1, '#0d1522');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 灯光晕 */
+    var lg = ctx.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, 90);
+    lg.addColorStop(0, 'rgba(242, 214, 140, 0.30)');
+    lg.addColorStop(1, 'rgba(242, 214, 140, 0)');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.arc(lamp.x, lamp.y, 90, 0, 6.29);
+    ctx.fill();
+    ctx.fillStyle = '#f4dfa2';
+    ctx.beginPath();
+    ctx.arc(lamp.x, lamp.y, 5, 0, 6.29);
+    ctx.fill();
+
+    /* 地面 */
+    ctx.strokeStyle = 'rgba(156, 200, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND + 1);
+    ctx.lineTo(W, GROUND + 1);
+    ctx.stroke();
+
+    drawShadow();
+    drawPerson(PERSON_X, GROUND, PERSON_H, pose);
+  }
+
+  function track(ev) {
+    var rect = stage.getBoundingClientRect();
+    lamp.x = ev.clientX - rect.left;
+    lamp.y = ev.clientY - rect.top;
+    hasMouse = true;
+  }
+  stage.addEventListener('pointermove', track);
+  stage.addEventListener('pointerdown', function (ev) {
+    track(ev);
+    pose = (pose + 1) % 3;   /* 点一下换个姿势 */
+  });
+  stage.addEventListener('pointerleave', function () {
+    lamp.x = W * 0.5; lamp.y = H * 0.12;
+  });
+
+  window.addEventListener('resize', function () { resize(); draw(Date.now()); });
+  resize();
+  draw(Date.now());
+  /* 灯不动也要轻微呼吸感：低频重画即可（工艺：setTimeout 链） */
+  setInterval(function () { draw(Date.now()); }, 120);
+})();
+</script>
+</body>
+</html>

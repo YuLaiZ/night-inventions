@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜词典</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --serif: Georgia, "Songti SC", "Noto Serif SC", serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .book {
+    margin-top: clamp(20px, 5vw, 28px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(16px, 4vw, 26px);
+  }
+  .entry {
+    display: flex;
+    gap: 16px;
+    padding: 13px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .entry:last-child { border-bottom: none; }
+  .glyph {
+    flex: 0 0 58px;
+    text-align: center;
+  }
+  .glyph .zi {
+    font-family: var(--serif);
+    font-size: 40px;
+    line-height: 1.1;
+    color: var(--gold);
+  }
+  .glyph .pinyin {
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: 0.06em;
+  }
+  .def .mean { color: var(--ink-strong); font-size: 15px; }
+  .def .mean b { color: var(--ice); font-weight: 600; }
+  .def .night { color: var(--ink-dim); font-size: 13.5px; margin-top: 3px; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜词典</h1>
+  <p class="sub">古人给天光每一段都起了名字。<em>你熬的不是夜，是他们的十二个时辰。</em></p>
+
+  <div class="book" id="book"></div>
+
+  <p class="hint">释义以古义为准，末一句是夜班擅自续写的。老词典不会同意，但它管不着。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  /* 字、音、本义（以古义为准）——夜班续写一句 */
+  var WORDS = [
+    { z: '霁', y: 'jì', m: '雨雪停止，天色放晴。', n: '心里的雨停了，也叫霁——只是没人替你预报。' },
+    { z: '曛', y: 'xūn', m: '落日的余光。', n: '白班留给夜班的那点余温。' },
+    { z: '晞', y: 'xī', m: '晨光初露；晒干。', n: '露水等了一夜，就是在等这个字。' },
+    { z: '昃', y: 'zè', m: '太阳西斜。', n: '古人提醒：日中则昃，好日子别太得意。' },
+    { z: '晷', y: 'guǐ', m: '日影；引申为时光。', n: '焚膏继晷——熬夜这件事，古人干得比你凶。' },
+    { z: '旻', y: 'mín', m: '秋天的天空。', n: '秋天的天格外高，愁也跟着格外高。' },
+    { z: '夤', y: 'yín', m: '深。夤夜，即深夜。', n: '你现在就处在夤夜里——词典亲自盖章认证。' },
+    { z: '昉', y: 'fǎng', m: '天刚亮；起始。', n: '一切事情的开头，都带一点天亮的意思。' },
+    { z: '晡', y: 'bū', m: '午后三点到五点。', n: '古人下午茶的时间，你的第三杯咖啡。' },
+    { z: '昧', y: 'mèi', m: '昏暗；光还没有照到的地方。', n: '「暧昧」的昧——光是没到，不是不存在。' },
+    { z: '霭', y: 'ǎi', m: '云气，雾气。', n: '深夜的山把它盖成被子，替睡着的人。' },
+    { z: '煦', y: 'xù', m: '温暖，和暖。', n: '和风可煦——被窝里的那一小块地方，叫煦。' }
+  ];
+
+  var book = document.getElementById('book');
+  WORDS.forEach(function (w) {
+    var entry = document.createElement('div');
+    entry.className = 'entry';
+    var glyph = document.createElement('div');
+    glyph.className = 'glyph';
+    var zi = document.createElement('div');
+    zi.className = 'zi';
+    zi.textContent = w.z;
+    var py = document.createElement('div');
+    py.className = 'pinyin';
+    py.textContent = w.y;
+    glyph.appendChild(zi);
+    glyph.appendChild(py);
+
+    var def = document.createElement('div');
+    def.className = 'def';
+    var mean = document.createElement('div');
+    mean.className = 'mean';
+    var b = document.createElement('b');
+    b.textContent = w.m.split('。')[0] + '。';
+    mean.appendChild(b);
+    if (w.m.split('。')[1]) {
+      var extra = document.createElement('span');
+      extra.textContent = w.m.split('。')[1] + '。';
+      mean.appendChild(extra);
+    }
+    var night = document.createElement('div');
+    night.className = 'night';
+    night.textContent = w.n;
+    def.appendChild(mean);
+    def.appendChild(night);
+
+    entry.appendChild(glyph);
+    entry.appendChild(def);
+    book.appendChild(entry);
+  });
+})();
+</script>
+</body>
+</html>

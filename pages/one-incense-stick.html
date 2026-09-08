@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一炷香</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .altar {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .altar canvas { display: block; width: 100%; }
+  .altar .tip {
+    position: absolute;
+    left: 0; right: 0; bottom: 12px;
+    text-align: center;
+    color: rgba(199, 208, 226, 0.55);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+  .altar.lit .tip { opacity: 0; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>一炷香</h1>
+  <p class="sub">心里压着一个念头睡不着？<em>点一炷香给它。</em>香尽之前，不许反复去想。</p>
+
+  <div class="altar" id="altar">
+    <canvas id="cv"></canvas>
+    <div class="tip">点一下香，把它点燃</div>
+  </div>
+
+  <p class="hint">这炷香大约燃两分半钟。香灰落进炉里的声音，深夜里其实听不见——但你听得见。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var altar = document.getElementById('altar');
+  var W = 0, H = 0, DPR = 1;
+
+  var BURN_MS = 150000;          /* 两分半燃尽 */
+  var state = 'unlit';           /* unlit → burning → done */
+  var litAt = 0;
+  var smoke = [];
+  var ashSegs = [];              /* 正在坠落的香灰段 */
+  var lastAshDrop = 0;
+  var lastFrame = Date.now();
+
+  /* 香的几何：底座在 H*0.86，香杆从底座竖起 */
+  var cx = 0, baseY = 0, stickTop = 0, stickLen = 0;
+
+  function resize() {
+    var w = altar.clientWidth;
+    var h = Math.round(Math.min(420, Math.max(320, w * 0.74)));
+    DPR = window.devicePixelRatio || 1;
+    cv.width = w * DPR;
+    cv.height = h * DPR;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    cx = W * 0.5;
+    baseY = H * 0.86;
+    stickLen = H * 0.5;
+    stickTop = baseY - stickLen;
+  }
+
+  /* 香的剩余比例 0..1（burning 时随墙钟递减） */
+  function remain() {
+    if (state === 'unlit') return 1;
+    if (state === 'done') return 0;
+    return Math.max(0, 1 - (Date.now() - litAt) / BURN_MS);
+  }
+
+  function ignite() {
+    if (state === 'done') { state = 'unlit'; }   /* 香尽后再点，就是新一炷 */
+    if (state !== 'unlit') return;
+    state = 'burning';
+    litAt = Date.now();
+    lastAshDrop = litAt + 14000;   /* 14 秒后落第一段灰 */
+    altar.classList.add('lit');
+  }
+
+  function step(dt) {
+    if (state !== 'burning') {
+      /* 烟散尽 */
+      for (var k = smoke.length - 1; k >= 0; k--) {
+        smoke[k].y -= smoke[k].vy * dt;
+        smoke[k].x += Math.sin(smoke[k].y / 14 + smoke[k].sw) * 10 * dt;
+        smoke[k].a -= 0.09 * dt;
+        smoke[k].r += 3.5 * dt;
+        if (smoke[k].a <= 0) smoke.splice(k, 1);
+      }
+      return;
+    }
+    var rem = remain();
+    if (rem <= 0) { state = 'done'; return; }
+
+    /* 香头持续冒烟 */
+    var tipY = stickTop + (1 - rem) * stickLen;
+    if (Math.random() < dt * 300) {
+      smoke.push({
+        x: cx + (Math.random() - 0.5) * 3,
+        y: tipY - 2,
+        vy: 16 + Math.random() * 10,
+        r: 2 + Math.random() * 2.5,
+        a: 0.22 + Math.random() * 0.12,
+        sw: Math.random() * 6.28
+      });
+    }
+    for (var i = smoke.length - 1; i >= 0; i--) {
+      var s = smoke[i];
+      s.y -= s.vy * dt;
+      s.x += Math.sin(s.y / 14 + s.sw) * 10 * dt;   /* 烟丝左右漂 */
+      s.r += 2.2 * dt;
+      s.a -= 0.05 * dt;
+      if (s.a <= 0) smoke.splice(i, 1);
+    }
+
+    /* 香灰定期断落一节 */
+    if (Date.now() > lastAshDrop && rem > 0.12) {
+      var dropY = stickTop + (1 - rem) * stickLen;
+      ashSegs.push({ x: cx, y: dropY, len: 5 + Math.random() * 6, vy: 0, rot: 0, vr: (Math.random() - 0.5) * 4 });
+      lastAshDrop = Date.now() + 12000 + Math.random() * 8000;
+    }
+    for (var j = ashSegs.length - 1; j >= 0; j--) {
+      var seg = ashSegs[j];
+      seg.vy += 220 * dt;
+      seg.y += seg.vy * dt;
+      seg.rot += seg.vr * dt;
+      if (seg.y > baseY - 4) ashSegs.splice(j, 1);   /* 落进香炉 */
+    }
+  }
+
+  function draw(now) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#080b13');
+    g.addColorStop(1, '#101623');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 一豆烛光似的背景暖晕（炉口） */
+    var warm = ctx.createRadialGradient(cx, baseY, 0, cx, baseY, W * 0.42);
+    warm.addColorStop(0, 'rgba(232, 160, 74, 0.10)');
+    warm.addColorStop(1, 'rgba(232, 160, 74, 0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 香炉 */
+    ctx.fillStyle = '#1a2233';
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + 14, W * 0.13, 16, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(cx - W * 0.13, baseY + 12, W * 0.26, 10);
+    ctx.fillStyle = '#141b2a';
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + 12, W * 0.13, 14, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.fillStyle = '#232c40';
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + 10, W * 0.11, 9, 0, Math.PI, 0);
+    ctx.fill();
+
+    /* 烟（画在香杆后面更柔） */
+    for (var m = 0; m < smoke.length; m++) {
+      var sm = smoke[m];
+      ctx.globalAlpha = sm.a;
+      ctx.fillStyle = '#aeb8cc';
+      ctx.beginPath();
+      ctx.arc(sm.x, sm.y, sm.r, 0, 6.29);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    var rem = remain();
+    var stickVisible = state !== 'done';
+    if (stickVisible) {
+      var burnY = stickTop + (1 - rem) * stickLen;
+      /* 香杆（未燃段：深褐） */
+      ctx.strokeStyle = '#4a3a2c';
+      ctx.lineWidth = 3.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx, baseY - 8);
+      ctx.lineTo(cx, burnY);
+      ctx.stroke();
+      /* 已燃段只剩细竹芯 */
+      if (state === 'burning') {
+        ctx.strokeStyle = 'rgba(122, 104, 84, 0.45)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(cx, burnY);
+        ctx.lineTo(cx, stickTop);
+        ctx.stroke();
+      }
+      /* 香灰层（燃点上方一小节灰白） */
+      if (state === 'burning' && rem < 0.97) {
+        var ashTop = Math.max(stickTop, burnY - 14);
+        ctx.strokeStyle = '#9aa3b5';
+        ctx.lineWidth = 4.2;
+        ctx.beginPath();
+        ctx.moveTo(cx, ashTop);
+        ctx.lineTo(cx, burnY);
+        ctx.stroke();
+        /* 香头红点（呼吸闪烁） */
+        var flick = 0.7 + 0.3 * Math.sin(now / 90);
+        ctx.fillStyle = 'rgba(255, 120, 60,' + flick + ')';
+        ctx.beginPath();
+        ctx.arc(cx, burnY, 2.6, 0, 6.29);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 170, 90,' + 0.25 * flick + ')';
+        ctx.beginPath();
+        ctx.arc(cx, burnY, 5.5, 0, 6.29);
+        ctx.fill();
+      }
+      if (state === 'unlit') {
+        /* 未点燃：顶端一点深灰 */
+        ctx.strokeStyle = '#6b7285';
+        ctx.lineWidth = 4.2;
+        ctx.beginPath();
+        ctx.moveTo(cx, stickTop);
+        ctx.lineTo(cx, stickTop + 12);
+        ctx.stroke();
+      }
+    } else {
+      /* 燃尽：只余一段短竹芯立在炉里 */
+      ctx.strokeStyle = 'rgba(122, 104, 84, 0.45)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(cx, baseY - 8);
+      ctx.lineTo(cx, stickTop + stickLen * 0.94);
+      ctx.stroke();
+    }
+
+    /* 坠落中的香灰段 */
+    for (var a = 0; a < ashSegs.length; a++) {
+      var sg = ashSegs[a];
+      ctx.save();
+      ctx.translate(sg.x, sg.y);
+      ctx.rotate(sg.rot);
+      ctx.strokeStyle = 'rgba(154, 163, 181, 0.8)';
+      ctx.lineWidth = 3.6;
+      ctx.beginPath();
+      ctx.moveTo(-sg.len / 2, 0);
+      ctx.lineTo(sg.len / 2, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    /* 燃尽后的那句话 */
+    if (state === 'done') {
+      ctx.fillStyle = 'rgba(242, 199, 110, 0.75)';
+      ctx.font = '15px ' + getComputedStyle(document.body).fontFamily;
+      ctx.textAlign = 'center';
+      ctx.fillText('香尽了。愿那个念头已经安放好。', cx, H * 0.30);
+    }
+  }
+
+  function frame() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    step(dt);
+    draw(now);
+    requestAnimationFrame(frame);
+  }
+  /* 后台 rAF 停摆兜底：主循环失联时按墙钟补步 */
+  setInterval(function () {
+    var now = Date.now();
+    if (now - lastFrame > 400) {
+      step(Math.min(1, (now - lastFrame) / 1000));
+      lastFrame = now;
+      draw(now);
+    }
+  }, 600);
+
+  altar.addEventListener('pointerdown', function () { ignite(); });
+  window.addEventListener('resize', function () { resize(); draw(Date.now()); });
+  resize();
+  draw(Date.now());
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

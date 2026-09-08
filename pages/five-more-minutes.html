@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>再睡五分钟</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    transition: filter 1.2s ease;
+  }
+  body.dim { filter: brightness(0.62); }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .clockbox {
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+    text-align: center;
+  }
+  .big {
+    color: var(--gold);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(44px, 13vw, 64px);
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+  }
+  .clockbox .cap { color: var(--ink-dim); font-size: 13px; margin-top: 4px; }
+
+  .ledger {
+    margin-top: clamp(16px, 4vw, 22px);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(10, 14, 24, 0.6);
+    padding: 12px 16px;
+    max-height: 200px;
+    overflow-y: auto;
+    text-align: left;
+  }
+  .ledger .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--ink-dim);
+  }
+  .ledger .row .no { font-family: var(--mono); color: var(--gold); opacity: 0.8; }
+  .ledger .empty { color: var(--ink-dim); font-size: 13px; text-align: center; padding: 6px 0; }
+
+  .actions {
+    margin-top: 18px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14.5px;
+    letter-spacing: 0.1em;
+    border: none;
+    border-radius: 999px;
+    padding: 12px 34px;
+    cursor: pointer;
+    color: var(--bg-0);
+    background: var(--gold);
+  }
+  button.act.ghostBtn {
+    color: var(--ink);
+    background: rgba(16, 24, 40, 0.8);
+    border: 1px solid var(--line);
+  }
+  button.act:hover { filter: brightness(1.08); }
+  button.act:active { transform: scale(0.97); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>再睡五分钟</h1>
+  <p class="sub">闹钟响了。世界要求你起来。<em>这里替你说：再睡五分钟。</em></p>
+
+  <div class="clockbox">
+    <div class="big" id="big">05:00</div>
+    <div class="cap" id="cap">按下按钮，本机正式批准你继续睡</div>
+  </div>
+
+  <div class="ledger" id="ledger">
+    <div class="empty">承诺清单还是空的——多体面。</div>
+  </div>
+
+  <div class="actions">
+    <button class="act" id="snoozeBtn" type="button">再睡五分钟</button>
+    <button class="act ghostBtn" id="upBtn" type="button">……起了</button>
+  </div>
+
+  <p class="hint">倒计时归零会自动续期——本装置对人性不抱幻想，但也没有恶意。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var big = document.getElementById('big');
+  var cap = document.getElementById('cap');
+  var ledger = document.getElementById('ledger');
+  var snoozeBtn = document.getElementById('snoozeBtn');
+  var upBtn = document.getElementById('upBtn');
+
+  var deadline = 0;          /* 本轮五分钟的到期墙钟 */
+  var timer = null;
+  var running = false;
+  var presses = 0;
+  var total = 0;             /* 累计批准分钟数 */
+  var EXCUSES = [
+    '被窝还有余温，驳回起床请求。',
+    '梦里剧情正到关键处，不能弃剧。',
+    '已通知太阳稍等片刻。',
+    '被子的引力此刻达到峰值。',
+    '刚才那不算醒，那算试运行。',
+    '批准续睡。理由栏空着也是诚意。'
+  ];
+
+  function fmt(sec) {
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function addRow() {
+    presses += 1;
+    total += 5;
+    if (ledger.querySelector('.empty')) ledger.innerHTML = '';
+    var row = document.createElement('div');
+    row.className = 'row';
+    var no = document.createElement('span');
+    no.className = 'no';
+    no.textContent = '#' + (presses < 10 ? '0' : '') + presses;
+    var txt = document.createElement('span');
+    txt.textContent = EXCUSES[(presses - 1) % EXCUSES.length] + '（累计 +' + total + ' 分钟）';
+    row.appendChild(no);
+    row.appendChild(txt);
+    ledger.appendChild(row);
+    ledger.scrollTop = ledger.scrollHeight;
+  }
+
+  function tick() {
+    if (!running) return;
+    var remain = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    big.textContent = fmt(remain);
+    if (remain <= 0) {
+      /* 归零自动续期：对人性不抱幻想 */
+      snooze();
+    }
+    timer = setTimeout(tick, 250);
+  }
+
+  function snooze() {
+    deadline = Date.now() + 5 * 60 * 1000;
+    document.body.classList.add('dim');
+    addRow();
+    cap.textContent = '已批准。世界同意等一会儿。';
+    if (!running) {
+      running = true;
+      tick();
+    }
+  }
+
+  snoozeBtn.addEventListener('click', snooze);
+  upBtn.addEventListener('click', function () {
+    running = false;
+    if (timer) { clearTimeout(timer); timer = null; }
+    document.body.classList.remove('dim');
+    big.textContent = fmt(0);
+    cap.textContent = '起来了。被窝会在明天同一时间继续等你。';
+  });
+})();
+</script>
+</body>
+</html>

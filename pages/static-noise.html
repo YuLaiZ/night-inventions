@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>雪花屏</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .tv {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .tv canvas { display: block; width: 100%; image-rendering: pixelated; }
+  .tv .channel {
+    position: absolute;
+    top: 10px; right: 14px;
+    color: rgba(220, 230, 245, 0.75);
+    font-family: ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+    letter-spacing: 0.12em;
+    text-shadow: 0 0 6px rgba(0,0,0,0.8);
+    pointer-events: none;
+  }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>雪花屏</h1>
+  <p class="sub">有人说雪花屏里什么都有。<em>是真的——你等得够久的话。</em></p>
+
+  <div class="tv" id="tv">
+    <canvas id="cv"></canvas>
+    <div class="channel" id="ch">CH 00</div>
+  </div>
+
+  <p class="hint">盯着看，别眨眼。偶尔会闪过什么——一只猫、一轮月、一把伞。点一下换台，再等。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var tv = document.getElementById('tv');
+  var chEl = document.getElementById('ch');
+  var W = 0, H = 0;
+  var NW = 120, NH = 66;
+  var noiseCv = document.createElement('canvas');
+  var nctx = noiseCv.getContext('2d');
+  var noiseData = null;
+
+  var channel = 0;
+  var nextGhost = 0;
+  var ghostUntil = 0;
+
+  /* 深夜剪影：画进 NW×NH 噪声缓冲，随放大呈像素感；一律白描线 */
+  var GHOSTS = [
+    function (c, x, y) { /* 猫坐姿 */
+      c.moveTo(x + 0.24, y + 0.50);
+      c.quadraticCurveTo(x + 0.22, y + 0.22, x + 0.25, y + 0.12);
+      c.lineTo(x + 0.31, y + 0.22);
+      c.quadraticCurveTo(x + 0.39, y + 0.17, x + 0.42, y + 0.25);
+      c.quadraticCurveTo(x + 0.56, y + 0.42, x + 0.48, y + 0.82);
+      c.lineTo(x + 0.20, y + 0.82);
+      c.closePath();
+    },
+    function (c, x, y) { /* 月牙 */
+      c.arc(x + 0.30, y + 0.38, 0.20, 0, 6.29);
+      c.moveTo(x + 0.44, y + 0.16);
+      c.arc(x + 0.22, y + 0.38, 0.21, 5.5, 1.8);
+    },
+    function (c, x, y) { /* 高楼两座 */
+      c.rect(x + 0.12, y + 0.34, 0.22, 0.48);
+      c.rect(x + 0.40, y + 0.20, 0.16, 0.62);
+    },
+    function (c, x, y) { /* 打伞的人 */
+      c.moveTo(x + 0.10, y + 0.36);
+      c.quadraticCurveTo(x + 0.42, y + 0.14, x + 0.74, y + 0.36);
+      c.lineTo(x + 0.42, y + 0.36);
+      c.lineTo(x + 0.42, y + 0.50);
+      c.lineTo(x + 0.40, y + 0.50);
+      c.lineTo(x + 0.40, y + 0.42);
+      c.lineTo(x + 0.44, y + 0.42);
+      c.lineTo(x + 0.44, y + 0.86);
+      c.lineTo(x + 0.37, y + 0.86);
+      c.lineTo(x + 0.40, y + 0.50);
+      c.closePath();
+    },
+    function (c, x, y) { /* 一只茶杯 */
+      c.rect(x + 0.18, y + 0.42, 0.34, 0.30);
+      c.moveTo(x + 0.52, y + 0.48);
+      c.quadraticCurveTo(x + 0.76, y + 0.54, x + 0.52, y + 0.68);
+      c.moveTo(x + 0.25, y + 0.34);
+      c.quadraticCurveTo(x + 0.30, y + 0.26, x + 0.25, y + 0.20);
+    },
+    function (c, x, y) { /* 自行车 */
+      c.arc(x + 0.20, y + 0.62, 0.13, 0, 6.29);
+      c.arc(x + 0.64, y + 0.62, 0.13, 0, 6.29);
+      c.moveTo(x + 0.20, y + 0.62);
+      c.lineTo(x + 0.38, y + 0.36);
+      c.lineTo(x + 0.64, y + 0.62);
+      c.moveTo(x + 0.38, y + 0.36);
+      c.lineTo(x + 0.52, y + 0.36);
+      c.lineTo(x + 0.64, y + 0.62);
+    }
+  ];
+
+  function resize() {
+    var w = tv.clientWidth || 300;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.72)));
+    W = w; H = h;
+    cv.width = W;
+    cv.height = H;
+    NH = Math.max(40, Math.round(NW * H / W));
+    noiseCv.width = NW;
+    noiseCv.height = NH;
+    noiseData = nctx.createImageData(NW, NH);
+  }
+
+  function drawNoise() {
+    var d = noiseData.data;
+    for (var i = 0; i < d.length; i += 4) {
+      var v = (Math.random() * 255) | 0;
+      d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = 255;
+    }
+    nctx.putImageData(noiseData, 0, 0);
+    if (Date.now() < ghostUntil) {
+      var gw = NW * 0.62, gh = NH * 0.68;
+      var gx = (NW - gw) / 2, gy = (NH - gh) / 2;
+      nctx.fillStyle = 'rgba(5, 8, 14, 0.78)';   /* 剪影区先压暗，白线才浮得出 */
+      nctx.fillRect(gx - 4, gy - 4, gw + 8, gh + 8);
+      nctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      nctx.lineWidth = 2.4;
+      nctx.lineJoin = 'round';
+      nctx.beginPath();
+      GHOSTS[channel % GHOSTS.length](nctx, gx, gy);
+      nctx.stroke();
+    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(noiseCv, 0, 0, W, H);
+  }
+
+  function frame() {
+    var now = Date.now();
+    if (now >= nextGhost && now >= ghostUntil) {
+      ghostUntil = now + 140;              /* 剪影只闪一瞬 */
+      nextGhost = now + 7000 + Math.random() * 9000;
+    }
+    drawNoise();
+    setTimeout(function () { requestAnimationFrame(frame); }, 55);
+  }
+
+  tv.addEventListener('pointerdown', function () {
+    channel = (channel + 1) % 6;
+    chEl.textContent = 'CH ' + (channel < 10 ? '0' : '') + channel;
+    nextGhost = Date.now() + 2500 + Math.random() * 5000;   /* 换台后稍等 */
+  });
+
+  window.addEventListener('resize', resize);
+  resize();
+  nextGhost = Date.now() + 3000;
+  frame();
+})();
+</script>
+</body>
+</html>

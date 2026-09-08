@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地球另一端</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --magma: #e8804a;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .ctrl {
+    margin-top: clamp(20px, 5vw, 28px);
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  select, button.dig {
+    font-family: var(--sans);
+    font-size: 14.5px;
+    border-radius: 999px;
+    padding: 10px 18px;
+  }
+  select {
+    color: var(--ink-strong);
+    background: rgba(16, 24, 40, 0.8);
+    border: 1px solid var(--line);
+    max-width: 56vw;
+  }
+  button.dig {
+    letter-spacing: 0.14em;
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+    padding: 10px 30px;
+    cursor: pointer;
+  }
+  button.dig:hover { filter: brightness(1.08); }
+  button.dig:active { transform: scale(0.97); }
+  button.dig:disabled { opacity: 0.55; cursor: default; transform: none; }
+
+  /* 剖面：地表 → 地心 → 出口 */
+  .shaft-wrap { margin-top: clamp(18px, 4vw, 24px); text-align: center; }
+  .shaft-label {
+    display: flex;
+    justify-content: space-between;
+    max-width: 300px;
+    margin: 0 auto;
+    color: var(--ink-dim);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
+  .shaft {
+    position: relative;
+    width: 64px;
+    height: 200px;
+    margin: 6px auto 0;
+    border-radius: 32px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg,
+      #3c5a48 0%, #5a4632 18%, #4a3a44 34%,
+      #b05c2e 46%, #f2a25c 50%, #b05c2e 54%,
+      #4a3a44 66%, #5a4632 82%, #3c5a48 100%);
+    opacity: 0.5;
+    transition: opacity 0.4s ease;
+  }
+  .shaft.lit { opacity: 1; }
+  .drill {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 10px;
+    height: 10px;
+    margin-left: -5px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--ice);
+    box-shadow: 0 0 12px 4px rgba(156, 200, 255, 0.55);
+    transform: translateY(0);
+  }
+  .odometer {
+    margin-top: 12px;
+    color: var(--gold);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 22px;
+    letter-spacing: 0.04em;
+  }
+  .odometer .u { font-size: 13px; color: var(--ink-dim); margin-left: 4px; }
+
+  .report {
+    margin-top: clamp(20px, 5vw, 30px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+    min-height: 132px;
+  }
+  .item { margin-top: 14px; }
+  .item:first-child { margin-top: 0; }
+  .item .no {
+    display: inline-block;
+    color: var(--gold);
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    margin-bottom: 2px;
+  }
+  .item .txt { color: var(--ink-strong); font-size: 15.5px; }
+  .item .txt.pending { color: var(--ink-dim); }
+  .fade { transition: opacity 0.3s ease; }
+  .fade.swap { opacity: 0; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>地球另一端</h1>
+  <p class="sub">从脚底笔直往下挖 12,742 公里，穿过地心，再往前 6,371 公里就是出口。<em>钻出来的那一刻，那里是几点钟？</em></p>
+
+  <div class="ctrl">
+    <select id="city" aria-label="出发地"></select>
+    <button class="dig" id="dig" type="button">开挖</button>
+  </div>
+
+  <div class="shaft-wrap">
+    <div class="shaft-label"><span>这里 · 地表</span><span>出口 · 地表</span></div>
+    <div class="shaft" id="shaft">
+      <div class="drill" id="drill"></div>
+    </div>
+    <div class="odometer" id="odo">0<span class="u">km</span></div>
+    <div class="shaft-label" style="justify-content:center"><span>↓ 地心在正中 · 6,371 km ↓</span></div>
+  </div>
+
+  <div class="report fade" id="report">
+    <div class="item"><span class="no">一 · 对面是谁</span><div class="txt pending" id="a1">选好出发地，按下「开挖」。</div></div>
+    <div class="item"><span class="no">二 · 当地此刻</span><div class="txt pending" id="a2">——</div></div>
+    <div class="item"><span class="no">三 · 与你</span><div class="txt pending" id="a3">——</div></div>
+  </div>
+
+  <p class="hint">没人真挖过这条洞。但坐标是真的，时刻表也是真的——你失眠的每一分钟，地球那头都有人替你过着白天。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  /* 出发地与落点共用一张城市表；tz 用 IANA 名称，当地时刻交给浏览器 Intl（含夏令时） */
+  var CITIES = [
+    { n: '上海', la: 31.23, lo: 121.47, tz: 'Asia/Shanghai', g: 0 },
+    { n: '北京', la: 39.90, lo: 116.41, tz: 'Asia/Shanghai', g: 0 },
+    { n: '广州', la: 23.13, lo: 113.26, tz: 'Asia/Shanghai', g: 0 },
+    { n: '深圳', la: 22.54, lo: 114.06, tz: 'Asia/Shanghai', g: 0 },
+    { n: '成都', la: 30.57, lo: 104.07, tz: 'Asia/Shanghai', g: 0 },
+    { n: '重庆', la: 29.56, lo: 106.55, tz: 'Asia/Shanghai', g: 0 },
+    { n: '西安', la: 34.34, lo: 108.94, tz: 'Asia/Shanghai', g: 0 },
+    { n: '杭州', la: 30.27, lo: 120.16, tz: 'Asia/Shanghai', g: 0 },
+    { n: '武汉', la: 30.59, lo: 114.31, tz: 'Asia/Shanghai', g: 0 },
+    { n: '南京', la: 32.06, lo: 118.80, tz: 'Asia/Shanghai', g: 0 },
+    { n: '天津', la: 39.13, lo: 117.20, tz: 'Asia/Shanghai', g: 0 },
+    { n: '青岛', la: 36.07, lo: 120.38, tz: 'Asia/Shanghai', g: 0 },
+    { n: '厦门', la: 24.48, lo: 118.09, tz: 'Asia/Shanghai', g: 0 },
+    { n: '长沙', la: 28.23, lo: 112.94, tz: 'Asia/Shanghai', g: 0 },
+    { n: '昆明', la: 24.88, lo: 102.83, tz: 'Asia/Shanghai', g: 0 },
+    { n: '拉萨', la: 29.65, lo: 91.14, tz: 'Asia/Shanghai', g: 0 },
+    { n: '哈尔滨', la: 45.80, lo: 126.53, tz: 'Asia/Shanghai', g: 0 },
+    { n: '乌鲁木齐', la: 43.83, lo: 87.62, tz: 'Asia/Shanghai', g: 0 },
+    { n: '香港', la: 22.32, lo: 114.17, tz: 'Asia/Hong_Kong', g: 0 },
+    { n: '台北', la: 25.03, lo: 121.57, tz: 'Asia/Taipei', g: 0 },
+    { n: '东京', la: 35.68, lo: 139.69, tz: 'Asia/Tokyo', g: 0 },
+    { n: '首尔', la: 37.57, lo: 126.98, tz: 'Asia/Seoul', g: 0 },
+    { n: '曼谷', la: 13.76, lo: 100.50, tz: 'Asia/Bangkok', g: 0 },
+    { n: '新加坡', la: 1.35, lo: 103.82, tz: 'Asia/Singapore', g: 0 },
+    { n: '吉隆坡', la: 3.14, lo: 101.69, tz: 'Asia/Kuala_Lumpur', g: 0 },
+    { n: '孟买', la: 19.08, lo: 72.88, tz: 'Asia/Kolkata', g: 0 },
+    { n: '迪拜', la: 25.20, lo: 55.27, tz: 'Asia/Dubai', g: 0 },
+    { n: '悉尼', la: -33.87, lo: 151.21, tz: 'Australia/Sydney', g: 1 },
+    { n: '墨尔本', la: -37.81, lo: 144.96, tz: 'Australia/Melbourne', g: 1 },
+    { n: '奥克兰', la: -36.85, lo: 174.76, tz: 'Pacific/Auckland', g: 1 },
+    { n: '伦敦', la: 51.51, lo: -0.13, tz: 'Europe/London', g: 2 },
+    { n: '巴黎', la: 48.86, lo: 2.35, tz: 'Europe/Paris', g: 2 },
+    { n: '莫斯科', la: 55.76, lo: 37.62, tz: 'Europe/Moscow', g: 2 },
+    { n: '伊斯坦布尔', la: 41.01, lo: 28.98, tz: 'Europe/Istanbul', g: 2 },
+    { n: '开罗', la: 30.04, lo: 31.24, tz: 'Africa/Cairo', g: 2 },
+    { n: '内罗毕', la: -1.29, lo: 36.82, tz: 'Africa/Nairobi', g: 2 },
+    { n: '约翰内斯堡', la: -26.20, lo: 28.05, tz: 'Africa/Johannesburg', g: 2 },
+    { n: '卡萨布兰卡', la: 33.57, lo: -7.59, tz: 'Africa/Casablanca', g: 2 },
+    { n: '纽约', la: 40.71, lo: -74.01, tz: 'America/New_York', g: 3 },
+    { n: '芝加哥', la: 41.88, lo: -87.63, tz: 'America/Chicago', g: 3 },
+    { n: '洛杉矶', la: 34.05, lo: -118.24, tz: 'America/Los_Angeles', g: 3 },
+    { n: '温哥华', la: 49.28, lo: -123.12, tz: 'America/Vancouver', g: 3 },
+    { n: '墨西哥城', la: 19.43, lo: -99.13, tz: 'America/Mexico_City', g: 3 },
+    { n: '波哥大', la: 4.71, lo: -74.07, tz: 'America/Bogota', g: 3 },
+    { n: '利马', la: -12.05, lo: -77.04, tz: 'America/Lima', g: 3 },
+    { n: '圣保罗', la: -23.55, lo: -46.63, tz: 'America/Sao_Paulo', g: 3 },
+    { n: '蒙得维的亚', la: -34.90, lo: -56.16, tz: 'America/Montevideo', g: 3 },
+    { n: '布宜诺斯艾利斯', la: -34.60, lo: -58.38, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '罗萨里奥', la: -32.95, lo: -60.64, tz: 'America/Argentina/Cordoba', g: 3 },
+    { n: '圣菲', la: -31.63, lo: -60.70, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '科尔多瓦', la: -31.42, lo: -64.18, tz: 'America/Argentina/Cordoba', g: 3 },
+    { n: '里奥夸尔托', la: -33.13, lo: -64.35, tz: 'America/Argentina/Cordoba', g: 3 },
+    { n: '圣罗莎', la: -36.62, lo: -64.29, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '布兰卡港', la: -38.72, lo: -62.27, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '内乌肯', la: -38.95, lo: -68.06, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '罗卡将军市', la: -39.03, lo: -67.58, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '特雷利乌', la: -43.25, lo: -65.31, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '科莫多罗·里瓦达维亚', la: -45.09, lo: -67.57, tz: 'America/Argentina/Buenos_Aires', g: 3 },
+    { n: '门多萨', la: -32.89, lo: -68.84, tz: 'America/Argentina/Mendoza', g: 3 },
+    { n: '圣地亚哥', la: -33.45, lo: -70.67, tz: 'America/Santiago', g: 3 },
+    { n: '拉塞雷纳', la: -29.90, lo: -71.25, tz: 'America/Santiago', g: 3 }
+  ];
+  var GROUPS = ['东亚 · 南亚', '大洋洲', '欧洲 · 非洲', '美洲'];
+
+  var DIAMETER = 12742;
+  var DUR = 4200;
+
+  var sel = document.getElementById('city');
+  var btn = document.getElementById('dig');
+  var shaft = document.getElementById('shaft');
+  var drill = document.getElementById('drill');
+  var odo = document.getElementById('odo');
+  var report = document.getElementById('report');
+  var a1 = document.getElementById('a1');
+  var a2 = document.getElementById('a2');
+  var a3 = document.getElementById('a3');
+
+  GROUPS.forEach(function (label, gi) {
+    var og = document.createElement('optgroup');
+    og.label = label;
+    CITIES.forEach(function (c, i) {
+      if (c.g !== gi) return;
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = c.n;
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  });
+
+  function antipode(c) {
+    var lon = c.lo > 0 ? c.lo - 180 : c.lo + 180;
+    return { la: -c.la, lo: lon };
+  }
+
+  function haversine(la1, lo1, la2, lo2) {
+    var R = 6371;
+    var r = Math.PI / 180;
+    var dLa = (la2 - la1) * r;
+    var dLo = (lo2 - lo1) * r;
+    var a = Math.sin(dLa / 2) * Math.sin(dLa / 2) +
+      Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  }
+
+  function nearest(p) {
+    var best = null, bd = Infinity;
+    CITIES.forEach(function (c) {
+      var d = haversine(p.la, p.lo, c.la, c.lo);
+      if (d < bd) { bd = d; best = c; }
+    });
+    return { city: best, dist: bd };
+  }
+
+  function seaName(lat, lon) {
+    if (lat < -58) return '南大洋';
+    if (lat > 62) return '北冰洋';
+    if (lon >= 120 || lon <= -75) {
+      if (lat >= -58 && lat <= 58) return '太平洋';
+    }
+    if (lon > 18 && lon <= 120 && lat >= -58 && lat <= 28) return '印度洋';
+    if (lon > -75 && lon <= 18 && lat >= -58 && lat <= 60) return '大西洋';
+    return '一片没有名字的洋';
+  }
+
+  function localParts(tz) {
+    try {
+      var f = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', hour12: false
+      });
+      var parts = {};
+      f.formatToParts(new Date()).forEach(function (x) { parts[x.type] = x.value; });
+      var h = parseInt(parts.hour, 10);
+      /* zh-CN 下 hour12:false 可能落到 12 小时制，用 dayPeriod 校回 24 小时 */
+      var dp = parts.dayPeriod || '';
+      if (h === 24) h = 0;
+      if (h < 12 && /下|晚|夜/.test(dp)) h += 12;
+      else if (h === 12 && /上|晨|凌/.test(dp)) h = 0;
+      return { y: parts.year, m: parts.month, d: parts.day, h: h, mi: parts.minute };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function period(h) {
+    if (h >= 5 && h < 7) return '天刚亮，早市刚支起来';
+    if (h >= 7 && h < 11) return '日头正往半空爬';
+    if (h >= 11 && h < 14) return '影子踩在脚底下';
+    if (h >= 14 && h < 17.5) return '日头开始偏西';
+    if (h >= 17.5 && h < 19.5) return '天边烧起来了';
+    if (h >= 19.5 && h < 23) return '窗灯一盏盏亮了';
+    return '万籁俱寂，只剩路灯';
+  }
+
+  function dayWord(h) {
+    return (h >= 6 && h < 19) ? '白天' : '黑夜';
+  }
+
+  function fill(origin) {
+    var p = antipode(origin);
+    var near = nearest(p);
+    a1.textContent = near.dist <= 600
+      ? near.city.n + '附近约 ' + Math.round(near.dist) + ' 公里'
+      : seaName(p.la, p.lo) + '中部的一片开阔水面（最近的城在 ' + Math.round(near.dist) + ' 公里外）';
+
+    var there = localParts(origin.tz);
+    var opp = localParts(near.city.tz);
+    if (!there || !opp) {
+      a2.textContent = '——这台设备的时钟打了个盹，当地时刻算不出来。';
+      a3.textContent = '但对面是真实存在的：' + a1.textContent + '。';
+      return;
+    }
+    var ord = function (l) { return Date.UTC(+l.y, +l.m - 1, +l.d); };
+    var shift = ord(opp) === ord(there) ? '你们的今天'
+      : (ord(opp) > ord(there) ? '你们的明天' : '你们的昨天');
+    a2.textContent = '当地 ' + opp.m + ' 月 ' + opp.d + ' 日（' + shift + '）' +
+      opp.h + ':' + opp.mi + ' —— ' + period(opp.h) + '。';
+
+    /* 时差取两地当前 UTC 偏移之差（含夏令时），规范到 ±12 小时 */
+    var now = new Date();
+    var utcMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+    function offMin(l) {
+      return (((l.h * 60 + parseInt(l.mi, 10)) - utcMin) % 1440 + 1440) % 1440;
+    }
+    var diff = ((offMin(opp) - offMin(there)) % 1440 + 1440) % 1440;
+    if (diff > 720) diff -= 1440;
+    var hh = Math.floor(Math.abs(diff) / 60);
+    var mm = Math.abs(diff) % 60;
+    var gap = '差 ' + hh + ' 小时' + (mm ? ' ' + mm + ' 分' : '') + '。';
+    var dw1 = dayWord(there.h), dw2 = dayWord(opp.h);
+    a3.textContent = dw1 === dw2
+      ? gap + '两边此刻竟共着同一种天色。'
+      : gap + '你这边是' + dw1 + '，那边是' + dw2 + '。';
+  }
+
+  var timer = null;
+  function setOdo(km) {
+    odo.innerHTML = km + '<span class="u">km</span>';
+  }
+
+  function dig() {
+    btn.disabled = true;
+    btn.textContent = '挖掘中…';
+    shaft.classList.add('lit');
+    report.classList.add('swap');
+    var t0 = Date.now();
+    var done = false;
+    function settle() {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      setOdo(DIAMETER);
+      drill.style.transform = 'translateY(' + (shaft.clientHeight - 5) + 'px)';
+      [a1, a2, a3].forEach(function (el) { el.classList.remove('pending'); });
+      fill(CITIES[+sel.value]);
+      report.classList.remove('swap');
+      btn.disabled = false;
+      btn.textContent = '再挖一次';
+    }
+    clearInterval(timer);
+    timer = setInterval(function () {
+      var t = Math.min(1, (Date.now() - t0) / DUR);
+      var e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      setOdo(Math.round(DIAMETER * e));
+      drill.style.transform = 'translateY(' + (e * (shaft.clientHeight - 10) + 5) + 'px)';
+      if (t >= 1) settle();
+    }, 60);
+    setTimeout(settle, DUR + 300);
+  }
+
+  btn.addEventListener('click', dig);
+  setOdo(0);
+})();
+</script>
+</body>
+</html>

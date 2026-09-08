@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>不寄出的信</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --serif: Georgia, "Songti SC", "Noto Serif SC", serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .desk { position: relative; margin-top: clamp(18px, 4vw, 26px); }
+  .paper {
+    position: relative;
+    background: linear-gradient(180deg, #efe8d8 0%, #e6dcc6 100%);
+    border-radius: 6px;
+    min-height: 320px;
+    padding: 26px 26px 30px;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+    transition: opacity 0.5s ease;
+  }
+  .paper::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 5px;
+    border-radius: 6px 6px 0 0;
+    background: repeating-linear-gradient(90deg, #b8452f 0 14px, transparent 14px 22px);
+    opacity: 0.5;
+  }
+  .letter {
+    width: 100%;
+    min-height: 260px;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    color: #3a3428;
+    font-family: var(--serif);
+    font-size: 16.5px;
+    line-height: 2.05;
+    letter-spacing: 0.03em;
+  }
+  .letter::placeholder { color: rgba(58, 52, 40, 0.38); }
+  .meta-row {
+    position: absolute;
+    left: 26px; right: 26px; bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    color: rgba(58, 52, 40, 0.5);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+  .burn-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .after {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 30px;
+    color: var(--gold);
+    font-size: 16.5px;
+    letter-spacing: 0.08em;
+    line-height: 2;
+  }
+  .desk.burnt .after { display: flex; }
+
+  .actions {
+    margin-top: 18px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 9px 26px;
+    cursor: pointer;
+    color: var(--ink);
+    background: rgba(16, 24, 40, 0.8);
+  }
+  button.act.primary {
+    color: var(--bg-0);
+    background: var(--gold);
+    border: none;
+  }
+  button.act:hover { filter: brightness(1.08); }
+  button.act:active { transform: scale(0.97); }
+  button.act:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>不寄出的信</h1>
+  <p class="sub">深夜适合写信，写给<em>不打算寄出</em>的人。写完不用存——烧掉就好，风会替你收着。</p>
+
+  <div class="desk" id="desk">
+    <div class="paper" id="paper">
+      <textarea class="letter" id="letter" placeholder="提笔就写，不用打草稿。称呼、落款，都随你——反正不寄。"></textarea>
+      <div class="meta-row"><span id="count">0 字</span><span>今夜 · 灯下</span></div>
+    </div>
+    <canvas class="burn-layer" id="burn"></canvas>
+    <div class="after">有些话写给风听就够了。<br>信已入火，字已入夜。</div>
+  </div>
+
+  <div class="actions">
+    <button class="act primary" id="burnBtn" type="button">烧掉它</button>
+    <button class="act" id="againBtn" type="button">再写一封</button>
+  </div>
+
+  <p class="hint">烧掉不会让那句话消失——它只是换了个地方，从你心里搬进夜里。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var desk = document.getElementById('desk');
+  var paper = document.getElementById('paper');
+  var letter = document.getElementById('letter');
+  var countEl = document.getElementById('count');
+  var burnBtn = document.getElementById('burnBtn');
+  var againBtn = document.getElementById('againBtn');
+  var cv = document.getElementById('burn');
+  var ctx = cv.getContext('2d');
+  var W = 0, H = 0, DPR = 1;
+
+  var burning = false;
+  var burnStart = 0;
+  var BURN_MS = 3400;
+  var sparks = [];
+  var lastFrame = Date.now();
+
+  function resize() {
+    var r = desk.getBoundingClientRect();
+    DPR = window.devicePixelRatio || 1;
+    W = Math.round(r.width); H = Math.round(r.height);
+    cv.width = W * DPR; cv.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  letter.addEventListener('input', function () {
+    countEl.textContent = letter.value.length + ' 字';
+  });
+
+  /* 烧信：纸张自底边向上碳化消隐（mask），火舌与灰烬贴着消隐线上蹿 */
+  function startBurn() {
+    if (burning) return;
+    var txt = letter.value.trim();
+    if (txt.length === 0) {
+      /* 空信也允许烧：等于烧掉一个念头 */
+    }
+    letter.blur();
+    burning = true;
+    burnStart = Date.now();
+    burnBtn.disabled = true;
+    againBtn.disabled = true;
+    resize();
+    sparks = [];
+    requestAnimationFrame(frame);
+  }
+
+  function burnEdge() {
+    /* 当前碳化线 y（从底部往顶部走） */
+    var t = Math.min(1, (Date.now() - burnStart) / BURN_MS);
+    var ease = t * t * (3 - 2 * t);
+    return H - ease * (H - 10);
+  }
+
+  function step(dt, now) {
+    if (!burning) return;
+    var edge = burnEdge();
+    if (Math.random() < dt * 260) {
+      sparks.push({
+        x: Math.random() * W * 0.9 + W * 0.05,
+        y: edge + (Math.random() - 0.5) * 6,
+        vy: -(24 + Math.random() * 34),
+        vx: (Math.random() - 0.5) * 14,
+        life: 1,
+        decay: 0.9 + Math.random() * 0.9,
+        kind: Math.random() < 0.62 ? 'flame' : 'ash'
+      });
+    }
+    for (var i = sparks.length - 1; i >= 0; i--) {
+      var p = sparks[i];
+      p.life -= p.decay * dt;
+      if (p.life <= 0) { sparks.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy *= (1 - 0.4 * dt);
+      p.vx += Math.sin(p.y / 9) * 12 * dt;
+    }
+  }
+
+  function draw(now) {
+    ctx.clearRect(0, 0, W, H);
+    if (!burning) return;
+    var edge = burnEdge();
+    /* 碳化渐隐：纸张 mask 随线上升 */
+    paper.style.webkitMask = 'linear-gradient(180deg, #fff 0 ' + (edge / H * 100) + '%, transparent ' + (edge / H * 100 + 6) + '%)';
+    paper.style.mask = 'linear-gradient(180deg, #fff 0 ' + (edge / H * 100) + '%, transparent ' + (edge / H * 100 + 6) + '%)';
+    /* 焦线 */
+    ctx.strokeStyle = 'rgba(64, 40, 22, 0.75)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(0, edge);
+    ctx.lineTo(W, edge);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(232, 128, 74, 0.5)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, edge - 2.5);
+    ctx.lineTo(W, edge - 2.5);
+    ctx.stroke();
+    /* 火舌与灰烬 */
+    for (var i = 0; i < sparks.length; i++) {
+      var p = sparks[i];
+      if (p.kind === 'flame') {
+        ctx.globalAlpha = Math.max(0, p.life) * 0.85;
+        var g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 7 * p.life + 2);
+        g.addColorStop(0, 'rgba(255, 196, 96, 0.9)');
+        g.addColorStop(0.5, 'rgba(232, 120, 54, 0.5)');
+        g.addColorStop(1, 'rgba(232, 120, 54, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 7 * p.life + 2, 0, 6.29);
+        ctx.fill();
+      } else {
+        ctx.globalAlpha = Math.max(0, p.life) * 0.7;
+        ctx.fillStyle = '#565b66';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.6, 0, 6.29);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (now - burnStart >= BURN_MS) finishBurn();
+  }
+
+  function finishBurn() {
+    burning = false;
+    paper.style.webkitMask = 'none';
+    paper.style.mask = 'none';
+    paper.style.opacity = '0';
+    desk.classList.add('burnt');
+    burnBtn.disabled = false;
+    burnBtn.textContent = '已入火';
+    againBtn.disabled = false;
+    ctx.clearRect(0, 0, W, H);
+  }
+
+  function reset() {
+    letter.value = '';
+    countEl.textContent = '0 字';
+    paper.style.opacity = '1';
+    paper.style.webkitMask = 'none';
+    paper.style.mask = 'none';
+    desk.classList.remove('burnt');
+    burnBtn.textContent = '烧掉它';
+    burning = false;
+    ctx.clearRect(0, 0, W, H);
+  }
+
+  function frame() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    step(dt, now);
+    draw(now);
+    if (burning) requestAnimationFrame(frame);
+  }
+  /* 后台 rAF 停摆兜底 */
+  setInterval(function () {
+    var now = Date.now();
+    if (burning && now - lastFrame > 400) {
+      step(Math.min(1, (now - lastFrame) / 1000), now);
+      lastFrame = now;
+      draw(now);
+    }
+  }, 600);
+
+  burnBtn.addEventListener('click', startBurn);
+  againBtn.addEventListener('click', function () {
+    reset();
+    letter.focus();
+  });
+  window.addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜煎蛋</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stage {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .stage canvas { display: block; width: 100%; }
+
+  .actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 26px;
+    cursor: pointer;
+    color: var(--bg-0);
+    background: var(--gold);
+  }
+  button.act.ghostBtn {
+    color: var(--ink);
+    background: rgba(16, 24, 40, 0.8);
+    border: 1px solid var(--line);
+  }
+  button.act:hover { filter: brightness(1.08); }
+  button.act:active { transform: scale(0.97); }
+  button.act:disabled { opacity: 0.45; cursor: default; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜煎蛋</h1>
+  <p class="sub">深夜的厨房还亮着一盏灯。<em>给自己煎一个蛋，火候自己说了算。</em></p>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="actions">
+    <button class="act" id="crackBtn" type="button">打蛋下锅</button>
+    <button class="act ghostBtn" id="flipBtn" type="button" disabled>翻个面</button>
+    <button class="act ghostBtn" id="outBtn" type="button" disabled>出锅</button>
+  </div>
+
+  <p class="hint" id="hint">白边越宽火候越老，边上泛金正好——糊了也别倒掉，深夜不挑剔。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+  var crackBtn = document.getElementById('crackBtn');
+  var flipBtn = document.getElementById('flipBtn');
+  var outBtn = document.getElementById('outBtn');
+  var hint = document.getElementById('hint');
+
+  var W = 0, H = 0;
+  var state = 'empty';       /* empty → frying → flipped → served */
+  var fryStart = 0;
+  var egg = { cx: 0, cy: 0, R: 0, seed: [] };
+  var yolkJitter = 0;
+  var lastFrame = Date.now();
+
+  function resize() {
+    var w = stage.clientWidth;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.72)));
+    cv.width = w;
+    cv.height = h;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    egg.cx = W * 0.5;
+    egg.cy = H * 0.46;
+    egg.R = Math.min(W, H) * 0.30;
+    /* 蛋白 blob 的随机轮廓：8 个方向的半径扰动（自然蛋形颗粒感） */
+    egg.seed = [];
+    for (var i = 0; i < 8; i++) egg.seed.push(0.82 + Math.random() * 0.36);
+  }
+
+  /* 火候 0..1：下锅起随墙钟增长（翻面后加速一点点，盖面熟得快） */
+  function doneness(now) {
+    if (state === 'empty') return 0;
+    var ms = now - fryStart;
+    if (state === 'flipped' || state === 'served') return Math.min(1, ms / 26000 + 0.18);
+    return Math.min(1, ms / 34000);
+  }
+
+  function drawEgg(now, doneness) {
+    /* 蛋白 blob：底色白，边缘随火候描金/焦 */
+    var steps = egg.seed.length;
+    var spread = 0.55 + doneness * 0.45;      /* 蛋白随熟摊开 */
+    ctx.beginPath();
+    for (var i = 0; i <= steps; i++) {
+      var ang = i / steps * Math.PI * 2;
+      var rr = egg.R * spread * egg.seed[i % steps];
+      var px = egg.cx + Math.cos(ang) * rr;
+      var py = egg.cy + Math.sin(ang) * rr * 0.86;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#f7f3e8';
+    ctx.fill();
+    /* 焦边：由火候决定描边色 */
+    if (doneness > 0.35) {
+      var gold = Math.min(1, (doneness - 0.35) / 0.4);
+      ctx.strokeStyle = doneness > 0.8
+        ? 'rgba(146, 96, 42, ' + (0.5 + 0.4 * gold) + ')'
+        : 'rgba(226, 178, 92, ' + (0.4 + 0.5 * gold) + ')';
+      ctx.lineWidth = 2 + doneness * 2;
+      ctx.stroke();
+    }
+    /* 蛋黄（翻面前可见；颤动） */
+    if (state === 'frying') {
+      var jr = egg.R * 0.30 + yolkJitter;
+      var yg = ctx.createRadialGradient(egg.cx - jr * 0.2, egg.cy - jr * 0.2, jr * 0.2, egg.cx, egg.cy, jr);
+      yg.addColorStop(0, '#ffd257');
+      yg.addColorStop(1, '#f0a428');
+      ctx.fillStyle = yg;
+      ctx.beginPath();
+      ctx.arc(egg.cx, egg.cy, jr, 0, 6.29);
+      ctx.fill();
+    } else if (state === 'flipped') {
+      /* 盖面煎：蛋黄被蛋白盖住，只透一点橙意 */
+      ctx.fillStyle = 'rgba(240, 164, 40, 0.28)';
+      ctx.beginPath();
+      ctx.arc(egg.cx, egg.cy, egg.R * 0.36, 0, 6.29);
+      ctx.fill();
+    }
+  }
+
+  function draw(now) {
+    var d = doneness(now);
+    /* 锅 */
+    var panR = Math.min(W, H) * 0.44;
+    var pg = ctx.createRadialGradient(egg.cx - panR * 0.2, egg.cy - panR * 0.2, panR * 0.1, egg.cx, egg.cy, panR);
+    pg.addColorStop(0, '#23262d');
+    pg.addColorStop(1, '#141619');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.arc(egg.cx, egg.cy, panR, 0, 6.29);
+    ctx.fill();
+    ctx.strokeStyle = '#0c0e11';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    /* 锅柄 */
+    ctx.strokeStyle = '#1d2026';
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(egg.cx + panR * 0.94, egg.cy);
+    ctx.lineTo(W - 8, egg.cy - H * 0.06);
+    ctx.stroke();
+
+    if (state !== 'empty' && state !== 'served') {
+      drawEgg(now, d);
+      /* 热气：frying 时偶尔一缕 */
+      if (state === 'frying' && Math.random() < 0.08) {
+        steam.push({ x: egg.cx + (Math.random() - 0.5) * egg.R, y: egg.cy - egg.R * 0.6, a: 0.20, r: 3 });
+      }
+    }
+
+    /* 热气粒子 */
+    for (var i = steam.length - 1; i >= 0; i--) {
+      var sp = steam[i];
+      sp.y -= 14 / 60;
+      sp.x += Math.sin(sp.y / 12) * 0.5;
+      sp.a -= 0.006;
+      sp.r += 0.12;
+      if (sp.a <= 0) { steam.splice(i, 1); continue; }
+      ctx.globalAlpha = sp.a;
+      ctx.fillStyle = '#c7d0e2';
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.r, 0, 6.29);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    /* 蛋黄颤动衰减 */
+    yolkJitter *= 0.9;
+  }
+
+  var steam = [];
+
+  function loop() {
+    var now = Date.now();
+    /* 蛋黄偶尔颤一下（刚下锅时抖，之后安定） */
+    if (state === 'frying' && Math.random() < 0.02) yolkJitter = 1.6 + Math.random();
+    draw(now);
+    setTimeout(loop, 70);
+  }
+
+  crackBtn.addEventListener('click', function () {
+    if (state !== 'empty' && state !== 'served') return;
+    resize();          /* 重掷 blob 轮廓 */
+    state = 'frying';
+    fryStart = Date.now();
+    steam.length = 0;
+    yolkJitter = 3;
+    crackBtn.disabled = true;
+    flipBtn.disabled = false;
+    outBtn.disabled = false;
+    hint.textContent = '滋——蛋白正在摊开。别急着翻，白边泛金再动铲。';
+  });
+
+  flipBtn.addEventListener('click', function () {
+    if (state !== 'frying') return;
+    state = 'flipped';
+    flipBtn.disabled = true;
+    var d = doneness(Date.now());
+    hint.textContent = d > 0.75 ? '边缘已经有点焦了——深夜嘛，焦一点也是风味。'
+      : '盖面煎三十秒，蛋黄刚好凝在半熟。';
+  });
+
+  outBtn.addEventListener('click', function () {
+    if (state !== 'frying' && state !== 'flipped') return;
+    var d = doneness(Date.now());
+    state = 'served';
+    outBtn.disabled = true;
+    flipBtn.disabled = true;
+    crackBtn.disabled = false;
+    hint.textContent = d < 0.45 ? '溏心的。深夜吃溏心蛋要小心被子公司弹。'
+      : d < 0.8 ? '火候正好。锅和蛋都谢谢你。'
+      : '全熟的，边儿焦了——但深夜的焦香，比火候金贵。';
+    /* 出锅：盘子里那只蛋（画到盘上） */
+    setTimeout(function () { draw(Date.now()); }, 30);
+  });
+
+  window.addEventListener('resize', function () { resize(); draw(Date.now()); });
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>

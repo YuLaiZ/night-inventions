@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>走马灯</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stage {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .stage canvas { display: block; width: 100%; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>走马灯</h1>
+  <p class="sub">灯一转，马就跑了起来。<em>第一百件藏品</em>，送给这盏点了一百个夜晚的灯。</p>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <p class="hint">点一下灯，换一班灯屏：奔马、游鱼、飞鸟。烛火是假的，转是真的——像所有被讲了一百遍的故事。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+  var W = 0, H = 0;
+
+  var THEMES = ['奔马', '游鱼', '飞鸟'];
+  var theme = 0;
+  var scrollX = 0;
+  var lastFrame = Date.now();
+
+  function resize() {
+    var w = stage.clientWidth;
+    var h = Math.round(Math.min(420, Math.max(330, w * 0.76)));
+    cv.width = w;
+    cv.height = h;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+  }
+
+  /* 剪影绘制函数：在 (x, y) 处画一只朝左行进的主题剪影，s 为比例 */
+  function drawHorse(c, x, y, s) {
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x + s * 0.10, y - s * 0.32);
+    c.lineTo(x + s * 0.30, y - s * 0.40);
+    c.lineTo(x + s * 0.52, y - s * 0.38);
+    c.quadraticCurveTo(x + s * 0.66, y - s * 0.42, x + s * 0.78, y - s * 0.30);
+    c.lineTo(x + s * 0.92, y - s * 0.34);
+    c.quadraticCurveTo(x + s * 0.98, y - s * 0.30, x + s * 0.94, y - s * 0.22);
+    c.lineTo(x + s * 0.70, y - s * 0.14);
+    c.lineTo(x + s * 0.72, y);
+    c.lineTo(x + s * 0.64, y);
+    c.lineTo(x + s * 0.60, y - s * 0.12);
+    c.lineTo(x + s * 0.42, y - s * 0.13);
+    c.lineTo(x + s * 0.38, y);
+    c.lineTo(x + s * 0.30, y);
+    c.lineTo(x + s * 0.32, y - s * 0.14);
+    c.lineTo(x + s * 0.16, y - s * 0.14);
+    c.lineTo(x + s * 0.12, y);
+    c.closePath();
+    c.fill();
+  }
+  function drawFish(c, x, y, s) {
+    c.beginPath();
+    c.moveTo(x, y - s * 0.16);
+    c.quadraticCurveTo(x + s * 0.35, y - s * 0.38, x + s * 0.62, y - s * 0.18);
+    c.lineTo(x + s * 0.74, y - s * 0.34);
+    c.lineTo(x + s * 0.80, y - s * 0.16);
+    c.lineTo(x + s * 0.74, y + 0.02);
+    c.quadraticCurveTo(x + s * 0.35, y + 0.06, x, y - s * 0.16);
+    c.closePath();
+    c.fill();
+    c.beginPath();
+    c.arc(x + s * 0.14, y - s * 0.19, s * 0.02, 0, 6.29);
+  }
+  function drawBird(c, x, y, s) {
+    c.beginPath();
+    c.moveTo(x, y - s * 0.10);
+    c.quadraticCurveTo(x + s * 0.16, y - s * 0.34, x + s * 0.34, y - s * 0.12);
+    c.quadraticCurveTo(x + s * 0.44, y - s * 0.06, x + s * 0.52, y - s * 0.10);
+    c.quadraticCurveTo(x + s * 0.72, y - s * 0.26, x + s * 0.94, y - s * 0.14);
+    c.quadraticCurveTo(x + s * 0.66, y + 0.06, x + s * 0.40, y - s * 0.02);
+    c.quadraticCurveTo(x + s * 0.18, y + 0.06, x, y - s * 0.10);
+    c.closePath();
+    c.fill();
+  }
+
+  function draw(now) {
+    var dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    scrollX += dt * 46;
+
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#070b12');
+    g.addColorStop(1, '#0d1420');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    var cx = W * 0.5;
+    var cy = H * 0.42;
+    var LW = Math.min(W * 0.62, 320);      /* 灯屏宽 */
+    var LH = LW * 0.52;
+    var topY = cy - LH * 0.86;
+
+    /* 灯体暖光 */
+    var breathe = 0.92 + 0.08 * Math.sin(now / 700);
+    var glow = ctx.createRadialGradient(cx, cy, LW * 0.1, cx, cy, LW * 0.95);
+    glow.addColorStop(0, 'rgba(242, 190, 96, ' + 0.24 * breathe + ')');
+    glow.addColorStop(1, 'rgba(242, 190, 96, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 灯笼体（椭圆灯屏） */
+    ctx.save();
+    ctx.fillStyle = 'rgba(240, 196, 110, 0.13)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, LW * 0.55, LH * 0.62, 0, 0, 6.29);
+    ctx.fill();
+
+    /* 灯屏：旋转剪影带（圆角矩形裁剪） */
+    var bandW = LW * 0.92, bandH = LH * 0.46;
+    var bx = cx - bandW / 2, by = cy - bandH / 2;
+    ctx.save();
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, bandW, bandH, bandH * 0.22);
+    else ctx.rect(bx, by, bandW, bandH);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(8, 12, 20, 0.55)';
+    ctx.fillRect(bx, by, bandW, bandH);
+    /* 剪影队列：主题剪影每隔 0.5*bandW 一只，循环 */
+    var s = bandH * 0.78;
+    var period = bandW * 0.52;
+    var off = -(scrollX % period);
+    ctx.fillStyle = 'rgba(255, 224, 150, 0.92)';
+    for (var k = -1; k < Math.ceil(bandW / period) + 1; k++) {
+      var gx = bx + off + k * period;
+      if (theme === 0) drawHorse(ctx, gx, by + bandH * 0.84, s * 0.9);
+      else if (theme === 1) drawFish(ctx, gx, by + bandH * 0.52, s * 0.9);
+      else drawBird(ctx, gx, by + bandH * 0.52, s * 0.9);
+    }
+    ctx.restore();
+
+    /* 灯屏格线（竖细条，走马灯骨架感） */
+    ctx.strokeStyle = 'rgba(242, 190, 96, 0.14)';
+    ctx.lineWidth = 1;
+    for (var v = 1; v < 6; v++) {
+      var vx = bx + bandW * v / 6;
+      ctx.beginPath();
+      ctx.moveTo(vx, by);
+      ctx.lineTo(vx, by + bandH);
+      ctx.stroke();
+    }
+
+    /* 上下灯盖 + 穗 */
+    ctx.fillStyle = '#5a4326';
+    ctx.beginPath();
+    ctx.ellipse(cx, by - 8, bandW * 0.30, 8, 0, 0, 6.29);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx, by + bandH + 8, bandW * 0.30, 8, 0, 0, 6.29);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(232, 128, 74, 0.55)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - bandW * 0.16, by + bandH + 14);
+    ctx.quadraticCurveTo(cx, by + bandH + 30, cx + bandW * 0.10, by + bandH + 52);
+    ctx.stroke();
+
+    /* 底座投影 */
+    ctx.fillStyle = 'rgba(242, 190, 96, 0.07)';
+    ctx.beginPath();
+    ctx.ellipse(cx, H * 0.86, LW * 0.55, 16, 0, 0, 6.29);
+    ctx.fill();
+
+    /* 主题名 */
+    ctx.fillStyle = 'rgba(242, 199, 110, 0.7)';
+    ctx.font = '13px ' + getComputedStyle(document.body).fontFamily;
+    ctx.textAlign = 'center';
+    ctx.fillText(THEMES[theme] + ' · 点灯换班', cx, H * 0.94);
+
+    ctx.restore();
+  }
+
+  function loop() {
+    draw(Date.now());
+    setTimeout(loop, 70);
+  }
+
+  stage.addEventListener('pointerdown', function () {
+    theme = (theme + 1) % THEMES.length;
+  });
+  window.addEventListener('resize', resize);
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>

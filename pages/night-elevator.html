@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜电梯</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .cab {
+    margin-top: clamp(20px, 5vw, 28px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+  }
+  .floor-display {
+    text-align: center;
+    color: var(--gold);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 30px;
+    letter-spacing: 0.06em;
+  }
+  .floor-display .u { font-size: 14px; color: var(--ink-dim); margin-left: 6px; }
+  .doorway {
+    position: relative;
+    height: 150px;
+    margin-top: 16px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(10, 13, 23, 0.85);
+    border: 1px solid var(--line);
+  }
+  .scene {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px 22px;
+    text-align: center;
+    color: var(--ink-strong);
+    font-size: 15.5px;
+    opacity: 0;
+    transition: opacity 0.45s ease;
+  }
+  .scene.show { opacity: 1; }
+  .door {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 50.5%;
+    background: linear-gradient(180deg, #1c2438 0%, #161d30 100%);
+    border: 1px solid var(--line);
+    transition: transform 0.5s ease;
+    z-index: 2;
+  }
+  .door::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    bottom: 50%;
+    width: 2px;
+    background: rgba(156, 200, 255, 0.25);
+  }
+  .door.l { left: 0; border-radius: 10px 0 0 10px; }
+  .door.r { right: 0; border-radius: 0 10px 10px 0; }
+  .door.l::after { right: 8px; }
+  .door.r::after { left: 8px; }
+  .doorway.open .door.l { transform: translateX(-101%); }
+  .doorway.open .door.r { transform: translateX(101%); }
+
+  .panel {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    max-width: 320px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  button.f {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    color: var(--ink);
+    background: rgba(16, 24, 40, 0.8);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 0;
+    cursor: pointer;
+  }
+  button.f:hover { border-color: var(--ice); color: var(--ink-strong); }
+  button.f:disabled { opacity: 0.4; cursor: default; }
+  button.f.here { border-color: var(--gold); color: var(--gold); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜电梯</h1>
+  <p class="sub">这栋楼在夜里并不睡觉，只是压低了声音。<em>按下楼层，去哪层都行——反正今晚你哪儿都不用去。</em></p>
+
+  <div class="cab">
+    <div class="floor-display"><span id="floor">1</span><span class="u">F</span></div>
+    <div class="doorway open" id="doorway">
+      <div class="scene" id="scene"></div>
+      <div class="door l"></div>
+      <div class="door r"></div>
+    </div>
+    <div class="panel" id="panel"></div>
+  </div>
+
+  <p class="hint">电梯说：深夜载客，不问去处。门开的时候，记得替那层的人轻轻的。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var FLOORS = {
+    1: '大堂。夜班保安打着第二个哈欠，登记簿上今晚只有你一个访客。',
+    2: '便利店的关东煮汤底，正咕嘟着今晚的第三个小时。',
+    3: '门口的猫和门内的猫隔着一道纱窗对峙，谁都不肯先让步。',
+    4: '阳台上的衬衫被风吹着，替还没回家的人先散一会儿步。',
+    5: '一家三口在看电视，笑声隔着门板传来，比节目本身还清楚。',
+    6: '厨房里小火煨着汤，锅盖哒哒地响，像有人小声打着拍子。',
+    7: '台灯还亮着，作业本上只写了一个名字，人已经趴着睡着了。',
+    8: '水汽从浴室门缝里漫出来，热水器嗡嗡地撑今晚最后一点班。',
+    9: '有人在阳台浇花，水顺着楼缝滴下去，不知道会落进谁的梦里。',
+    10: '吸尘器在客厅画着圈，音量拧到最小，怕吵醒刚睡着的婴儿。',
+    11: '这层只有门缝下的一线光，和光里浮着的一粒灰。',
+    12: '天台。门一开，风比灯先到。整座城市的夜在这里摊开——谁都可以看，不用登记。'
+  };
+  var TOP = 12;
+  var DOOR_MS = 520;
+
+  var floorEl = document.getElementById('floor');
+  var doorway = document.getElementById('doorway');
+  var scene = document.getElementById('scene');
+  var panel = document.getElementById('panel');
+  var current = 1;
+  var moving = false;
+  var timer = null;
+
+  Object.keys(FLOORS).forEach(function (f) {
+    var b = document.createElement('button');
+    b.className = 'f' + (+f === 1 ? ' here' : '');
+    b.type = 'button';
+    b.textContent = f;
+    b.dataset.floor = f;
+    b.addEventListener('click', function () { go(+f); });
+    panel.appendChild(b);
+  });
+
+  function settle(floor) {
+    current = floor;
+    floorEl.textContent = floor;
+    scene.textContent = FLOORS[floor];
+    doorway.classList.add('open');
+    scene.classList.add('show');
+    Array.prototype.forEach.call(panel.children, function (b) {
+      b.classList.toggle('here', +b.dataset.floor === floor);
+    });
+    moving = false;
+    Array.prototype.forEach.call(panel.children, function (b) { b.disabled = false; });
+  }
+
+  function go(target) {
+    if (moving || target === current) return;
+    moving = true;
+    Array.prototype.forEach.call(panel.children, function (b) { b.disabled = true; });
+    doorway.classList.remove('open');
+    scene.classList.remove('show');
+    var from = current, started = Date.now(), done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      settle(target);
+    }
+    /* 楼层滚动 + 开门总时长对齐：墙钟推算，setTimeout 兜底结算 */
+    var travel = Math.abs(target - from) * 150;
+    timer = setInterval(function () {
+      var t = Math.min(1, (Date.now() - started) / travel);
+      floorEl.textContent = Math.round(from + (target - from) * t);
+    }, 60);
+    setTimeout(finish, travel + DOOR_MS + 60);
+  }
+
+  scene.textContent = FLOORS[1];
+  scene.classList.add('show');
+})();
+</script>
+</body>
+</html>

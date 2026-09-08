@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>老式挂钟</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .wall {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .wall canvas { display: block; width: 100%; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>老式挂钟</h1>
+  <p class="sub">它走的每一秒<em>都是真的</em>。不像深夜的你，总觉得时间走得慢。</p>
+
+  <div class="wall" id="wall">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <p class="hint">摆锤晃一下是一秒，不多也不少。别盯着秒针看，你会困——看分针，它有耐心。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var wall = document.getElementById('wall');
+  var W = 0, H = 0, DPR = 1;
+  var lastSecond = -1;
+  var tickAt = 0;           /* 秒针跳动时刻（摆锤受激微顿） */
+
+  function resize() {
+    var w = wall.clientWidth;
+    var h = Math.round(Math.min(460, Math.max(360, w * 0.86)));
+    DPR = window.devicePixelRatio || 1;
+    cv.width = w * DPR;
+    cv.height = h * DPR;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function draw(now) {
+    var d = new Date();
+    var ms = d.getMilliseconds();
+    var sec = d.getSeconds();
+    var min = d.getMinutes();
+    var hr = d.getHours() % 12;
+
+    if (sec !== lastSecond) { lastSecond = sec; tickAt = now; }
+    var sinceTick = (now - tickAt) / 1000;
+
+    ctx.clearRect(0, 0, W, H);
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a1018');
+    g.addColorStop(1, '#0d141f');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    var cx = W * 0.5, cy = H * 0.30;
+    var R = Math.min(W, H) * 0.24;
+
+    /* 钟壳（木框） */
+    ctx.fillStyle = '#3a2b1e';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 1.16, 0, 6.29);
+    ctx.fill();
+    ctx.fillStyle = '#2a1f15';
+    ctx.fillRect(cx - R * 0.34, cy, R * 0.68, H * 0.47);
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, 6.29);
+    ctx.fill();
+
+    /* 钟面 */
+    var face = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.2, cx, cy, R);
+    face.addColorStop(0, '#f4edda');
+    face.addColorStop(1, '#dcd2b4');
+    ctx.fillStyle = face;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.94, 0, 6.29);
+    ctx.fill();
+
+    /* 刻度 */
+    for (var i = 0; i < 60; i++) {
+      var ang = i * Math.PI / 30;
+      var major = i % 5 === 0;
+      var r1 = R * (major ? 0.78 : 0.84), r2 = R * 0.88;
+      ctx.strokeStyle = major ? 'rgba(60, 48, 30, 0.85)' : 'rgba(60, 48, 30, 0.4)';
+      ctx.lineWidth = major ? 2.4 : 1;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.sin(ang) * r1, cy - Math.cos(ang) * r1);
+      ctx.lineTo(cx + Math.sin(ang) * r2, cy - Math.cos(ang) * r2);
+      ctx.stroke();
+    }
+    /* 12/3/6/9 数字 */
+    ctx.fillStyle = '#3c301e';
+    ctx.font = '600 ' + Math.round(R * 0.14) + 'px ' + getComputedStyle(document.body).fontFamily;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    var nums = [['12', 0, -1], ['3', 1, 0], ['6', 0, 1], ['9', -1, 0]];
+    nums.forEach(function (n) {
+      ctx.fillText(n[0], cx + n[1] * R * 0.66, cy + n[2] * R * 0.66);
+    });
+
+    /* 针（真实时刻） */
+    function hand(ang, len, width, color) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - Math.sin(ang) * len * 0.16, cy + Math.cos(ang) * len * 0.16);
+      ctx.lineTo(cx + Math.sin(ang) * len, cy - Math.cos(ang) * len);
+      ctx.stroke();
+    }
+    hand((hr + min / 60) * Math.PI / 6, R * 0.46, R * 0.075, '#2e2517');
+    hand((min + sec / 60) * Math.PI / 30, R * 0.66, R * 0.055, '#2e2517');
+    /* 秒针：每秒跳一格，跳后小幅回摆 */
+    var secJitter = sinceTick < 0.12 ? -0.06 * Math.sin(sinceTick / 0.12 * Math.PI) : 0;
+    hand((sec + secJitter) * Math.PI / 30, R * 0.74, 1.6, '#a8442e');
+    ctx.fillStyle = '#a8442e';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.05, 0, 6.29);
+    ctx.fill();
+    ctx.fillStyle = '#efe8d8';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 0.02, 0, 6.29);
+    ctx.fill();
+
+    /* 摆锤：钟壳下方的窗 */
+    var winY = cy + R * 1.28;
+    var winH = H * 0.20;
+    ctx.fillStyle = '#171f2e';
+    ctx.fillRect(cx - R * 0.42, winY - winH * 0.42, R * 0.84, winH);
+    ctx.strokeStyle = '#3a2b1e';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(cx - R * 0.42, winY - winH * 0.42, R * 0.84, winH);
+    /* 摆杆与铜锤：与秒针同频（2 秒往复，跳秒时刻微顿） */
+    var swing = Math.sin(now / 1000 * Math.PI) * 0.16;
+    if (sinceTick < 0.1) swing *= 0.55;
+    var px = cx + Math.sin(swing) * winH * 0.72;
+    var py = winY + Math.cos(swing) * winH * 0.72 - winH * 0.42;
+    ctx.strokeStyle = '#c8a86a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, winY - winH * 0.42);
+    ctx.lineTo(px, py);
+    ctx.stroke();
+    var bob = ctx.createRadialGradient(px - 3, py, 1, px, py, 12);
+    bob.addColorStop(0, '#f0d79a');
+    bob.addColorStop(1, '#a8803f');
+    ctx.fillStyle = bob;
+    ctx.beginPath();
+    ctx.arc(px, py, 11, 0, 6.29);
+    ctx.fill();
+
+    /* 玻璃反光 */
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(cx - R * 0.34, cy - R * 0.34, R * 0.5, R * 0.24, -0.7, 0, 6.29);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function frame() {
+    draw(Date.now());
+    requestAnimationFrame(frame);
+  }
+  /* 后台 rAF 停摆兜底：失联时至少每秒重画（跳秒由墙钟保证） */
+  setInterval(function () { draw(Date.now()); }, 1000);
+
+  window.addEventListener('resize', function () { resize(); draw(Date.now()); });
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

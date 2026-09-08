@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜节目单</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .guide {
+    margin-top: clamp(20px, 5vw, 28px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(16px, 4vw, 26px);
+  }
+  .g-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 10px;
+    margin-bottom: 6px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .g-head .t { color: var(--gold); font-size: 14px; letter-spacing: 0.18em; }
+  .g-head .live {
+    color: var(--ink-strong);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+  }
+  .g-head .live i {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #e05a3f;
+    margin-right: 6px;
+    vertical-align: 1px;
+  }
+  .row {
+    display: flex;
+    gap: 14px;
+    padding: 11px 4px;
+    border-radius: 8px;
+    opacity: 0.38;
+    transition: opacity 0.6s ease, background 0.4s ease;
+  }
+  .row .time {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-dim);
+    font-size: 13.5px;
+    min-width: 52px;
+    text-align: right;
+    padding-top: 2px;
+  }
+  .row .what .name { color: var(--ink); font-size: 15px; }
+  .row .what .desc { color: var(--ink-dim); font-size: 13.5px; margin-top: 1px; }
+  .row.now {
+    opacity: 1;
+    background: rgba(242, 199, 110, 0.07);
+    outline: 1px solid rgba(242, 199, 110, 0.25);
+  }
+  .row.now .time { color: var(--gold); }
+  .row.now .what .name { color: var(--ink-strong); }
+  .row.now .what .name::after {
+    content: '正在播';
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 11px;
+    color: var(--bg-0);
+    background: var(--gold);
+    border-radius: 4px;
+    padding: 0 6px;
+    vertical-align: 2px;
+    letter-spacing: 0.1em;
+  }
+  .row.past { opacity: 0.22; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜节目单</h1>
+  <p class="sub">今晚的电视还是老样子。<em>你睡你的，它播它的。</em></p>
+
+  <div class="guide">
+    <div class="g-head">
+      <span class="t">今夜 · 频道 0</span>
+      <span class="live"><i></i><span id="nowTime">--:--</span></span>
+    </div>
+    <div id="list"></div>
+  </div>
+
+  <p class="hint">红点亮着的那个就是现在。看到雪花屏就快天亮了——那是电视在说晚安。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  /* 每行 start = 起始小时（跨夜：23 起到次日 6） */
+  var SHOWS = [
+    { h: 23, m: 0, name: '开台 · 今晚的电视', desc: '还是老样子，它不会为了你睡不着换台。' },
+    { h: 23, m: 30, name: '深夜新闻', desc: '其实没什么新闻，主播也在熬。' },
+    { h: 0, m: 0, name: '午夜剧场', desc: '一部看过八遍的老片，台词你都能接上。' },
+    { h: 1, m: 0, name: '购物频道', desc: '卖一口锅。主持人的声音越来越小，像在哄你。' },
+    { h: 2, m: 0, name: '夜间气象', desc: '明天多云，适合把心事拿出来晒一晒。' },
+    { h: 3, m: 0, name: '测试卡', desc: '彩色的，配着蜂鸣声——深夜里你其实听不见。' },
+    { h: 4, m: 0, name: '雪花屏', desc: '真正的节目开始了。每一个雪花都不一样。' },
+    { h: 5, m: 30, name: '晨曲', desc: '窗外第一批窗户亮了，夜班的电视开始打哈欠。' },
+    { h: 6, m: 0, name: '开台曲 · 交班', desc: '把夜还给别人，把早晨交给你。' }
+  ];
+
+  var list = document.getElementById('list');
+  var nowTime = document.getElementById('nowTime');
+  var rows = [];
+
+  SHOWS.forEach(function (s) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    var time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = (s.h < 10 ? '0' : '') + s.h + ':' + (s.m < 10 ? '0' : '') + s.m;
+    var what = document.createElement('div');
+    what.className = 'what';
+    var name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.name;
+    var desc = document.createElement('div');
+    desc.className = 'desc';
+    desc.textContent = s.desc;
+    what.appendChild(name);
+    what.appendChild(desc);
+    row.appendChild(time);
+    row.appendChild(what);
+    list.appendChild(row);
+    rows.push({ el: row, start: s.h * 60 + s.m });
+  });
+
+  function tick() {
+    var d = new Date();
+    var cur = d.getHours() * 60 + d.getMinutes();
+    nowTime.textContent = (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' +
+      (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+
+    /* 夜间窗口：23:00（1380）起跨零点到 06:00（360）止 */
+    var night = cur >= 1380 || cur < 360;
+    var idx = -1;
+    if (night) {
+      if (cur >= 1380) {
+        /* 零点前：只可能正播 23:00 / 23:30 两档 */
+        idx = cur >= 1410 ? 1 : 0;
+      } else {
+        for (var i = 2; i < rows.length; i++) {
+          if (rows[i].start <= cur) idx = i;
+        }
+      }
+    }
+    rows.forEach(function (r, i) {
+      r.el.classList.remove('now', 'past');
+      if (!night) { r.el.classList.add('past'); return; }
+      if (i === idx) r.el.classList.add('now');
+      else if (idx >= 0 && i < idx) r.el.classList.add('past');
+    });
+  }
+  setInterval(tick, 5000);
+  tick();
+})();
+</script>
+</body>
+</html>

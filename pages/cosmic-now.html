@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>此刻，宇宙里</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .report {
+    margin-top: clamp(20px, 5vw, 30px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(16, 24, 40, 0.6);
+    padding: clamp(18px, 4vw, 28px);
+  }
+  .item { margin-top: 16px; }
+  .item:first-child { margin-top: 0; }
+  .item .no {
+    display: inline-block;
+    color: var(--gold);
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    margin-bottom: 2px;
+  }
+  .item .txt { color: var(--ink-strong); font-size: 15.5px; }
+  .item .txt b { color: var(--ice); font-weight: 600; }
+
+  .meter {
+    margin-top: clamp(20px, 5vw, 28px);
+    text-align: center;
+  }
+  .meter .label { color: var(--ink-dim); font-size: 14px; }
+  .meter .value {
+    margin-top: 6px;
+    color: var(--gold);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(24px, 7vw, 34px);
+    letter-spacing: 0.03em;
+  }
+  .meter .value .u { font-size: 14px; color: var(--ink-dim); margin-left: 4px; }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>此刻，宇宙里</h1>
+  <p class="sub">深夜的天文台不打烊。下面每一句话，<em>都正在你头顶发生</em>。</p>
+
+  <div class="report">
+    <div class="item"><span class="no">一 · 太阳</span><div class="txt">太阳的光跑了 <b>8 分 19 秒</b>才落在你窗台上。你从来见不到「现在」的太阳，只见到 8 分钟前的它。</div></div>
+    <div class="item"><span class="no">二 · 月亮</span><div class="txt">月亮离你约 <b>38.4 万公里</b>，它的样子是 <b>1.28 秒</b>前的。你抬头时，它已经先走了 1 秒多。</div></div>
+    <div class="item"><span class="no">三 · 比邻星</span><div class="txt">今晚你看到的那颗最近的恒星，光走了 <b>4.24 年</b>才到。它出发时，你还没上小学。</div></div>
+    <div class="item"><span class="no">四 · 仙女座星系</span><div class="txt">晴夜勉强能看到的仙女座，光跑了 <b>254 万年</b>。它出发时，地球上第一堆篝火还没被点燃。</div></div>
+    <div class="item"><span class="no">五 · 月亮在悄悄走</span><div class="txt">月亮每年离地球远 <b>3.8 厘米</b>——和你指甲生长的速度差不多。告别进行得很慢，慢到不必伤感。</div></div>
+  </div>
+
+  <div class="meter">
+    <div class="label">与此同时，你正坐着地球绕太阳飞行。自你打开这一页：</div>
+    <div class="value"><span id="km">0</span><span class="u">km</span></div>
+  </div>
+
+  <p class="hint">速度 29.78 公里/秒，全程免票，无座，也不提供安全带。宇宙不打烊，你不用急。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  /* 地球公转平均速率 29.78 km/s；用墙钟推算，interval 只负责刷新显示 */
+  var SPEED = 29.78; // km/s
+  var T0 = Date.now();
+  var kmEl = document.getElementById('km');
+  var last = -1;
+
+  function tick() {
+    var km = Math.floor((Date.now() - T0) / 1000 * SPEED);
+    if (km !== last) {
+      last = km;
+      kmEl.textContent = km.toLocaleString('en-US');
+    }
+  }
+  setInterval(tick, 200);
+  tick();
+})();
+</script>
+</body>
+</html>

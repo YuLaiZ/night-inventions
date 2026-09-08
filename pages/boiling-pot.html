@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一壶水开</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stage {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .stage canvas { display: block; width: 100%; }
+
+  .actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  button.act {
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 30px;
+    cursor: pointer;
+    color: var(--bg-0);
+    background: var(--gold);
+  }
+  button.act.ghostBtn {
+    color: var(--ink);
+    background: rgba(16, 24, 40, 0.8);
+    border: 1px solid var(--line);
+  }
+  button.act:hover { filter: brightness(1.08); }
+  button.act:active { transform: scale(0.97); }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>一壶水开</h1>
+  <p class="sub">水没开之前，每一秒都是等的。<em>开了之后，你反而舍得离开它了。</em></p>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="actions">
+    <button class="act" id="fireBtn" type="button">开火</button>
+    <button class="act ghostBtn" id="offBtn" type="button">关火</button>
+  </div>
+
+  <p class="hint" id="hint">冷水一壶。开火之后别走开——水开的声音，是深夜里最诚实的一句「快了」。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+  var fireBtn = document.getElementById('fireBtn');
+  var offBtn = document.getElementById('offBtn');
+  var hint = document.getElementById('hint');
+
+  var W = 0, H = 0;
+  var heat = 0;            /* 0..1 火候（开火后增长） */
+  var bubbles = [];
+  var steam = [];
+  var lastFrame = Date.now();
+  var boiledOnce = false;
+
+  var KETTLE = {};         /* 壶几何缓存 */
+
+  function resize() {
+    var w = stage.clientWidth;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.72)));
+    cv.width = w;
+    cv.height = h;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    KETTLE = { cx: W * 0.5, cy: H * 0.60, rw: W * 0.21, rh: H * 0.20 };
+  }
+
+  function waterTop() { return KETTLE.cy - KETTLE.rh * 0.30; }
+  function waterBottom() { return KETTLE.cy + KETTLE.rh * 0.78; }
+
+  function step(dt) {
+    if (heat > 0) heat = Math.min(1, heat + dt / 38);
+    var lvl = heat;
+    /* 气泡：火候越大越多越大，从壶底升起 */
+    var rate = 3 + lvl * 26;
+    if (Math.random() < dt * rate) {
+      bubbles.push({
+        x: KETTLE.cx + (Math.random() - 0.5) * KETTLE.rw * 1.2,
+        y: waterBottom() - Math.random() * 8,
+        v: 18 + Math.random() * 22 + lvl * 26,
+        r: 0.8 + Math.random() * (1 + lvl * 2.6)
+      });
+    }
+    for (var i = bubbles.length - 1; i >= 0; i--) {
+      var b = bubbles[i];
+      b.y -= b.v * dt;
+      b.x += Math.sin(b.y / 5) * 4 * dt;
+      if (b.y < waterTop()) { bubbles.splice(i, 1); continue; }
+    }
+    /* 蒸汽：接近沸腾才冒 */
+    if (lvl > 0.62 && Math.random() < dt * (lvl * 14)) {
+      steam.push({
+        x: KETTLE.cx + (Math.random() - 0.5) * KETTLE.rw * 0.5,
+        y: waterTop() - 6,
+        vy: 20 + Math.random() * 14,
+        r: 3 + Math.random() * 3,
+        a: 0.20 + Math.random() * 0.10
+      });
+    }
+    for (var s = steam.length - 1; s >= 0; s--) {
+      var sp = steam[s];
+      sp.y -= sp.vy * dt;
+      sp.x += Math.sin(sp.y / 10) * 9 * dt;
+      sp.r += 3.4 * dt;
+      sp.a -= 0.06 * dt;
+      if (sp.a <= 0) steam.splice(s, 1);
+    }
+  }
+
+  function draw(now) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0a0f18');
+    g.addColorStop(1, '#121826');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    var k = KETTLE;
+    /* 炉架 */
+    ctx.strokeStyle = 'rgba(156, 200, 255, 0.18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(k.cx - k.rw * 0.9, k.cy + k.rh * 0.95);
+    ctx.lineTo(k.cx + k.rw * 0.9, k.cy + k.rh * 0.95);
+    ctx.stroke();
+
+    /* 火苗（heat>0） */
+    if (heat > 0.02) {
+      var fh = heat * k.rh * 0.34;
+      for (var f = -2; f <= 2; f++) {
+        var fx = k.cx + f * k.rw * 0.30;
+        var sway = Math.sin(now / 70 + f * 2) * 3;
+        var fg = ctx.createLinearGradient(fx, k.cy + k.rh * 0.92, fx, k.cy + k.rh * 0.92 - fh);
+        fg.addColorStop(0, 'rgba(255, 140, 60, 0.85)');
+        fg.addColorStop(1, 'rgba(255, 210, 120, 0)');
+        ctx.fillStyle = fg;
+        ctx.beginPath();
+        ctx.moveTo(fx - 7, k.cy + k.rh * 0.92);
+        ctx.quadraticCurveTo(fx + sway, k.cy + k.rh * 0.92 - fh * 1.4, fx + 7, k.cy + k.rh * 0.92);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    /* 壶身 */
+    ctx.fillStyle = '#39404e';
+    ctx.beginPath();
+    ctx.ellipse(k.cx, k.cy, k.rw, k.rh, 0, 0, 6.29);
+    ctx.fill();
+    /* 壶口 */
+    ctx.fillStyle = '#11151f';
+    ctx.beginPath();
+    ctx.ellipse(k.cx, k.cy - k.rh * 0.86, k.rw * 0.42, k.rh * 0.16, 0, 0, 6.29);
+    ctx.fill();
+    /* 壶嘴 */
+    ctx.strokeStyle = '#39404e';
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(k.cx - k.rw * 0.82, k.cy - k.rh * 0.1);
+    ctx.quadraticCurveTo(k.cx - k.rw * 1.25, k.cy - k.rh * 0.4, k.cx - k.rw * 1.05, k.cy - k.rh * 0.72);
+    ctx.stroke();
+    /* 把手 */
+    ctx.strokeStyle = '#2b303c';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(k.cx + k.rw * 0.95, k.cy - k.rh * 0.1, k.rh * 0.34, -1.3, 1.3);
+    ctx.stroke();
+
+    /* 水面与水（透过壶口可见的水色） */
+    ctx.fillStyle = heat > 0.02 ? 'rgba(90, 130, 170, 0.5)' : 'rgba(70, 100, 135, 0.5)';
+    ctx.beginPath();
+    ctx.ellipse(k.cx, k.cy - k.rh * 0.86, k.rw * 0.40, k.rh * 0.14, 0, 0, 6.29);
+    ctx.fill();
+
+    /* 气泡（画在壶口水面上下） */
+    ctx.strokeStyle = 'rgba(214, 232, 250, 0.65)';
+    ctx.lineWidth = 1;
+    for (var i = 0; i < bubbles.length; i++) {
+      var b = bubbles[i];
+      ctx.globalAlpha = Math.min(1, (b.y - waterTop()) / 30);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, 6.29);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    /* 蒸汽 */
+    for (var s = 0; s < steam.length; s++) {
+      var sp = steam[s];
+      ctx.globalAlpha = sp.a;
+      ctx.fillStyle = '#d5deec';
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.r, 0, 6.29);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    /* 温度读数 */
+    ctx.fillStyle = 'rgba(242, 199, 110, 0.85)';
+    ctx.font = Math.round(W * 0.045) + 'px ' + getComputedStyle(document.body).fontFamily;
+    ctx.textAlign = 'center';
+    var temp = Math.round(18 + heat * 82);
+    ctx.fillText(temp + '°C', W * 0.5, H * 0.14);
+    if (heat >= 1) {
+      ctx.fillStyle = 'rgba(242, 199, 110, 0.95)';
+      ctx.fillText('开了。冲什么都行。', W * 0.5, H * 0.20);
+    }
+  }
+
+  function loop() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    step(dt);
+    draw(now);
+    setTimeout(loop, 60);
+  }
+
+  fireBtn.addEventListener('click', function () {
+    heat = Math.max(0.04, heat);
+    hint.textContent = '火苗舔着壶底。前半段最熬人——水跟人一样，开之前都憋着。';
+  });
+  offBtn.addEventListener('click', function () {
+    heat = 0;
+    hint.textContent = '关了火，气泡会慢慢安静下来。想喝的时候再点。';
+  });
+
+  window.addEventListener('resize', function () { resize(); });
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>

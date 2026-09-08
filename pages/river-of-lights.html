@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜车河</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .scene {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .scene canvas { display: block; width: 100%; }
+  .scene .trail { position: absolute; inset: 0; }
+  .scene .tip {
+    position: absolute;
+    left: 0; right: 0; bottom: 10px;
+    text-align: center;
+    color: rgba(199, 208, 226, 0.55);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    pointer-events: none;
+  }
+
+  .legend {
+    margin-top: 14px;
+    display: flex;
+    justify-content: center;
+    gap: 22px;
+    font-size: 13.5px;
+    color: var(--ink-dim);
+  }
+  .legend i {
+    display: inline-block;
+    width: 22px; height: 3px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-right: 7px;
+  }
+  .legend .go i { background: linear-gradient(90deg, rgba(255,255,255,0.2), #ffffff); }
+  .legend .home i { background: linear-gradient(90deg, rgba(255,90,70,0.2), #ff5a46); }
+
+  .hint {
+    margin-top: 12px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>深夜车河</h1>
+  <p class="sub">长曝光里，高架是一条发光的河。<em>白灯是出发，红灯是回家。</em>深夜没有一辆车按喇叭。</p>
+
+  <div class="scene" id="scene">
+    <canvas id="base"></canvas>
+    <canvas class="trail" id="trail"></canvas>
+    <div class="tip">想加一辆车，就点一下桥面</div>
+  </div>
+
+  <div class="legend">
+    <span class="go"><i></i>出发 · 车头灯</span>
+    <span class="home"><i></i>回家 · 尾灯</span>
+  </div>
+
+  <p class="hint">曝光从不落幕：每一辆车的光都会在夜里多留一小会儿，才肯淡掉。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var base = document.getElementById('base');
+  var trail = document.getElementById('trail');
+  var bctx = base.getContext('2d');
+  var tctx = trail.getContext('2d');
+  var sceneEl = document.getElementById('scene');
+  var W = 0, H = 0, DPR = 1;
+
+  /* 两条对向车道：上车道向右（车头白灯），下车道向左（尾灯红） */
+  var laneTop = null, laneBot = null;
+  var cars = [];
+  var lastFrame = Date.now();
+
+  function quad(p0, p1, p2, t) {
+    var u = 1 - t;
+    return {
+      x: u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x,
+      y: u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y
+    };
+  }
+
+  function resize() {
+    var w = sceneEl.clientWidth;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.72)));
+    DPR = window.devicePixelRatio || 1;
+    [base, trail].forEach(function (c) {
+      c.width = w * DPR;
+      c.height = h * DPR;
+      c.style.height = h + 'px';
+    });
+    W = w; H = h;
+    bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    drawBase();
+    /* 车道曲线随宽高重算（保持在桥面带内）；旧车清空重建 */
+    laneTop = { p0: { x: -30, y: H * 0.68 }, p1: { x: W * 0.5, y: H * 0.55 }, p2: { x: W + 30, y: H * 0.43 } };
+    laneBot = { p0: { x: -30, y: H * 0.75 }, p1: { x: W * 0.5, y: H * 0.615 }, p2: { x: W + 30, y: H * 0.49 } };
+    cars.length = 0;
+    for (var i = 0; i < 7; i++) spawn(Math.random());
+  }
+
+  function drawBase() {
+    var g = bctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#060912');
+    g.addColorStop(0.6, '#0d1526');
+    g.addColorStop(1, '#0a0f1d');
+    bctx.fillStyle = g;
+    bctx.fillRect(0, 0, W, H);
+
+    /* 星与月 */
+    bctx.fillStyle = '#cfe0ff';
+    for (var s = 0; s < 22; s++) {
+      bctx.globalAlpha = 0.25 + Math.random() * 0.35;
+      bctx.fillRect(Math.random() * W, Math.random() * H * 0.32, 1.1, 1.1);
+    }
+    bctx.globalAlpha = 0.9;
+    bctx.fillStyle = '#e8e2c9';
+    bctx.beginPath();
+    bctx.arc(W * 0.86, H * 0.13, 11, 0, 6.29);
+    bctx.fill();
+    bctx.fillStyle = '#0b1120';
+    bctx.beginPath();
+    bctx.arc(W * 0.86 - 5, H * 0.13 - 3.5, 10, 0, 6.29);
+    bctx.fill();
+    bctx.globalAlpha = 1;
+
+    /* 远处楼群剪影 */
+    var x = -4;
+    while (x < W + 4) {
+      var bw = 20 + Math.random() * 38;
+      var bh = 24 + Math.random() * H * 0.16;
+      bctx.fillStyle = '#111a2e';
+      bctx.fillRect(x, H * 0.55 - bh, bw, bh + 4);
+      bctx.fillStyle = 'rgba(242, 199, 110, 0.42)';
+      var nw = Math.floor(Math.random() * 4);
+      for (var k = 0; k < nw; k++)
+        bctx.fillRect(x + 3 + Math.random() * (bw - 7), H * 0.55 - bh + 4 + Math.random() * (bh - 8), 3, 4);
+      x += bw + 2;
+    }
+
+    /* 桥面带（车道画在带内），下缘一道护栏细线 */
+    bctx.fillStyle = '#15223a';
+    bctx.beginPath();
+    bctx.moveTo(-20, H * 0.70);
+    bctx.quadraticCurveTo(W * 0.5, H * 0.50, W + 20, H * 0.42);
+    bctx.lineTo(W + 20, H * 0.47);
+    bctx.quadraticCurveTo(W * 0.5, H * 0.55, -20, H * 0.75);
+    bctx.closePath();
+    bctx.fill();
+    bctx.strokeStyle = 'rgba(156, 200, 255, 0.12)';
+    bctx.lineWidth = 1;
+    bctx.beginPath();
+    bctx.moveTo(-20, H * 0.705);
+    bctx.quadraticCurveTo(W * 0.5, H * 0.505, W + 20, H * 0.425);
+    bctx.stroke();
+  }
+
+  function spawn(t) {
+    var top = Math.random() < 0.5;
+    cars.push({
+      lane: top ? laneTop : laneBot,
+      dir: top ? 1 : -1,
+      t: t === undefined ? (top ? -0.02 : 1.02) : t,
+      speed: (top ? 0.055 : 0.045) + Math.random() * 0.02,
+      tail: 0.05 + Math.random() * 0.04
+    });
+  }
+
+  function step(dt) {
+    for (var i = cars.length - 1; i >= 0; i--) {
+      var c = cars[i];
+      c.t += c.speed * dt * c.dir;
+      if (c.t > 1.08 || c.t < -0.08) cars.splice(i, 1);
+    }
+    if (cars.length < 9 && Math.random() < 0.5) spawn();
+  }
+
+  function drawTrail(dt) {
+    /* 长曝光：极淡覆盖让灯迹拖出长长的河（车道线在 base 层，不在此重画） */
+    tctx.fillStyle = 'rgba(10, 15, 29, 0.035)';
+    tctx.fillRect(0, 0, W, H);
+
+    for (var i = 0; i < cars.length; i++) {
+      var c = cars[i];
+      var head = quad(c.lane.p0, c.lane.p1, c.lane.p2, c.t);
+      var back = quad(c.lane.p0, c.lane.p1, c.lane.p2, c.t - c.tail * c.dir);
+      var back2 = quad(c.lane.p0, c.lane.p1, c.lane.p2, c.t - 2.1 * c.tail * c.dir);
+      var white = c.dir === 1;
+      /* 长曝光光迹：三段渐亮 */
+      tctx.lineCap = 'round';
+      tctx.lineWidth = 1.2;
+      tctx.strokeStyle = white ? 'rgba(210, 228, 255, 0.16)' : 'rgba(255, 90, 70, 0.15)';
+      tctx.beginPath(); tctx.moveTo(back2.x, back2.y); tctx.lineTo(back.x, back.y); tctx.stroke();
+      tctx.lineWidth = 2;
+      tctx.strokeStyle = white ? 'rgba(210, 228, 255, 0.4)' : 'rgba(255, 90, 70, 0.38)';
+      tctx.beginPath(); tctx.moveTo(back.x, back.y); tctx.lineTo(head.x, head.y); tctx.stroke();
+      /* 亮头 */
+      tctx.fillStyle = white ? '#ffffff' : '#ff6a52';
+      tctx.beginPath();
+      tctx.arc(head.x, head.y, 1.8, 0, 6.29);
+      tctx.fill();
+    }
+  }
+
+  function frame() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    step(dt);
+    drawTrail(dt);
+    requestAnimationFrame(frame);
+  }
+  /* 后台 rAF 停摆兜底：主循环失联时按墙钟补步 */
+  setInterval(function () {
+    var now = Date.now();
+    if (now - lastFrame > 400) {
+      step(Math.min(1, (now - lastFrame) / 1000));
+      lastFrame = now;
+      drawTrail(0.05);
+    }
+  }, 600);
+
+  sceneEl.addEventListener('pointerdown', function (ev) {
+    var rect = sceneEl.getBoundingClientRect();
+    var y = ev.clientY - rect.top;
+    /* 点靠近哪条车道，就往那条道加车 */
+    spawn(y < H * 0.56 ? 0.02 : 0.98);
+  });
+
+  window.addEventListener('resize', function () { resize(); });
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

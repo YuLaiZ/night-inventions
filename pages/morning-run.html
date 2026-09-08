@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晨跑</title>
+<style>
+  :root {
+    --bg-0: #0a0d17;
+    --bg-1: #101828;
+    --ink: #c7d0e2;
+    --ink-strong: #edf1fa;
+    --ink-dim: #8b96ad;
+    --gold: #f2c76e;
+    --ice: #9cc8ff;
+    --line: rgba(156, 200, 255, 0.14);
+    --sans: system-ui, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%) fixed;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(20px, 5vw, 40px) clamp(16px, 4vw, 28px) 40px;
+  }
+  .back-home {
+    display: inline-block;
+    color: var(--ink-dim);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    margin-bottom: clamp(18px, 4vw, 30px);
+  }
+  .back-home:hover { color: var(--ice); }
+  h1 {
+    color: var(--ink-strong);
+    font-size: clamp(26px, 6vw, 34px);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-align: center;
+  }
+  .sub { margin-top: 8px; color: var(--ink-dim); font-size: 15px; text-align: center; }
+  .sub em { font-style: normal; color: var(--gold); }
+
+  .stage {
+    position: relative;
+    margin-top: clamp(18px, 4vw, 26px);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .stage canvas { display: block; width: 100%; }
+  .stage .meter {
+    position: absolute;
+    top: 12px; right: 14px;
+    color: rgba(220, 230, 245, 0.7);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13.5px;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+  }
+
+  .hint {
+    margin-top: 14px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  footer { margin-top: clamp(32px, 6vw, 44px); }
+  .sig { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.04em; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back-home" href="../">← 陈列馆</a>
+
+  <h1>晨跑</h1>
+  <p class="sub">六点的河边，跑者只有一个。<em>太阳还没上班，他先到了。</em></p>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="meter" id="meter">0 m</div>
+  </div>
+
+  <p class="hint">点一下，配速提一档——最多提到冲刺。风会替你数喘气。</p>
+
+  <footer>
+    <p class="sig">夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ · <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener" style="color:inherit">GitHub 源码</a></p>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict';
+
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+  var meter = document.getElementById('meter');
+  var W = 0, H = 0;
+
+  var SPEEDS = [2.2, 3.0, 4.0, 5.4];
+  var speedIdx = 0;
+  var groundY = 0;
+  var scroll = 0;          /* 世界滚动（跑者原地跑） */
+  var cycle = 0;           /* 跑步相位 */
+  var lastFrame = Date.now();
+  var trees = [];
+
+  function resize() {
+    var w = stage.clientWidth;
+    var h = Math.round(Math.min(400, Math.max(300, w * 0.70)));
+    cv.width = w;
+    cv.height = h;
+    cv.style.height = h + 'px';
+    W = w; H = h;
+    groundY = H * 0.74;
+    plant();
+  }
+
+  function plant() {
+    trees = [];
+    for (var i = 0; i < 10; i++) {
+      trees.push({ x: Math.random() * W * 2, s: 0.7 + Math.random() * 0.5 });
+    }
+  }
+
+  function drawRunner(x, y, h, phase) {
+    /* 跑者剪影：躯干前倾+四肢摆动 */
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#131a28';
+    ctx.strokeStyle = '#131a28';
+    ctx.lineWidth = h * 0.085;
+    ctx.lineCap = 'round';
+    var headR = h * 0.10;
+    var lean = h * 0.06;
+    /* 头 */
+    ctx.beginPath();
+    ctx.arc(lean + headR * 0.2, -h + headR, headR, 0, 6.29);
+    ctx.fill();
+    /* 躯干（前倾） */
+    var shX = lean, shY = -h + headR * 2.2;
+    var hipX = lean * 0.3, hipY = -h * 0.46;
+    ctx.lineWidth = h * 0.10;
+    ctx.beginPath();
+    ctx.moveTo(shX, shY);
+    ctx.lineTo(hipX, hipY);
+    ctx.stroke();
+    /* 手臂：双摆反相 */
+    var armA = Math.sin(phase) * 0.9;
+    ctx.lineWidth = h * 0.06;
+    ctx.beginPath();
+    ctx.moveTo(shX, shY);
+    ctx.lineTo(shX + Math.cos(armA) * h * 0.16, shY + Math.sin(armA) * h * 0.16 + h * 0.10);
+    ctx.moveTo(shX, shY);
+    ctx.lineTo(shX - Math.cos(armA) * h * 0.16, shY - Math.sin(armA) * h * 0.16 + h * 0.10);
+    ctx.stroke();
+    /* 腿：跑动循环（提膝-前迈-后蹬） */
+    var legA = Math.sin(phase) * 0.75;
+    var legB = Math.sin(phase + Math.PI) * 0.75;
+    ctx.lineWidth = h * 0.075;
+    ctx.beginPath();
+    ctx.moveTo(hipX, hipY);
+    ctx.lineTo(hipX + Math.sin(legA) * h * 0.20, hipY + Math.cos(legA) * h * 0.22);
+    ctx.lineTo(hipX + Math.sin(legA) * h * 0.20 + h * 0.06, hipY + Math.cos(legA) * h * 0.22 + h * 0.24);
+    ctx.moveTo(hipX, hipY);
+    ctx.lineTo(hipX + Math.sin(legB) * h * 0.20, hipY + Math.cos(legB) * h * 0.22);
+    ctx.lineTo(hipX + Math.sin(legB) * h * 0.20 - h * 0.05, hipY + Math.cos(legB) * h * 0.22 + h * 0.20);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw(now) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#22344a');
+    g.addColorStop(0.6, '#3d5570');
+    g.addColorStop(1, '#4c6478');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    /* 淡月与初光 */
+    ctx.fillStyle = 'rgba(232, 226, 201, 0.85)';
+    ctx.beginPath();
+    ctx.arc(W * 0.78, H * 0.18, 12, 0, 6.29);
+    ctx.fill();
+    ctx.fillStyle = '#0d1420';
+    ctx.beginPath();
+    ctx.arc(W * 0.78 - 5, H * 0.18 - 4, 11, 0, 6.29);
+    ctx.fill();
+
+    /* 远树（视差：随速度滚动） */
+    ctx.fillStyle = 'rgba(26, 38, 54, 0.9)';
+    for (var i = 0; i < trees.length; i++) {
+      var t = trees[i];
+      var tx = ((t.x - scroll * 0.35) % (W * 2) + W * 2) % (W * 2) - W * 0.5;
+      var th = H * 0.16 * t.s;
+      ctx.beginPath();
+      ctx.moveTo(tx, groundY - th * 0.1);
+      ctx.lineTo(tx + th * 0.16, groundY - th);
+      ctx.lineTo(tx + th * 0.30, groundY - th * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    /* 地面 */
+    ctx.fillStyle = '#2c3a4a';
+    ctx.fillRect(0, groundY, W, H - groundY);
+    ctx.strokeStyle = 'rgba(200, 214, 230, 0.25)';
+    ctx.lineWidth = 1;
+    for (var k = 0; k < 8; k++) {
+      var lx = ((k * 90 - scroll) % (W + 90) + W + 90) % (W + 90) - 45;
+      ctx.beginPath();
+      ctx.moveTo(lx, groundY + 12);
+      ctx.lineTo(lx + 34, groundY + 12);
+      ctx.stroke();
+    }
+
+    /* 跑者 */
+    drawRunner(W * 0.42, groundY, H * 0.30, cycle);
+
+    ctx.globalAlpha = 1;
+  }
+
+  function loop() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    var spd = SPEEDS[speedIdx];
+    scroll += spd * dt * 60;
+    cycle += spd * dt * 7.2;
+    draw(now);
+    meter.textContent = Math.round(scroll) + ' m';
+    setTimeout(loop, 60);
+  }
+
+  stage.addEventListener('pointerdown', function () {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+  });
+
+  window.addEventListener('resize', function () { resize(); });
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>
