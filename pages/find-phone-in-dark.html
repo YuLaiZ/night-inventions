@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>摸黑找手机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #020304;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 1.2s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.flash .copy, body.found .copy { opacity: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .flash {
+    position: absolute; inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .flash.on { animation: flashout 1.6s ease forwards; }
+  @keyframes flashout {
+    0% { opacity: 0.95; }
+    18% { opacity: 0.9; }
+    100% { opacity: 0; }
+  }
+  .found-line {
+    position: absolute; top: 44%; left: 0; right: 0;
+    text-align: center;
+    font-size: 18px; letter-spacing: 0.26em;
+    color: #e8d9b0;
+    opacity: 0;
+    transition: opacity 1.8s ease 0.9s;
+    z-index: 4;
+    pointer-events: none;
+    padding-left: 0.26em;
+  }
+  body.found .found-line { opacity: 1; }
+  .found-sub {
+    position: absolute; top: 52%; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.16em;
+    color: #6d675c;
+    opacity: 0;
+    transition: opacity 1.8s ease 1.6s;
+    z-index: 4;
+    pointer-events: none;
+  }
+  body.found .found-sub { opacity: 0.9; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+    transition: opacity 1s ease;
+  }
+  body.found footer { opacity: 0.4; }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 6;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+<div class="flash" id="flash"></div>
+
+<div class="copy">
+  <h1>摸黑找手机</h1>
+  <p>半夜醒了，手在床头柜上摸手机。<br>指尖有一点微光，跟着它走。</p>
+</div>
+
+<div class="found-line">找到了。屏幕一亮——什么消息也没有。</div>
+<div class="found-sub">也挺好。放下，睡吧。</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var mx = -300, my = -300;         // 指尖位置
+  var phone = { x: 0, y: 0, w: 46, h: 86, ang: (Math.random() - 0.5) * 1.2 };
+  var found = false;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (!found) placePhone();
+  }
+  window.addEventListener('resize', resize);
+
+  function placePhone() {
+    var w = window.innerWidth, h = window.innerHeight;
+    phone.x = w * (0.15 + Math.random() * 0.7);
+    phone.y = h * (0.35 + Math.random() * 0.5);
+  }
+
+  window.addEventListener('pointermove', function (e) {
+    mx = e.clientX; my = e.clientY;
+  });
+
+  canvas.addEventListener('click', function (e) {
+    if (found) return;
+    var dx = e.clientX - phone.x, dy = e.clientY - phone.y;
+    var d = Math.hypot(dx, dy);
+    if (d < 70) {
+      found = true;
+      document.body.classList.add('found');
+      var f = document.getElementById('flash');
+      f.classList.add('on');
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    ctx.fillStyle = '#020304';
+    ctx.fillRect(0, 0, w, h);
+
+    if (!found) {
+      // 床头柜上的杂物剪影（微光里隐约可见的轮廓）
+      drawClutter();
+
+      // 手机：就在指尖微光里
+      ctx.save();
+      ctx.translate(phone.x, phone.y);
+      ctx.rotate(phone.ang);
+      ctx.fillStyle = '#10151d';
+      ctx.strokeStyle = '#2c3542';
+      ctx.lineWidth = 2;
+      roundRect(-phone.w / 2, -phone.h / 2, phone.w, phone.h, 7);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+
+      // 指尖微光（跟随指针，照亮半径 ~110px）
+      var g = ctx.createRadialGradient(mx, my, 0, mx, my, 115);
+      g.addColorStop(0, 'rgba(214,222,236,0.30)');
+      g.addColorStop(0.35, 'rgba(214,222,236,0.10)');
+      g.addColorStop(1, 'rgba(214,222,236,0)');
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+      // 光晕再叠一层暖边
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+
+      // 指尖小点
+      ctx.fillStyle = 'rgba(230,235,245,0.9)';
+      ctx.beginPath();
+      ctx.arc(mx, my, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 找到后：手机躺在光里
+      ctx.save();
+      ctx.translate(w / 2, h * 0.68);
+      ctx.rotate(phone.ang);
+      ctx.fillStyle = '#10151d';
+      ctx.strokeStyle = '#39434f';
+      ctx.lineWidth = 2;
+      roundRect(-60, -110, 120, 220, 16);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#0a0d12';
+      roundRect(-52, -98, 104, 196, 10);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawClutter() {
+    // 几样床头杂物：闹钟、水杯、书角（只在微光下可见——用同一张遮罩，直接画即可）
+    var w = window.innerWidth, h = window.innerHeight;
+    ctx.save();
+    ctx.translate(w * 0.82, h * 0.3);
+    ctx.rotate(0.2);
+    ctx.strokeStyle = '#39414f';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.stroke();      // 闹钟
+    ctx.beginPath(); ctx.moveTo(-14, 2); ctx.lineTo(14, 2); ctx.moveTo(0, 2); ctx.lineTo(0, -16); ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.translate(w * 0.12, h * 0.72);
+    ctx.strokeStyle = '#333b48';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(-18, -24, 36, 44);                                       // 水杯
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  resize();
+  placePhone();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

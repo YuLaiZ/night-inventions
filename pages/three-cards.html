@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今晚三选一</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  .row {
+    position: absolute; left: 50%; top: 48%;
+    transform: translate(-50%, -50%);
+    display: flex; gap: 26px;
+    z-index: 2;
+  }
+  .card {
+    width: 128px; height: 186px;
+    perspective: 800px;
+    cursor: pointer;
+  }
+  .inner {
+    position: relative; width: 100%; height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.7s cubic-bezier(0.4, 0.1, 0.3, 1);
+  }
+  .card.flip .inner { transform: rotateY(180deg); }
+  .face {
+    position: absolute; inset: 0;
+    backface-visibility: hidden;
+    border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .card-back {
+    background: linear-gradient(160deg, #1e2432, #12161f);
+    border: 2px solid #39414f;
+  }
+  .card-back::after {
+    content: "✦";
+    color: #4a5262;
+    font-size: 30px;
+  }
+  .front {
+    transform: rotateY(180deg);
+    background: linear-gradient(170deg, #f0e9d8, #d8ccae);
+    border: 2px solid #b9ac8d;
+    padding: 12px;
+  }
+  .front .sym { font-size: 40px; line-height: 1.4; }
+  .front .name {
+    font-size: 14px; color: #4a4034;
+    letter-spacing: 0.14em;
+    margin-top: 8px;
+  }
+  .verdict {
+    position: absolute; bottom: 9vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; line-height: 2;
+    letter-spacing: 0.08em;
+    color: #cfc6b2;
+    min-height: 58px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    padding: 0 30px;
+    pointer-events: none;
+  }
+  .verdict.show { opacity: 1; }
+  .reset-row {
+    position: absolute; bottom: 4.5vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 3;
+  }
+  .reset-row button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #b9b3a5;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    padding: 7px 20px;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.8s ease;
+    font-family: inherit;
+  }
+  body.picked .reset-row button { opacity: 1; pointer-events: auto; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>今晚三选一</h1>
+  <p>心里想着一件事，三张里抽一张。<br>今晚归你哪一句，牌说了算。</p>
+</div>
+
+<div class="row" id="row"></div>
+<div class="verdict" id="verdict"></div>
+<div class="reset-row"><button id="reset">再抽一次</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var DECK = [
+    { sym: '🌙', name: '月亮牌', line: '今晚的事别急着想明白。月亮也是先缺着，再慢慢圆的。' },
+    { sym: '🕯', name: '灯牌', line: '你已经是别人的灯了，虽然你自己不知道。早点亮着，早点睡。' },
+    { sym: '🌉', name: '桥牌', line: '过不去的先放着。桥又不会跑，明天它还在那儿等你。' },
+    { sym: '☕', name: '热茶牌', line: '趁热把该喝的喝了，该放的放了。凉了就不好喝了，说的是茶。' },
+    { sym: '🕰', name: '慢钟牌', line: '你的钟今晚走得慢。多出来的时间，全归你。' },
+    { sym: '📮', name: '信牌', line: '有句话正在路上。不是今晚到，但一定到。' },
+    { sym: '🐱', name: '猫牌', line: '学猫：想理谁理谁，不想理就去睡。没有谁值得你熬夜内耗。' },
+    { sym: '🌌', name: '星河牌', line: '抬头的事今晚免了，闭眼就行——星河会自己流进来。' }
+  ];
+
+  var row = document.getElementById('row');
+  var verdict = document.getElementById('verdict');
+
+  function deal() {
+    document.body.classList.remove('picked');
+    verdict.classList.remove('show');
+    row.innerHTML = '';
+    // 洗牌取 3 张
+    var pool = DECK.slice();
+    for (var i = pool.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+    var three = pool.slice(0, 3);
+    three.forEach(function (cardData) {
+      var el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML =
+        '<div class="inner">' +
+        '<div class="face card-back"></div>' +
+        '<div class="face front"><div class="sym">' + cardData.sym + '</div><div class="name">' + cardData.name + '</div></div>' +
+        '</div>';
+      el.addEventListener('click', function () {
+        if (document.body.classList.contains('picked')) return;
+        el.classList.add('flip');
+        document.body.classList.add('picked');
+        setTimeout(function () {
+          verdict.innerHTML = cardData.name + ' —— ' + cardData.line;
+          verdict.classList.add('show');
+        }, 650);
+      });
+      row.appendChild(el);
+    });
+  }
+
+  document.getElementById('reset').addEventListener('click', deal);
+  deal();
+})();
+</script>
+</body>
+</html>

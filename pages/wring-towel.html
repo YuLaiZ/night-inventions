@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拧毛巾</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.18em;
+    color: #8fb5c9;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>拧毛巾</h1>
+  <p>一条湿透的毛巾，挂在今天头上。<br>按住两端，反方向拧——水滴一颗一颗挤出来。</p>
+</div>
+
+<div class="count-line" id="countLine"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var wet = 100;            // 含水 0..100
+  var twist = 0;            // 当前拧的角度幅度 0..1
+  var drops = [];           // 水滴 {x,y,vy,r}
+  var done = false;
+
+  var TL = { x: 0, y: 0 }, TR = { x: 0, y: 0 };
+  var towelW = 300;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var w = window.innerWidth;
+    TL.x = w / 2 - towelW / 2;
+    TR.x = w / 2 + towelW / 2;
+    TL.y = TR.y = window.innerHeight * 0.45;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function updateCount() {
+    if (done) { countLine.textContent = '拧干了。今晚的水分，一滴都不多。'; return; }
+    countLine.textContent = '含水 ' + Math.round(wet) + '% · 拧出来的水滴 ' + drops.filter(function (d) { return d.counted; }).length;
+  }
+  updateCount();
+
+  // 拖拽：按住毛巾左/右半边水平拖，产生拧
+  var drag = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    if (done) return;
+    drag = { side: e.clientX < window.innerWidth / 2 ? 'L' : 'R', x0: e.clientX };
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!drag || done) return;
+    var d = e.clientX - drag.x0;
+    if (drag.side === 'L') twist = Math.max(0, Math.min(1, -d / 130));
+    else twist = Math.max(0, Math.min(1, d / 130));
+  });
+  window.addEventListener('pointerup', function () { drag = null; });
+
+  function squeeze() {
+    if (twist > 0.35 && wet > 0 && Math.random() < twist * 0.5) {
+      wet = Math.max(0, wet - 1.4);
+      drops.push({
+        x: w0() / 2 + (Math.random() - 0.5) * 60,
+        y: h0() * 0.5 + 40,
+        vy: 30,
+        r: 2 + Math.random() * 2.6,
+        counted: true
+      });
+      updateCount();
+      if (wet <= 0 && !done) { done = true; updateCount(); }
+    }
+  }
+  function w0() { return window.innerWidth; }
+  function h0() { return window.innerHeight; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // 拧紧时挤水
+    if (twist > 0.35 && wet > 0) {
+      if (Math.random() < twist * dt * 9) {
+        wet = Math.max(0, wet - 1.4);
+        drops.push({
+          x: w / 2 + (Math.random() - 0.5) * 60,
+          y: h * 0.5 + 40,
+          vy: 30,
+          r: 2 + Math.random() * 2.6,
+          counted: true
+        });
+        updateCount();
+        if (wet <= 0 && !done) { done = true; updateCount(); }
+      }
+    }
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 拧毛巾：中段因拧转而鼓起扭转
+    var cx = w / 2, cy = h * 0.45;
+    var half = towelW / 2;
+    var k = twist;
+
+    // 两端（水平段）
+    ctx.strokeStyle = '#3f7a8a';
+    ctx.lineWidth = 22;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(TL.x, TL.y);
+    ctx.lineTo(cx - half * 0.42, cy);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + half * 0.42, cy);
+    ctx.lineTo(TR.x, TR.y);
+    ctx.stroke();
+
+    // 中段拧花（三角波纹随拧幅度收紧+旋转纹理）
+    ctx.strokeStyle = '#356a79';
+    ctx.lineWidth = 20;
+    ctx.beginPath();
+    ctx.moveTo(cx - half * 0.42, cy);
+    ctx.quadraticCurveTo(cx, cy + 26 * k + 8, cx + half * 0.42, cy);
+    ctx.stroke();
+    // 拧转纹（斜线密度随 k）
+    var n2 = Math.round(4 + k * 12);
+    ctx.strokeStyle = 'rgba(20,60,70,' + (0.35 + k * 0.3) + ')';
+    ctx.lineWidth = 2.2;
+    for (var i = 0; i < n2; i++) {
+      var tx = cx - half * 0.42 + (i + 0.5) * (half * 0.84 / n2);
+      var sgn = i % 2 === 0 ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(tx, cy - 14 - sgn * 3 * k);
+      ctx.lineTo(tx + 5 * sgn, cy + 14 + sgn * 2 * k);
+      ctx.stroke();
+    }
+
+    // 水滴
+    drops.forEach(function (d) {
+      d.vy += 420 * dt;
+      d.y += d.vy * dt;
+      ctx.fillStyle = 'rgba(140,200,230,0.85)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.r * 0.7, d.r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 提示
+    ctx.fillStyle = 'rgba(140,150,165,0.5)';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('按住左端往左 · 右端往右', w / 2, h * 0.62);
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  window.__dbg=function(){return {twist:twist,wet:wet,hasDrag:!!drag};};
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

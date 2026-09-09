@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>纸飞机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 0.8s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.flying .copy { opacity: 0; }
+  .stage {
+    position: absolute; left: 50%; top: 55%;
+    transform: translate(-50%, -50%);
+    width: 320px; height: 300px;
+    z-index: 2;
+  }
+  svg { display: block; width: 100%; height: 100%; }
+  .step-btn {
+    position: absolute; bottom: 16vh; left: 50%;
+    transform: translateX(-50%);
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    padding: 11px 30px;
+    cursor: pointer;
+    font-family: inherit;
+    z-index: 3;
+    transition: opacity 0.5s ease;
+  }
+  .step-btn:hover { border-color: #4a5468; }
+  .step-btn.hide { opacity: 0; pointer-events: none; }
+  .caption {
+    position: absolute; bottom: 11vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.14em;
+    color: #6d675c;
+    min-height: 20px;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>纸飞机</h1>
+  <p>把今晚折起来。<br>折好了，就让它替你飞一段。</p>
+</div>
+
+<div class="stage">
+  <svg viewBox="0 0 320 300" id="paperSvg"></svg>
+</div>
+
+<div class="caption" id="caption"></div>
+<button class="step-btn" id="stepBtn">折一下</button>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var svg = document.getElementById('paperSvg');
+  var NS = 'http://www.w3.org/2000/svg';
+  var caption = document.getElementById('caption');
+  var btn = document.getElementById('stepBtn');
+  var step = 0;                        // 0..4（4=折好）
+
+  var STEPS = [
+    { cap: '一张纸，铺平。' },
+    { cap: '对折，压出中缝。' },
+    { cap: '两个角，往中缝折。' },
+    { cap: '再折一次，折出机头。' },
+    { cap: '两翼对齐——好了。点它，放飞。' }
+  ];
+
+  // 各步骤的纸形（点集，坐标基于 320×300，纸宽 200 居中）
+  function poly(points, fill, stroke) {
+    var el = document.createElementNS(NS, 'polygon');
+    el.setAttribute('points', points);
+    el.setAttribute('fill', fill);
+    el.setAttribute('stroke', stroke || '#8b8474');
+    el.setAttribute('stroke-width', '1.4');
+    el.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(el);
+    return el;
+  }
+  function line(x1, y1, x2, y2, dash) {
+    var el = document.createElementNS(NS, 'line');
+    el.setAttribute('x1', x1); el.setAttribute('y1', y1);
+    el.setAttribute('x2', x2); el.setAttribute('y2', y2);
+    el.setAttribute('stroke', '#8b8474');
+    el.setAttribute('stroke-width', '1.4');
+    if (dash) el.setAttribute('stroke-dasharray', '5 6');
+    svg.appendChild(el);
+    return el;
+  }
+
+  function P(id, pts) { document.getElementById(id).setAttribute('points', pts); }
+
+  function render() {
+    if (step >= 4) return;
+    // 纸形随步骤变化：全部用两个多边形（左右两半）表达折叠
+    var L = document.getElementById('left');
+    var R = document.getElementById('right');
+    var dash1 = document.getElementById('dash1');
+    var dash2 = document.getElementById('dash2');
+
+    if (step === 0) {
+      L.setAttribute('points', '60,70 260,70 60,230 60,70');
+      L.setAttribute('fill', '#e8e0cc');
+      R.setAttribute('points', '260,70 260,230 60,70 260,70');
+      R.setAttribute('fill', '#d8cfb6');
+      dash1.setAttribute('points', '60,70 260,230');
+      dash1.setAttribute('stroke', '#8b8474');
+      caption.textContent = STEPS[0].cap;
+    } else if (step === 1) {
+      L.setAttribute('points', '60,70 260,230 160,150 60,70');
+      L.setAttribute('fill', '#e8e0cc');
+      R.setAttribute('points', '60,70 260,70 160,150 60,70');
+      R.setAttribute('fill', '#f2ecda');
+      dash1.setAttribute('points', '60,70 160,150');
+      caption.textContent = STEPS[1].cap;
+    } else if (step === 2) {
+      L.setAttribute('points', '60,70 160,150 110,110 60,70');
+      L.setAttribute('fill', '#dcd3bc');
+      R.setAttribute('points', '260,70 160,150 110,110 60,70 260,70');
+      R.setAttribute('fill', '#f2ecda');
+      dash1.setAttribute('points', '60,70 210,90');
+      dash1.setAttribute('stroke', '#b0a88f');
+      caption.textContent = STEPS[2].cap;
+    } else if (step === 3) {
+      L.setAttribute('points', '60,70 260,70 110,110 60,70');
+      L.setAttribute('fill', '#e8e0cc');
+      R.setAttribute('points', '60,70 260,70 110,110 60,70');
+      R.setAttribute('fill', '#c9c0a6');
+      dash1.setAttribute('points', '60,70 235,150');
+      dash2.setAttribute('points', '160,150 235,150');
+      caption.textContent = STEPS[3].cap;
+    }
+  }
+
+  function init() {
+    // 底层元素
+    poly('', '#e8e0cc', '#8b8474').setAttribute('id', 'left');
+    poly('', '#d8cfb6', '#8b8474').setAttribute('id', 'right');
+    var d1 = line(0, 0, 0, 0, true); d1.setAttribute('id', 'dash1'); d1.setAttribute('points', '60,70 260,230');
+    var d2 = line(0, 0, 0, 0, true); d2.setAttribute('id', 'dash2'); d2.setAttribute('points', '0,0 0,0');
+    render();
+  }
+
+  // 放飞后的飞机（canvas 由 svg polygon 简化：用 svg 动画移动整个纸形组）
+  function fly() {
+    svg.innerHTML = '';
+    // 折好的飞机（朝右）
+    poly('160,150 60,110 100,150 60,190', '#e8e0cc', '#8b8474');
+    poly('160,150 100,150 120,150', '#c9c0a6', '#8b8474');
+    var g = document.createElementNS(NS, 'g');
+    g.setAttribute('id', 'plane');
+    while (svg.firstChild) g.appendChild(svg.firstChild);
+    svg.appendChild(g);
+    document.body.classList.add('flying');
+    btn.classList.add('hide');
+    caption.textContent = '去吧。别回头，风是顺的。';
+
+    var x = 160, y = 150, vx = 130, vy = -26;
+    var last = Date.now();
+    var timer = setInterval(function () {
+      var now = Date.now();
+      var dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      x += vx * dt;
+      y += vy * dt + 18 * dt;
+      vy += 14 * dt;
+      g.setAttribute('transform', 'translate(' + (x - 160) + ',' + (y - 150) + ') rotate(' + (vy * 0.25) + ' 160 150)');
+      if (x > 420 || y > 340) {
+        clearInterval(timer);
+        setTimeout(function () {
+          // 重置：再来一张
+          svg.innerHTML = '';
+          init();
+          step = 0;
+          document.body.classList.remove('flying');
+          btn.classList.remove('hide');
+          btn.textContent = '再折一张';
+        }, 900);
+      }
+    }, 33);
+  }
+
+  btn.addEventListener('click', function () {
+    if (step < 4) {
+      step++;
+      render();
+      if (step === 4) {
+        btn.textContent = '放飞';
+        caption.textContent = STEPS[4].cap;
+      }
+    } else {
+      fly();
+    }
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>

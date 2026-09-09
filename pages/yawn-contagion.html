@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会传染的哈欠</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  .face-wrap {
+    position: absolute; left: 50%; top: 54%;
+    transform: translate(-50%, -50%);
+    width: 300px; height: 300px;
+    z-index: 2;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .caption {
+    position: absolute; bottom: 8vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.2em;
+    color: #9b948a;
+    min-height: 22px;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>会传染的哈欠</h1>
+  <p>别点它。就盯着看十秒。<br>哈欠这东西，隔着屏幕也会传染。</p>
+</div>
+
+<div class="face-wrap" id="faceWrap"><canvas id="fx" width="300" height="300"></canvas></div>
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var caption = document.getElementById('caption');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = 300 * DPR;
+  canvas.height = 300 * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  // 状态：sleepy（日常犯困，周期打哈欠）/ laughing（被点笑 2.6s）
+  var mode = 'sleepy';
+  var modeUntil = 0;
+  var yawn = 0;           // 0 闭 → 1 张最大（哈欠进度）
+  var yawning = false;
+  var yawnStart = 0;
+  var nextYawn = Date.now() + 3000 + Math.random() * 4000;
+  var captions = ['哈——啊……', '撑不住了……', '眼皮好重……', '你也想打了吧。', '呼啊——'];
+  var laughCaptions = ['嘿。', '挠痒痒呢。', '一笑就不困了。', '再笑一次。'];
+
+  document.getElementById('faceWrap').addEventListener('click', function () {
+    mode = 'laughing';
+    modeUntil = Date.now() + 2600;
+    yawning = false;
+    caption.textContent = laughCaptions[Math.floor(Math.random() * laughCaptions.length)];
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+
+    if (mode === 'laughing' && now > modeUntil) {
+      mode = 'sleepy';
+      nextYawn = now + 2000 + Math.random() * 3000;
+      caption.textContent = '';
+    }
+
+    if (mode === 'sleepy') {
+      if (!yawning && now > nextYawn) {
+        yawning = true;
+        yawnStart = now;
+        caption.textContent = captions[Math.floor(Math.random() * captions.length)];
+      }
+      if (yawning) {
+        var k = (now - yawnStart) / 2100;         // 2.1 秒一个哈欠
+        yawn = k < 0.4 ? k / 0.4 : Math.max(0, 1 - (k - 0.4) / 0.6);
+        if (k >= 1) {
+          yawning = false;
+          yawn = 0;
+          nextYawn = now + 5000 + Math.random() * 6000;
+        }
+      }
+    } else {
+      yawn = Math.max(0, yawn - dt * 3);
+    }
+
+    draw(t);
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, 300, 300);
+    var cx = 150, cy = 150;
+    var laughing = mode === 'laughing';
+    var breath = 1 + Math.sin(t * 0.0011) * 0.012;           // 呼吸
+    var shrink = 1 - yawn * 0.03;                             // 打哈欠缩一下
+    var R = 108 * breath * shrink;
+
+    // 脸
+    var g = ctx.createRadialGradient(cx - 30, cy - 40, 10, cx, cy, R);
+    g.addColorStop(0, laughing ? '#f2e2b0' : '#ded5be');
+    g.addColorStop(1, laughing ? '#d8c48c' : '#b8ae94');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 嘴（先画，眼睛盖不到它）
+    var mouthOpen = laughing ? 26 : yawn * 56;
+    ctx.fillStyle = '#5a4038';
+    if (mouthOpen > 3) {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + 38, mouthOpen * 0.62 + 10, mouthOpen, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 舌头
+      if (mouthOpen > 18) {
+        ctx.fillStyle = '#c97a6a';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 38 + mouthOpen * 0.5, mouthOpen * 0.34, mouthOpen * 0.28, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (laughing) {
+      ctx.strokeStyle = '#5a4038';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(cx, cy + 30, 26, 0.25, Math.PI - 0.25);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = '#5a4038';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 16, cy + 40);
+      ctx.quadraticCurveTo(cx, cy + 43, cx + 16, cy + 40);
+      ctx.stroke();
+    }
+
+    // 眼睛
+    var eyeY = cy - 28;
+    var eyeDX = 40;
+    ctx.strokeStyle = '#4a3a32';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    if (laughing) {
+      // 笑眼：下弯的月牙
+      [[-1, eyeDX], [1, eyeDX]].forEach(function (s) {
+        ctx.beginPath();
+        ctx.arc(cx + s[1] * s[0], eyeY + 4, 13, Math.PI + 0.5, -0.5);
+        ctx.stroke();
+      });
+    } else if (yawn > 0.35) {
+      // 打哈欠：眼睛挤成线
+      ctx.lineWidth = 5;
+      [[-1, eyeDX], [1, eyeDX]].forEach(function (s) {
+        ctx.beginPath();
+        ctx.moveTo(cx + s[1] * s[0] - 13, eyeY + yawn * 5);
+        ctx.lineTo(cx + s[1] * s[0] + 13, eyeY + yawn * 5);
+        ctx.stroke();
+      });
+    } else {
+      // 困倦：半眯眼（上眼皮压着）
+      [[-1, eyeDX], [1, eyeDX]].forEach(function (s) {
+        var ex = cx + s[1] * s[0];
+        ctx.beginPath();
+        ctx.arc(ex, eyeY, 13, 0.35, Math.PI - 0.35);   // 下半圆（下眼皮）
+        ctx.stroke();
+        // 上眼皮：压到一半
+        ctx.beginPath();
+        ctx.moveTo(ex - 13, eyeY + 2);
+        ctx.quadraticCurveTo(ex, eyeY - 6, ex + 13, eyeY + 2);
+        ctx.stroke();
+      });
+    }
+
+    // 打哈欠时的「哈——」余韵：脸旁小气泡
+    if (yawning && yawn > 0.5) {
+      ctx.fillStyle = 'rgba(200,195,180,' + (0.5 * (1 - yawn) + 0.15) + ')';
+      var bx = cx + R * 0.8, by = cy - R * 0.7;
+      ctx.beginPath(); ctx.arc(bx + Math.sin(t * 0.003) * 4, by - (t % 1000) * 0.01, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 14, by - 16 - (t % 1000) * 0.014, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 25, by - 30 - (t % 1000) * 0.017, 2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

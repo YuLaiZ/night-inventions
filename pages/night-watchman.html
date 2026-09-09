@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>丑时巡更</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .hour-plate {
+    position: absolute; top: 128px; right: 30px;
+    background: linear-gradient(170deg, #2b2318, #1a140c);
+    border: 1px solid #4a3f2e;
+    border-radius: 6px;
+    padding: 10px 16px;
+    text-align: center;
+    z-index: 3;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  }
+  .hour-plate .h-name {
+    font-size: 19px; letter-spacing: 0.2em;
+    color: #e0c48a;
+  }
+  .hour-plate .h-range {
+    font-size: 10px; letter-spacing: 0.1em;
+    color: #8a7a5c;
+    margin-top: 3px;
+  }
+  .cry {
+    position: absolute; bottom: 12vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 16px; letter-spacing: 0.34em;
+    color: #d9c9a0;
+    opacity: 0;
+    transition: opacity 1.4s ease;
+    z-index: 3;
+    pointer-events: none;
+    padding-left: 0.34em;
+    text-shadow: 0 0 22px rgba(255,220,150,0.3);
+  }
+  .cry.show { opacity: 1; }
+  .hint {
+    position: absolute; bottom: 5.5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; letter-spacing: 0.2em;
+    color: #4a4f58;
+    z-index: 3;
+    pointer-events: none;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>丑时巡更</h1>
+  <p>老巷子里的打更人，按真实时辰当值。<br>点他一下，听一句此刻的更词。</p>
+</div>
+
+<div class="hour-plate">
+  <div class="h-name" id="hName"></div>
+  <div class="h-range" id="hRange"></div>
+</div>
+
+<div class="cry" id="cry"></div>
+<div class="hint">点打更人 · 敲梆子</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var cry = document.getElementById('cry');
+  var hName = document.getElementById('hName');
+  var hRange = document.getElementById('hRange');
+
+  // 十二时辰与更词（每个时辰一句此刻的叮嘱）
+  var HOURS = [
+    { name: '子时', range: '23:00 – 00:59', cry: '天干物燥——小心火烛。' },
+    { name: '丑时', range: '01:00 – 02:59', cry: '关门关窗——夜深露重。' },
+    { name: '寅时', range: '03:00 – 04:59', cry: '睡实的都别醒——天快亮了。' },
+    { name: '卯时', range: '05:00 – 06:59', cry: '早起的先热身——地上有霜。' },
+    { name: '辰时', range: '07:00 – 08:59', cry: '该上工了——今日事今日毕。' },
+    { name: '巳时', range: '09:00 – 10:59', cry: '日头爬高了——晾的被褥记得翻面。' },
+    { name: '午时', range: '11:00 – 12:59', cry: '吃过午饭眯一刻——下午不困。' },
+    { name: '未时', range: '13:00 – 14:59', cry: '日头偏西——赶路的抓紧。' },
+    { name: '申时', range: '15:00 – 16:59', cry: '起风了——收衣服喽。' },
+    { name: '酉时', range: '17:00 – 18:59', cry: '炊烟起了——家里等你吃饭。' },
+    { name: '戌时', range: '19:00 – 20:59', cry: '天黑透了——出门带灯。' },
+    { name: '亥时', range: '21:00 – 22:59', cry: '早些安置——明早还有早上的事。' }
+  ];
+
+  function currentHour() {
+    var h = new Date().getHours();   // 0-23
+    // 子时 23-0，丑 1-2，寅 3-4 …… 亥 21-22
+    var idx = Math.floor(((h + 1) % 24) / 2);
+    return HOURS[idx];
+  }
+
+  function setHourPlate() {
+    var h = currentHour();
+    hName.textContent = h.name;
+    hRange.textContent = h.range;
+  }
+  setHourPlate();
+  setInterval(setHourPlate, 30000);
+
+  var knock = 0;      // 敲梆动画 0..1 衰减
+  var cryTimer = null;
+  canvas.addEventListener('click', function (e) {
+    // 只要点在打更人附近（x ±70, y ±120 区域内）
+    var w = window.innerWidth, groundY = hGround();
+    var px = watchmanX(), py = groundY;
+    if (Math.abs(e.clientX - px) < 80 && e.clientY > py - 150 && e.clientY < py + 30) {
+      knock = 1;
+      var h = currentHour();
+      cry.textContent = h.cry;
+      cry.classList.add('show');
+      if (cryTimer) clearTimeout(cryTimer);
+      cryTimer = setTimeout(function () { cry.classList.remove('show'); }, 5000);
+    }
+  });
+
+  function hGround() { return window.innerHeight * 0.72; }
+  function watchmanX() { return window.innerWidth * 0.5; }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 打更人行走：从右往左缓慢移动，走完一屏折返
+  var wx = 1.15;      // 屏宽占比
+  var dir = -1;
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var groundY = h * 0.72;
+
+    ctx.fillStyle = '#07090f';
+    ctx.fillRect(0, 0, w, h);
+
+    // 屋檐剪影（两侧屋顶轮廓）
+    ctx.fillStyle = '#0c0f16';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, groundY - 150);
+    for (var lx = 0; lx < w * 0.3; lx += 8) {
+      ctx.lineTo(lx, groundY - 150 - Math.sin(lx * 0.05) * 14 - lx * 0.16);
+    }
+    ctx.lineTo(w * 0.3, groundY);
+    ctx.lineTo(0, groundY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(w, 0);
+    ctx.lineTo(w, groundY - 170);
+    for (var rx = w; rx > w * 0.68; rx -= 8) {
+      ctx.lineTo(rx, groundY - 170 - Math.sin(rx * 0.04 + 2) * 16 - (w - rx) * 0.18);
+    }
+    ctx.lineTo(w * 0.68, groundY);
+    ctx.lineTo(w, groundY);
+    ctx.closePath();
+    ctx.fill();
+
+    // 月亮（远角，静）
+    ctx.fillStyle = 'rgba(220,228,248,0.75)';
+    ctx.beginPath();
+    ctx.arc(w * 0.14, h * 0.18, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#07090f';
+    ctx.beginPath();
+    ctx.arc(w * 0.14 + 9, h * 0.18 - 5, 19, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 地面
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, groundY, w, h - groundY);
+    ctx.strokeStyle = 'rgba(120,130,150,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, groundY);
+    ctx.lineTo(w, groundY);
+    ctx.stroke();
+
+    // 打更人行走
+    wx += dir * dt * 0.012;
+    if (wx < 0.2) { wx = 0.2; dir = 1; }
+    if (wx > 0.8) { wx = 0.8; dir = -1; }
+    var px = wx * w;
+    var py = groundY;
+    var walk = Math.sin(t * 0.006) * 3;
+
+    // 灯笼光晕
+    var lanternX = px - 16, lanternY = py - 62 + walk;
+    var lg = ctx.createRadialGradient(lanternX, lanternY, 0, lanternX, lanternY, 110);
+    lg.addColorStop(0, 'rgba(255,196,110,0.34)');
+    lg.addColorStop(1, 'rgba(255,196,110,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(lanternX - 110, lanternY - 110, 220, 220);
+
+    // 打更人剪影
+    ctx.save();
+    ctx.translate(px, py);
+    var bob = Math.sin(t * 0.006) * 1.6;
+    ctx.strokeStyle = '#181420';
+    ctx.fillStyle = '#181420';
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    // 身体
+    ctx.beginPath(); ctx.moveTo(0, -52 + bob); ctx.lineTo(0, -20); ctx.stroke();
+    // 头
+    ctx.beginPath(); ctx.arc(0, -60 + bob, 8, 0, Math.PI * 2); ctx.fill();
+    // 斗笠
+    ctx.beginPath(); ctx.moveTo(-13, -64 + bob); ctx.lineTo(13, -64 + bob); ctx.lineTo(0, -74 + bob); ctx.closePath(); ctx.fill();
+    // 腿（走动）
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(-6 + walk, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(6 - walk, 0); ctx.stroke();
+    // 提灯的手臂+灯笼
+    ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(0, -46 + bob); ctx.lineTo(-14, -56 + bob); ctx.stroke();
+    ctx.strokeStyle = '#5a4a30';
+    ctx.beginPath(); ctx.moveTo(-14, -56 + bob); ctx.lineTo(-16, lanternY - py + bob); ctx.stroke();
+    ctx.fillStyle = '#e8b45a';
+    ctx.beginPath();
+    ctx.ellipse(-16, lanternY - py + 6 + bob, 7, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 右手梆子（敲击时闪光）
+    ctx.strokeStyle = '#181420';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(0, -46 + bob); ctx.lineTo(14, -52 + bob); ctx.stroke();
+    ctx.restore();
+
+    // 敲梆瞬间：两道弧光波纹
+    if (knock > 0) {
+      knock -= dt * 1.4;
+      var kx = px + 16, ky = py - 56;
+      ctx.strokeStyle = 'rgba(255,226,160,' + Math.max(0, knock) * 0.8 + ')';
+      ctx.lineWidth = 2;
+      for (var r2 = 1; r2 <= 3; r2++) {
+        ctx.beginPath();
+        ctx.arc(kx, ky, 8 + r2 * 12 + (1 - knock) * 14, -0.9, 0.9);
+        ctx.stroke();
+      }
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

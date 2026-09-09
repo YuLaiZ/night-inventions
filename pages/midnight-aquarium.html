@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜水族馆</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜水族馆</h1>
+  <p>凌晨的水族馆，鱼也睡不着。<br>点一下水面投点食——它们会来的。</p>
+</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  var fishes = [];        // {x,y,vx,vy,col,size,ph}
+  var foods = [];         // {x,y,vy,eaten}
+  var bubbles = [];       // {x,y,r,v,ph}
+
+  var FISH_COLS = [
+    { body: '#d98a5a', fin: '#b3663a' },
+    { body: '#7ba6c9', fin: '#5a7d9a' },
+    { body: '#c9b26a', fin: '#a08a4a' },
+    { body: '#b98cc9', fin: '#8a6499' },
+    { body: '#8fb5a0', fin: '#6a917c' }
+  ];
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function initFish() {
+    fishes = [];
+    for (var i = 0; i < 9; i++) {
+      var a = Math.random() * Math.PI * 2;
+      fishes.push({
+        x: window.innerWidth * (0.15 + Math.random() * 0.7),
+        y: window.innerHeight * (0.3 + Math.random() * 0.5),
+        vx: Math.cos(a) * 30,
+        vy: Math.sin(a) * 12,
+        size: 9 + Math.random() * 8,
+        col: FISH_COLS[i % FISH_COLS.length],
+        ph: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  // 投食
+  canvas.addEventListener('click', function (e) {
+    for (var i = 0; i < 7; i++) {
+      foods.push({
+        x: e.clientX + (Math.random() - 0.5) * 46,
+        y: e.clientY + (Math.random() - 0.5) * 14,
+        vy: 14 + Math.random() * 10,
+        ph: Math.random() * Math.PI * 2
+      });
+    }
+  });
+
+  // ── 鱼群 boids ───────────────────────────────────────
+  function step(dt, t) {
+    var w = window.innerWidth, h = window.innerHeight;
+    var top = h * 0.24, bottom = h * 0.9;
+
+    fishes.forEach(function (f) {
+      var ax = 0, ay = 0;
+
+      // 1) 邻居三规则
+      var cx = 0, cy = 0, alx = 0, aly = 0, n = 0;
+      fishes.forEach(function (o) {
+        if (o === f) return;
+        var dx = o.x - f.x, dy = o.y - f.y;
+        var d = Math.hypot(dx, dy);
+        if (d < 130) { cx += o.x; cy += o.y; alx += o.vx; aly += o.vy; n++; }
+        if (d < 52 && d > 0.01) {                                      // 分离：强
+          ax -= dx / d * (52 - d) * 7;
+          ay -= dy / d * (52 - d) * 7;
+        }
+      });
+      if (n > 0) {
+        ax += (cx / n - f.x) * 0.10;                                   // 聚合：弱
+        ay += (cy / n - f.y) * 0.10;
+        ax += (alx / n - f.vx) * 0.45;                                 // 对齐
+        ay += (aly / n - f.vy) * 0.45;
+      }
+
+      // 2) 找最近的食物
+      var best = null, bestD = 280;
+      foods.forEach(function (fd) {
+        var dx = fd.x - f.x, dy = fd.y - f.y;
+        var d = Math.hypot(dx, dy);
+        if (d < bestD) { bestD = d; best = fd; }
+      });
+      if (best) {
+        var bx = best.x - f.x, by = best.y - f.y;
+        var bd = Math.max(1, Math.hypot(bx, by));
+        ax += bx / bd * 120;
+        ay += by / bd * 120;
+        if (bd < f.size * 0.7) best.eaten = true;
+      } else {
+        // 无食巡游：向水缸中心的微弱牵引，防止贴边堆角
+        ax += (w / 2 - f.x) * 0.06;
+        ay += (h * 0.55 - f.y) * 0.06;
+      }
+
+      f.vx += ax * dt;
+      f.vy += ay * dt;
+      var maxV = best ? 95 : 42;
+      var v = Math.hypot(f.vx, f.vy);
+      if (v > maxV) { f.vx = f.vx / v * maxV; f.vy = f.vy / v * maxV; }
+      if (v < 16) { f.vx *= 1.03; f.vy *= 1.03; }
+
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+
+      // 3) 缸壁：硬钳制 + 反弹
+      var m = 44;
+      if (f.x < m) { f.x = m; f.vx = Math.abs(f.vx) * 0.7 + 8; }
+      if (f.x > w - m) { f.x = w - m; f.vx = -Math.abs(f.vx) * 0.7 - 8; }
+      if (f.y < top) { f.y = top; f.vy = Math.abs(f.vy) * 0.7 + 6; }
+      if (f.y > bottom) { f.y = bottom; f.vy = -Math.abs(f.vy) * 0.7 - 6; }
+    });
+
+    // 食物下沉 & 被吃
+    for (var i = foods.length - 1; i >= 0; i--) {
+      var fd = foods[i];
+      fd.y += fd.vy * dt;
+      fd.x += Math.sin(t * 0.002 + fd.ph) * 8 * dt;
+      if (fd.eaten || fd.y > h * 0.92) foods.splice(i, 1);
+    }
+
+    // 气泡
+    if (Math.random() < dt * 1.6) {
+      bubbles.push({
+        x: window.innerWidth * (0.1 + Math.random() * 0.8),
+        y: window.innerHeight,
+        r: 1.5 + Math.random() * 2.5,
+        v: 26 + Math.random() * 24,
+        ph: Math.random() * Math.PI * 2
+      });
+    }
+    for (var j = bubbles.length - 1; j >= 0; j--) {
+      var b = bubbles[j];
+      b.y -= b.v * dt;
+      b.x += Math.sin(t * 0.003 + b.ph) * 10 * dt;
+      if (b.y < window.innerHeight * 0.22) bubbles.splice(j, 1);
+    }
+  }
+
+  function drawFish(f, t) {
+    var dir = f.vx >= 0 ? 1 : -1;
+    var tail = Math.sin(t * 0.008 * (Math.hypot(f.vx, f.vy) / 40 + 0.6) + f.ph) * 0.5;
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.scale(dir, 1);
+    ctx.rotate(Math.atan2(f.vy, Math.abs(f.vx)) * 0.6);
+    var s = f.size;
+    // 尾
+    ctx.fillStyle = f.col.fin;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.9, 0);
+    ctx.lineTo(-s * 1.7, -s * 0.5 + tail * s * 0.5);
+    ctx.lineTo(-s * 1.7, s * 0.5 + tail * s * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    // 身体
+    ctx.fillStyle = f.col.body;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s, s * 0.52, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 背鳍
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.2, -s * 0.45);
+    ctx.quadraticCurveTo(s * 0.1, -s * 0.95, s * 0.42, -s * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    // 眼
+    ctx.fillStyle = '#101318';
+    ctx.beginPath();
+    ctx.arc(s * 0.55, -s * 0.08, s * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+    // 被灯照亮的背线
+    ctx.fillStyle = 'rgba(255,240,210,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(s * 0.1, -s * 0.2, s * 0.6, s * 0.14, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    step(dt, t);
+
+    // 水体
+    var water = ctx.createLinearGradient(0, 0, 0, h);
+    water.addColorStop(0, '#08101c');
+    water.addColorStop(0.5, '#0a1523');
+    water.addColorStop(1, '#0c1a2a');
+    ctx.fillStyle = water;
+    ctx.fillRect(0, 0, w, h);
+
+    // 水面线（微微波动的高光）
+    ctx.strokeStyle = 'rgba(150,190,220,0.14)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var sx = 0; sx <= w; sx += 12) {
+      var sy = h * 0.22 + Math.sin(sx * 0.02 + t * 0.0012) * 2.4;
+      if (sx === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+
+    // 光柱
+    var beam = ctx.createLinearGradient(w * 0.3, 0, w * 0.45, h);
+    beam.addColorStop(0, 'rgba(140,180,220,0.05)');
+    beam.addColorStop(1, 'rgba(140,180,220,0)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.3, 0);
+    ctx.lineTo(w * 0.38, 0);
+    ctx.lineTo(w * 0.52, h);
+    ctx.lineTo(w * 0.3, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // 食物
+    foods.forEach(function (fd) {
+      ctx.fillStyle = 'rgba(216,202,164,0.9)';
+      ctx.beginPath();
+      ctx.arc(fd.x, fd.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 鱼
+    fishes.forEach(function (f) { drawFish(f, t); });
+
+    // 气泡
+    bubbles.forEach(function (b) {
+      ctx.strokeStyle = 'rgba(190,220,245,0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    // 缸底
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, h * 0.92, w, h * 0.08);
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  initFish();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

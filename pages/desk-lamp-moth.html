@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜台灯</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    position: relative;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  /* 月光给黑暗留一点层次 */
+  .moonlight {
+    position: absolute; right: -60px; top: -80px;
+    width: 420px; height: 420px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(150,170,210,0.05) 0%, rgba(150,170,210,0.02) 40%, transparent 70%);
+    pointer-events: none;
+  }
+  /* 桌沿：灯就落在它上面 */
+  .desk {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 11vh;
+    background: linear-gradient(#141924, #0a0d13 70%);
+    border-top: 1px solid #232a37;
+    pointer-events: none;
+  }
+  .stage {
+    position: absolute; inset: 0;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .lamp-wrap {
+    position: relative;
+    margin-bottom: calc(11vh - 6px);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lamp-svg { display: block; width: 240px; height: auto; }
+  @media (min-width: 700px) { .lamp-svg { width: 280px; } }
+  /* 拉绳弹动 */
+  .cord-pull .cord-group { animation: cord-yank 0.38s ease-out; transform-origin: 186px 98px; }
+  @keyframes cord-yank {
+    0% { transform: rotate(0deg); }
+    35% { transform: rotate(8deg); }
+    65% { transform: rotate(-3deg); }
+    100% { transform: rotate(0deg); }
+  }
+  .moth-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 1.4s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.lit .copy h1 { color: #b3a58a; }
+  body.lit .copy p { color: #7d7668; }
+  .hint {
+    position: absolute; bottom: 4.5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.2em;
+    color: #565d6a;
+    transition: opacity 1s ease;
+    pointer-events: none;
+    z-index: 4;
+  }
+  body.lit .hint { opacity: 0.35; }
+  footer {
+    position: absolute; bottom: 14px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4a4f5a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<div class="moonlight"></div>
+<div class="desk"></div>
+
+<div class="copy">
+  <h1>深夜台灯</h1>
+  <p>凌晨的房间只留这一盏。<br>拉一下灯绳，看看谁被这团暖和叫住。</p>
+</div>
+
+<div class="stage">
+  <div class="lamp-wrap" id="lampWrap">
+    <svg class="lamp-svg" viewBox="0 0 280 260" aria-label="一盏台灯和它的拉绳">
+      <defs>
+        <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#333b4a"/>
+          <stop offset="100%" stop-color="#1d2330"/>
+        </linearGradient>
+        <linearGradient id="shadeLit" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4d4029"/>
+          <stop offset="100%" stop-color="#2f2517"/>
+        </linearGradient>
+        <linearGradient id="stem" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#39404d"/>
+          <stop offset="50%" stop-color="#5d677e"/>
+          <stop offset="100%" stop-color="#2c323d"/>
+        </linearGradient>
+      </defs>
+
+      <!-- 灯罩：顶窄下宽的锥形，罩口微露内壁 -->
+      <g id="shadeGroup">
+        <path id="shadeBody" d="M112 74 Q140 56 168 74 L190 112 Q140 126 90 112 Z"
+              fill="url(#shade)" stroke="#4a5262" stroke-width="1.5"/>
+        <path id="shadeRim" d="M90 112 Q140 126 190 112" fill="none"
+              stroke="#5d6678" stroke-width="2.5" stroke-linecap="round"/>
+        <!-- 罩内壁的暖光，亮灯时浮现 -->
+        <path id="shadeInnerGlow" d="M90 112 Q140 126 190 112 Q140 118 90 112" fill="rgba(255,196,120,0)"/>
+      </g>
+
+      <!-- 灯头与钨丝 -->
+      <g id="bulbGroup">
+        <rect x="128" y="116" width="24" height="9" rx="3" fill="#333a46"/>
+        <g id="filament" stroke="#171b22" stroke-width="1.6" fill="none" stroke-linecap="round">
+          <path d="M132 125 L132 133 Q136 138 140 133 Q144 128 148 133 L148 125"/>
+        </g>
+      </g>
+
+      <!-- 灯杆与底座 -->
+      <path d="M140 125 L140 236" stroke="url(#stem)" stroke-width="7" stroke-linecap="round"/>
+      <ellipse cx="140" cy="243" rx="52" ry="9" fill="#141924"/>
+      <ellipse cx="140" cy="240" rx="52" ry="9" fill="#232b3a" stroke="#333d4f" stroke-width="1"/>
+
+      <!-- 拉绳：从罩右缘垂下 -->
+      <g class="cord-group" id="cordGroup">
+        <path d="M186 96 Q202 122 197 150 L197 182" fill="none" stroke="#5a6373" stroke-width="1.6"/>
+        <circle cx="197" cy="188" r="5" fill="#6b7488" stroke="#48505f" stroke-width="1"/>
+      </g>
+    </svg>
+  </div>
+</div>
+
+<canvas class="moth-canvas" id="fx"></canvas>
+<div class="hint" id="hint">拉一下灯绳</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── 状态 ─────────────────────────────────────────────
+  var lit = false;          // 开关
+  var warmth = 0;           // 0 熄 → 1 亮透（钨丝渐醒）
+  var warmTarget = 0;
+  var moths = [];           // 飞蛾
+  var dust = [];            // 光柱浮尘
+  var lampCenter = { x: 0, y: 0 };   // 光心（钨丝）
+  var deskTopY = 0;         // 桌沿顶
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var body = document.body;
+  var wrap = document.getElementById('lampWrap');
+  var cordGroup = document.getElementById('cordGroup');
+  var filament = document.getElementById('filament');
+  var shadeBody = document.getElementById('shadeBody');
+  var shadeInnerGlow = document.getElementById('shadeInnerGlow');
+
+  // ── 尺寸 ─────────────────────────────────────────────
+  function resize() {
+    canvas.width = window.innerWidth * (window.devicePixelRatio || 1);
+    canvas.height = window.innerHeight * (window.devicePixelRatio || 1);
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    var r = wrap.getBoundingClientRect();
+    // 钨丝在 SVG 坐标 (140,131)，映射到页面
+    var k = r.width / 280;
+    lampCenter.x = r.left + 140 * k;
+    lampCenter.y = r.top + 131 * (r.height / 260);
+    deskTopY = window.innerHeight - window.innerHeight * 0.11;
+  }
+  window.addEventListener('resize', resize);
+
+  // ── 飞蛾 ─────────────────────────────────────────────
+  function spawnMoth(fromEdge) {
+    var a = Math.random() * Math.PI * 2;
+    var m = {
+      rBase: 55 + Math.random() * 55,
+      r: 55 + Math.random() * 55,
+      ang: a,
+      omega: (Math.random() < 0.5 ? -1 : 1) * (0.35 + Math.random() * 0.4),
+      flap: Math.random() * Math.PI * 2,
+      flapSpeed: 14 + Math.random() * 6,
+      size: 5.5 + Math.random() * 2.5,
+      wob: Math.random() * 10,
+      vx: 0, vy: 0,
+      mode: fromEdge ? 'enter' : 'orbit',
+      alpha: 0
+    };
+    if (fromEdge) {
+      var side = Math.floor(Math.random() * 4);
+      var w = window.innerWidth, h = window.innerHeight;
+      if (side === 0) { m.x = -20; m.y = h * (0.2 + Math.random() * 0.6); }
+      else if (side === 1) { m.x = w + 20; m.y = h * (0.2 + Math.random() * 0.6); }
+      else if (side === 2) { m.x = w * Math.random(); m.y = -20; }
+      else { m.x = w * Math.random(); m.y = h + 20; }
+    } else {
+      m.x = lampCenter.x + Math.cos(a) * m.r;
+      m.y = lampCenter.y + Math.sin(a) * m.r;
+      m.alpha = 1;
+    }
+    moths.push(m);
+  }
+
+  function fleeAll() {
+    moths.forEach(function (m) {
+      m.mode = 'flee';
+      var dx = m.x - lampCenter.x, dy = m.y - lampCenter.y;
+      var d = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      m.vx = (dx / d) * (90 + Math.random() * 80);
+      m.vy = (dy / d) * (90 + Math.random() * 80) - 40;
+    });
+  }
+
+  function updateMoths(dt, t) {
+    var w = window.innerWidth, h = window.innerHeight;
+    for (var i = moths.length - 1; i >= 0; i--) {
+      var m = moths[i];
+      m.flap += m.flapSpeed * dt;
+
+      if (m.mode === 'orbit') {
+        // 绕灯螺旋 + 随机抖动（真飞蛾保持与光恒定夹角，路径即螺旋）
+        m.omega += (Math.random() - 0.5) * 0.9 * dt;
+        m.omega = Math.max(-1.1, Math.min(1.1, m.omega));
+        m.ang += m.omega * dt;
+        m.wob += dt;
+        var wob = Math.sin(t * 0.0013 + m.wob) * 14 + Math.sin(t * 0.0031 + m.wob * 2) * 7;
+        m.r = m.rBase + wob;
+        var tx = lampCenter.x + Math.cos(m.ang) * m.r;
+        var ty = lampCenter.y + Math.sin(m.ang) * m.r * 0.72; // 压扁成绕灯的盘旋面
+        m.x += (tx - m.x) * Math.min(1, dt * 3.2);
+        m.y += (ty - m.y) * Math.min(1, dt * 3.2);
+        m.alpha = Math.min(1, m.alpha + dt);
+      } else if (m.mode === 'enter') {
+        var ex = lampCenter.x - m.x, ey = lampCenter.y - m.y;
+        var ed = Math.max(1, Math.sqrt(ex * ex + ey * ey));
+        var sp = 130 + m.size * 6;
+        m.x += (ex / ed) * sp * dt;
+        m.y += (ey / ed) * sp * dt;
+        m.alpha = Math.min(1, m.alpha + dt * 1.5);
+        if (ed < m.rBase * 0.8) { m.mode = 'orbit'; m.ang = Math.atan2(m.y - lampCenter.y, m.x - lampCenter.x); }
+      } else { // flee
+        m.vx *= (1 - dt * 0.6); m.vy *= (1 - dt * 0.6);
+        m.vy += 6 * dt;
+        m.x += m.vx * dt; m.y += m.vy * dt;
+        m.alpha = Math.max(0, m.alpha - dt * 0.7);
+        if (m.alpha <= 0 || m.x < -60 || m.x > w + 60 || m.y < -60 || m.y > h + 60) {
+          moths.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  function drawMoth(m) {
+    if (m.alpha <= 0.01) return;
+    var dir = m.mode === 'orbit'
+      ? m.omega >= 0 ? 0 : Math.PI
+      : Math.atan2((lampCenter.y - m.y), (lampCenter.x - m.x));
+    ctx.save();
+    ctx.translate(m.x, m.y);
+    ctx.rotate(dir);
+    ctx.globalAlpha = m.alpha * (0.82 + 0.18 * Math.sin(m.flap * 0.5));
+    var spread = Math.abs(Math.sin(m.flap));
+    var s = m.size;
+    ctx.fillStyle = '#6d6152';
+    for (var side = -1; side <= 1; side += 2) {
+      ctx.save();
+      ctx.scale(1, side * (0.35 + 0.65 * spread));
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.3, 0);
+      ctx.quadraticCurveTo(-s * 0.1, -s * 1.5, s * 0.9, -s * 1.15);
+      ctx.quadraticCurveTo(s * 0.55, -s * 0.25, -s * 0.3, 0);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.4, s * 0.1);
+      ctx.quadraticCurveTo(s * 0.1, -s * 0.9, s * 0.62, -s * 0.55);
+      ctx.quadraticCurveTo(s * 0.2, -s * 0.05, -s * 0.4, s * 0.1);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = '#4d453a';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * 0.75, s * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (warmth > 0.4) {
+      ctx.fillStyle = 'rgba(255,196,120,' + (0.25 * warmth * m.alpha) + ')';
+      ctx.beginPath();
+      ctx.ellipse(s * 0.2, 0, s * 0.4, s * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ── 浮尘 ─────────────────────────────────────────────
+  function seedDust() {
+    dust = [];
+    for (var i = 0; i < 42; i++) {
+      dust.push({
+        x: Math.random(), y: Math.random(),
+        s: 0.6 + Math.random() * 1.3,
+        sp: 0.4 + Math.random() * 1.2,
+        ph: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  function drawDust(t) {
+    if (warmth < 0.12) return;
+    var a = (warmth - 0.12) / 0.88;
+    for (var i = 0; i < dust.length; i++) {
+      var d = dust[i];
+      var px = lampCenter.x + (d.x - 0.5) * 460 + Math.sin(t * 0.0002 * d.sp + d.ph) * 26;
+      var py = lampCenter.y + (d.y - 0.5) * 360 + Math.cos(t * 0.00017 * d.sp + d.ph * 2) * 20;
+      var tw = 0.35 + 0.65 * Math.abs(Math.sin(t * 0.0006 * d.sp + d.ph));
+      ctx.fillStyle = 'rgba(255,214,150,' + (0.16 * a * tw) + ')';
+      ctx.beginPath();
+      ctx.arc(px, py, d.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ── 光（全部 canvas 绘制，不受 viewBox 裁切） ──────────
+  // 钨丝点亮三段：暗红 → 橙 → 暖黄白（真白炽灯的醒法）
+  function filamentColor(k) {
+    var stops = [
+      [0.0, 23, 27, 34],
+      [0.3, 90, 42, 24],
+      [0.65, 224, 120, 48],
+      [1.0, 255, 217, 160]
+    ];
+    for (var i = 1; i < stops.length; i++) {
+      if (k <= stops[i][0]) {
+        var p = (k - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0]);
+        var a = stops[i - 1], b = stops[i];
+        return 'rgb(' + Math.round(a[1] + (b[1] - a[1]) * p) + ',' +
+                        Math.round(a[2] + (b[2] - a[2]) * p) + ',' +
+                        Math.round(a[3] + (b[3] - a[3]) * p) + ')';
+      }
+    }
+    return 'rgb(255,217,160)';
+  }
+
+  function applyLampBody() {
+    filament.setAttribute('stroke', filamentColor(warmth));
+    if (warmth > 0.05) {
+      filament.setAttribute('filter', 'drop-shadow(0 0 ' + (warmth * 6) + 'px rgba(255,180,90,' + warmth * 0.9 + '))');
+    } else {
+      filament.removeAttribute('filter');
+    }
+    shadeBody.setAttribute('fill', warmth > 0.02 ? 'url(#shadeLit)' : 'url(#shade)');
+    shadeInnerGlow.setAttribute('fill', 'rgba(255,196,120,' + (0.55 * warmth) + ')');
+  }
+
+  // 环境光 + 桌面光斑（带一点电压般的呼吸微晃）
+  function drawRoomLight(t) {
+    if (warmth <= 0.003) return;
+    var breath = 1 + Math.sin(t * 0.0011) * 0.02 + Math.sin(t * 0.0043) * 0.008;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 大环境光
+    var R = 330 * breath;
+    var g1 = ctx.createRadialGradient(lampCenter.x, lampCenter.y, 0, lampCenter.x, lampCenter.y, R);
+    g1.addColorStop(0, 'rgba(255,186,100,' + (0.26 * warmth) + ')');
+    g1.addColorStop(0.4, 'rgba(255,176,92,' + (0.10 * warmth) + ')');
+    g1.addColorStop(1, 'rgba(255,170,90,0)');
+    ctx.fillStyle = g1;
+    ctx.fillRect(lampCenter.x - R, lampCenter.y - R, R * 2, R * 2);
+
+    // 桌面椭圆光斑
+    ctx.save();
+    ctx.translate(lampCenter.x, deskTopY + 8);
+    ctx.scale(1, 0.16);
+    var R2 = 240 * breath;
+    var g2 = ctx.createRadialGradient(0, 0, 0, 0, 0, R2);
+    g2.addColorStop(0, 'rgba(255,190,110,' + (0.34 * warmth) + ')');
+    g2.addColorStop(1, 'rgba(255,180,100,0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(-R2, -R2, R2 * 2, R2 * 2);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  // ── 主循环（墙钟增量；rAF 主驱 + interval 兜底，后台不跳变） ──
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+
+    // 钨丝渐醒 1.8s / 渐熄 0.9s
+    var rate = warmTarget > warmth ? dt / 1.8 : -dt / 0.9;
+    warmth = Math.max(0, Math.min(1, warmth + rate));
+    applyLampBody();
+
+    // 亮灯后逐只来客
+    if (lit && moths.length < 3 && Math.random() < dt * (moths.length === 0 ? 0.7 : 0.28)) {
+      spawnMoth(moths.length > 0);
+    }
+
+    updateMoths(dt, t);
+
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    drawRoomLight(t);
+    drawDust(t);
+    moths.forEach(drawMoth);
+  }
+  function rafLoop() {
+    tick();
+    requestAnimationFrame(rafLoop);
+  }
+
+  // ── 开关 ─────────────────────────────────────────────
+  function toggle() {
+    lit = !lit;
+    if (lit) {
+      warmTarget = 1;
+      body.classList.add('lit');
+    } else {
+      warmTarget = 0;
+      body.classList.remove('lit');
+      fleeAll();
+    }
+    cordGroup.classList.remove('cord-pull');
+    void cordGroup.offsetWidth;
+    cordGroup.classList.add('cord-pull');
+  }
+
+  wrap.addEventListener('click', toggle);
+
+  resize();
+  seedDust();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

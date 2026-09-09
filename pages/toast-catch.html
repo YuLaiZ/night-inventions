@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>接住吐司</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #e8e0cc;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4438;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #6a6456; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a7466; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.18em;
+    color: #6a5a42;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #8a8578;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6a6558;
+    text-decoration: none;
+    border-bottom: 1px dotted #6a6558;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a8578; border-color: #8a8578; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>接住吐司</h1>
+  <p>烤面包机一弹，吐司就上了天。<br>在它落回来的时候点一下——接住早饭。</p>
+</div>
+
+<div class="count-line" id="countLine">接住 0 片 · 掉了 0 片</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var toast = null;        // {x,y,vy,rot,rotV,caught}
+  var caught = 0, dropped = 0;
+  var autoTimer = 0;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function launch() {
+    var w = window.innerWidth;
+    toast = {
+      x: w * 0.5 + (Math.random() - 0.5) * 60,
+      y: window.innerHeight * 0.68,
+      vy: -(330 + Math.random() * 120),
+      rot: 0,
+      rotV: (Math.random() - 0.5) * 3,
+      caught: false
+    };
+  }
+
+  canvas.addEventListener('click', function (e) {
+    if (!toast || toast.caught) return;
+    if (Math.hypot(e.clientX - toast.x, e.clientY - toast.y) < 90) {
+      toast.caught = true;
+      caught++;
+      updateCount();
+      toast = null;
+      scheduleNext(1200);
+    }
+  });
+
+  function scheduleNext(delay) {
+    setTimeout(launch, delay + Math.random() * 1800);
+  }
+
+  function updateCount() {
+    countLine.textContent = '接住 ' + caught + ' 片 · 掉了 ' + dropped + ' 片';
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var machineY = h * 0.62;
+
+    if (!toast && autoTimer <= 0) {
+      autoTimer = 1600;
+      launch();
+    }
+    if (toast && !toast.caught) {
+      toast.vy += 640 * dt;
+      toast.y += toast.vy * dt;
+      toast.rot += toast.rotV * dt;
+      // 落地：没接住
+      if (toast.y > h * 0.8 && toast.vy > 0) {
+        dropped++;
+        updateCount();
+        toast = null;
+        scheduleNext(1400);
+      }
+    }
+    autoTimer = Math.max(0, autoTimer - dt * 1000);
+
+    // 背景：厨房清晨
+    ctx.fillStyle = '#e8e0cc';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(0, 0, w, h * 0.3);
+
+    // 烤面包机
+    ctx.fillStyle = '#4a5568';
+    roundRect(w / 2 - 70, machineY - 10, 140, 90, 14);
+    ctx.fill();
+    ctx.fillStyle = '#3a4454';
+    ctx.fillRect(w / 2 - 52, machineY + 12, 104, 10);
+    // 手柄
+    ctx.fillStyle = '#d98a5a';
+    roundRect(w / 2 + 52, machineY - 4, 16, 26, 5);
+    ctx.fill();
+
+    // 吐司
+    if (toast) {
+      ctx.save();
+      ctx.translate(toast.x, toast.y);
+      ctx.rotate(toast.rot);
+      ctx.fillStyle = '#d9a860';
+      roundRect(-32, -22, 64, 44, 8);
+      ctx.fill();
+      ctx.fillStyle = '#f0d8a8';
+      roundRect(-26, -16, 52, 32, 6);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  setTimeout(launch, 1500);
+})();
+</script>
+</body>
+</html>

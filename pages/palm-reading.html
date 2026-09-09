@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>掌纹</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 0.8s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.reading .copy { opacity: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .verdict {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; line-height: 2.1;
+    letter-spacing: 0.08em;
+    color: #cfc6b2;
+    opacity: 0;
+    transition: opacity 1.2s ease;
+    z-index: 3;
+    padding: 0 30px;
+    pointer-events: none;
+  }
+  .verdict.show { opacity: 1; }
+  .again {
+    position: absolute; bottom: 3vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 4;
+    display: none;
+  }
+  body.done .again { display: block; }
+  .again button {
+    background: none;
+    border: none;
+    color: #6d675c;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 4px;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+    transition: opacity 1s ease;
+  }
+  body.reading footer, body.done footer { opacity: 0.35; }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>掌纹</h1>
+  <p>夜里不算命，只看看掌纹。<br>按住屏幕别松——让它们自己浮出来。</p>
+</div>
+
+<div class="verdict" id="verdict"></div>
+<div class="again"><button id="again">再看一次</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var verdict = document.getElementById('verdict');
+  var capTimer = null;
+
+  var LINES = [
+    { name: '生命线', tips: [
+      '弯得很稳——是那种熬得住，也放得下的人。',
+      '中段有个小岛：某年有一阵子很累，后来好了。',
+      '起点靠近拇指：恋家。夜里醒来的第一反应是确认自己在自己床上。'
+    ]},
+    { name: '智慧线', tips: [
+      '又直又长——想得多，但都值得想。',
+      '尾端微微上翘：白天的纠结，夜里都变成了段子。',
+      '和生命线连在一起：凡事三思，三思完还是要睡。'
+    ]},
+    { name: '感情线', tips: [
+      '深而长——在乎的人不多，但每一个都算数。',
+      '有细枝分出去：温柔分给了很多人，自己留了一点。',
+      '这条线今晚很淡。不是没有，是它让你先把自己照顾好。'
+    ]}
+  ];
+
+  // 掌纹线条（相对掌心坐标的折线，每条随机微扰）
+  var palmLines = [];
+  function makeLines() {
+    palmLines = [];
+    var variants = [
+      [[-78, 30], [-30, 8], [30, 2], [86, 14]],
+      [[-70, -4], [-20, 18], [28, 26], [82, 38]],
+      [[-60, 58], [-16, 44], [26, 40], [78, 52]]
+    ];
+    variants.forEach(function (v, vi) {
+      var pts = v.map(function (p) {
+        return { x: p[0] + (Math.random() - 0.5) * 14, y: p[1] + (Math.random() - 0.5) * 12 };
+      });
+      palmLines.push({ pts: pts, reveal: 0, meta: LINES[vi] });
+    });
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+  makeLines();
+
+  var pressed = false;
+  var pressStart = 0;
+
+  canvas.addEventListener('pointerdown', function () {
+    if (pressed) return;
+    pressed = true;
+    pressStart = Date.now();
+    document.body.classList.add('reading');
+    palmLines.forEach(function (l) { l.reveal = 0; });
+  });
+  window.addEventListener('pointerup', function () {
+    if (!pressed) return;
+    pressed = false;
+    var held = Date.now() - pressStart;
+    if (held < 2200) {
+      // 太快：线还没浮出来
+      document.body.classList.remove('reading');
+      return;
+    }
+    showVerdict();
+  });
+
+  function showVerdict() {
+    var html = palmLines.map(function (l, i) {
+      var tip = l.meta.tips[Math.floor(Math.random() * l.meta.tips.length)];
+      return '<b>' + l.meta.name + '</b>：' + tip;
+    }).join('<br>');
+    html += '<br>——掌纹不说未来，只说你已经走过的路。';
+    verdict.innerHTML = html;
+    verdict.classList.add('show');
+    document.body.classList.add('done');
+  }
+
+  document.getElementById('again').addEventListener('click', function () {
+    document.body.classList.remove('done');
+    verdict.classList.remove('show');
+    makeLines();
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 手掌（摊开的掌形剪影）
+    var cx = w / 2, cy = h * 0.52;
+    var s = Math.min(1.15, w / 380);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(s, s);
+    // 掌
+    ctx.fillStyle = '#151a24';
+    ctx.beginPath();
+    ctx.ellipse(0, 10, 96, 118, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 五指（圆角长条）
+    var fingers = [[-64, -108, 24, 96], [-26, -132, 26, 120], [14, -138, 26, 126], [52, -116, 25, 104]];
+    fingers.forEach(function (f2) {
+      roundRect(f2[0], f2[1], f2[2], f2[3], 13);
+      ctx.fill();
+    });
+    // 拇指
+    ctx.beginPath();
+    ctx.ellipse(-96, 30, 26, 46, -0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 掌纹（按压后渐显）
+    if (pressed) {
+      var held = Date.now() - pressStart;
+      palmLines.forEach(function (l, li) {
+        l.reveal = Math.min(1, held / 2400 + li * 0.08);
+        if (l.reveal <= 0) return;
+        var total = l.pts.length - 1;
+        var seg = l.reveal * total;
+        ctx.strokeStyle = 'rgba(214,180,150,' + (0.55 + 0.2 * li * 0.2) + ')';
+        ctx.lineWidth = 2.6 - li * 0.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(l.pts[0].x, l.pts[0].y);
+        for (var i = 1; i < total; i++) {
+          if (i > seg) break;
+          ctx.lineTo(l.pts[i].x, l.pts[i].y);
+        }
+        // 部分段插值
+        var frac = seg - Math.floor(seg);
+        var a2 = l.pts[Math.min(Math.floor(seg), total - 1)];
+        var b2 = l.pts[Math.min(Math.floor(seg) + 1, total)];
+        ctx.lineTo(a2.x + (b2.x - a2.x) * frac, a2.y + (b2.y - a2.y) * frac);
+        ctx.stroke();
+      });
+      // 微光提示
+      if (held < 2400) {
+        ctx.fillStyle = 'rgba(200,195,180,' + (0.3 + 0.2 * Math.sin(t * 0.004)) + ')';
+        ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('别松手……', 0, 150);
+      }
+    }
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

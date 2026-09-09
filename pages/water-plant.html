@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给绿植浇水</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1420;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #4a5a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6a78; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #4a5a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #4a5a6a;
+    text-decoration: none;
+    border-bottom: 1px dotted #4a5a6a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #6a7a8a; border-color: #6a7a8a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给绿植浇水</h1>
+  <p>它蔫了一整个夜班。<br>按住浇水壶——水要到，叶子要抬。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var watering = false;
+  var vigor = 0;            // 0 蔫 → 1 舒展
+  var drops = [];           // 水滴 {x,y,vy}
+  var doneShown = false;
+
+  function say(text) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4600);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  var potX = 0.5, potY = 0.78;
+
+  canvas.addEventListener('pointerdown', function () { watering = true; });
+  window.addEventListener('pointerup', function () { watering = false; });
+  window.addEventListener('pointercancel', function () { watering = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (watering && vigor < 1) {
+      vigor = Math.min(1, vigor + dt * 0.18);
+      // 壶嘴滴水
+      if (Math.random() < dt * 14) {
+        drops.push({ x: w * 0.62 - 46 + (Math.random() - 0.5) * 6, y: h * potY - 130 + 6, vy: 120 });
+      }
+      if (vigor >= 0.55 && !doneShown) {
+        doneShown = true;
+        say('叶子抬起来了。它没事，就是渴。');
+      }
+    }
+
+    // 背景：清晨窗边（色调随活力从灰蓝到暖绿）
+    var k = vigor;
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mix('#1c2430', '#28303a', k));
+    bg.addColorStop(1, mix('#141b26', '#1e2a30', k));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 水滴
+    var potTop = h * potY - 58;
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+      d.y += d.vy * dt;
+      if (d.y > potTop + 40) { drops.splice(i, 1); continue; }
+      ctx.fillStyle = 'rgba(150,200,230,0.8)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, 2.2, 3.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 花盆（梯形陶盆）
+    var px = w * potX, py = h * potY;
+    ctx.fillStyle = mix('#5c4a3a', '#7a5c42', k);
+    ctx.beginPath();
+    ctx.moveTo(px - 52, py - 58);
+    ctx.lineTo(px + 52, py - 58);
+    ctx.lineTo(px + 38, py);
+    ctx.lineTo(px - 38, py);
+    ctx.closePath();
+    ctx.fill();
+    // 盆沿
+    ctx.fillStyle = mix('#6a5644', '#8a6a4c', k);
+    roundRectFill(px - 58, py - 66, 116, 14, 4);
+
+    // 茎与叶（蔫→舒展：蔫时叶短且耷向两侧，浇透后向上展开）
+    var leaves = [
+      { a: -0.66, len: 62 + vigor * 30 },
+      { a: -0.3, len: 80 + vigor * 34 },
+      { a: 0.06, len: 88 + vigor * 38 },
+      { a: 0.42, len: 76 + vigor * 32 },
+      { a: 0.76, len: 60 + vigor * 26 }
+    ];
+    leaves.forEach(function (l2, li) {
+      var wilt = 1 - vigor;
+      var a = -Math.PI / 2 + l2.a + wilt * l2.a * 0.9 + wilt * 0.35;
+      var len = l2.len * (0.6 + vigor * 0.4);
+      var tipX = px + Math.cos(a) * len;
+      var tipY = py - 58 + Math.sin(a) * len;
+      ctx.strokeStyle = mix('#4a5a48', '#5a8a5c', k);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(px, py - 58);
+      ctx.quadraticCurveTo(px + (tipX - px) * 0.45, py - 58 + (tipY - py + 58) * 0.55, tipX, tipY);
+      ctx.stroke();
+      // 叶片
+      ctx.save();
+      ctx.translate(tipX, tipY);
+      ctx.rotate(a + Math.PI / 2 + wilt * 0.4);
+      ctx.fillStyle = mix('#5a6a52', '#6a9a68', k);
+      ctx.beginPath();
+      ctx.ellipse(0, -10, 8 - wilt * 1.6, 16 - wilt * 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // 浇水壶（盆口上方，按住时倾斜倒水）
+    var canX = w * 0.62, canY = potTop - 96;
+    ctx.save();
+    ctx.translate(canX, canY);
+    ctx.rotate(watering ? -0.5 : -0.08);
+    ctx.fillStyle = '#6a8a9a';
+    roundRectFill(-34, -26, 68, 52, 10);
+    // 壶嘴
+    ctx.beginPath();
+    ctx.moveTo(-34, -12);
+    ctx.lineTo(-56, -22);
+    ctx.lineTo(-52, -12);
+    ctx.closePath();
+    ctx.fill();
+    // 手柄
+    ctx.strokeStyle = '#4a6a7a';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(30, 0, 16, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function mix(a, b, k) {
+    if (k <= 0) return a;
+    var pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    var r = Math.round(((pa >> 16) & 255) + (((pb >> 16) & 255) - ((pa >> 16) & 255)) * k);
+    var g = Math.round(((pa >> 8) & 255) + (((pb >> 8) & 255) - ((pa >> 8) & 255)) * k);
+    var bl = Math.round((pa & 255) + ((pb & 255) - (pa & 255)) * k);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+  function roundRectFill(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

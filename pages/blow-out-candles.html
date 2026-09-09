@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>吹蜡烛</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #05070b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 1s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.wish .copy { opacity: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .wish-line {
+    position: absolute; top: 44%; left: 0; right: 0;
+    text-align: center;
+    font-size: 19px; letter-spacing: 0.3em;
+    color: #e8d9b0;
+    opacity: 0;
+    transition: opacity 2.2s ease 0.6s;
+    z-index: 3;
+    pointer-events: none;
+    padding-left: 0.3em;
+  }
+  body.wish .wish-line { opacity: 1; }
+  .sub {
+    position: absolute; top: 52%; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.18em;
+    color: #6d675c;
+    opacity: 0;
+    transition: opacity 2s ease 1.4s;
+    z-index: 3;
+    pointer-events: none;
+  }
+  body.wish .sub { opacity: 0.9; }
+  .hint {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.2em;
+    color: #4a4f58;
+    z-index: 3;
+    transition: opacity 1s ease;
+  }
+  body.wish .hint { opacity: 0; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>吹蜡烛</h1>
+  <p>给今天的你，七支蜡烛。<br>许个愿，然后长按屏幕——吹了它。</p>
+</div>
+
+<div class="wish-line">愿望收讫。</div>
+<div class="sub">明早醒来，让它自己走过去。</div>
+<div class="hint" id="hint">长按吹气 · 点一下重燃</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var hint = document.getElementById('hint');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  var COUNT = 7;
+  var candles = [];         // {fx(屏占比x), lit, len(火苗长 0..1), flicker seed}
+  var smoke = [];           // 烟粒子
+  var wind = 0;             // 0..1 吹力（按住渐增）
+  var blowing = false;
+  var allOut = false;
+  var wishShown = false;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  function initCandles() {
+    candles = [];
+    for (var i = 0; i < COUNT; i++) {
+      candles.push({
+        fx: 0.5 + (i - (COUNT - 1) / 2) * 0.075,
+        lit: true,
+        len: 1,
+        seed: Math.random() * Math.PI * 2,
+        outAt: 0
+      });
+    }
+  }
+
+  function relight() {
+    allOut = false;
+    wishShown = false;
+    document.body.classList.remove('wish');
+    candles.forEach(function (c) { c.lit = true; c.len = 0; c.outAt = 0; });
+    hint.textContent = '长按吹气 · 点一下重燃';
+  }
+
+  canvas.addEventListener('pointerdown', function () {
+    if (allOut) { relight(); return; }
+    blowing = true;
+  });
+  window.addEventListener('pointerup', function () { blowing = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // 风力：按住渐增，松手渐减
+    wind += ((blowing && !allOut ? 1 : 0) - wind) * Math.min(1, dt * 3.2);
+
+    // 吹力足够时逐支熄灭
+    if (wind > 0.55) {
+      var litCount = 0;
+      candles.forEach(function (c) { if (c.lit) litCount++; });
+      var left = candles.filter(function (c) { return c.lit; });
+      if (left.length && Math.random() < dt * 6) {
+        var victim = left[Math.floor(Math.random() * left.length)];
+        victim.lit = false;
+        victim.outAt = now;
+        // 一撮烟
+        var cx = victim.fx * w, cy = flameY(w, h) - 6;
+        for (var s = 0; s < 7; s++) {
+          smoke.push({ x: cx + (Math.random() - 0.5) * 5, y: cy - s * 3, vy: -14 - Math.random() * 12, vx: (Math.random() - 0.3) * 7, r: 2.5 + Math.random() * 3.5, life: 1.4 + Math.random() });
+        }
+      }
+      if (litCount === 0 && !allOut) {
+        allOut = true;
+        setTimeout(function () {
+          if (allOut) { wishShown = true; document.body.classList.add('wish'); }
+        }, 700);
+      }
+    }
+
+    // 火苗长度：有风压低，无风恢复
+    candles.forEach(function (c) {
+      if (!c.lit) return;
+      var target = 1 - wind * 0.85;
+      c.len += (target - c.len) * Math.min(1, dt * 5);
+    });
+
+    // 烟粒子
+    for (var i = smoke.length - 1; i >= 0; i--) {
+      var m = smoke[i];
+      m.x += m.vx * dt; m.y += m.vy * dt;
+      m.r += 6 * dt;
+      m.life -= dt;
+      if (m.life <= 0) smoke.splice(i, 1);
+    }
+
+    // ── 绘制 ──────────────────────────────────────────
+    ctx.clearRect(0, 0, w, h);
+    var floorY = h * 0.66;
+
+    // 蜡烛
+    candles.forEach(function (c, ci) {
+      var x = c.fx * w;
+      var ch = 64 - ci * 2;
+      var cw = 9;
+      // 烛身
+      var grad = ctx.createLinearGradient(x - cw, 0, x + cw, 0);
+      grad.addColorStop(0, '#b8ab90');
+      grad.addColorStop(0.5, '#e2d7bd');
+      grad.addColorStop(1, '#9a8d74');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x - cw / 2, floorY - ch, cw, ch);
+      // 烛芯
+      ctx.strokeStyle = '#3c3428';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(x, floorY - ch);
+      ctx.lineTo(x, floorY - ch - 5);
+      ctx.stroke();
+
+      if (c.lit) {
+        var fy = floorY - ch - 5;
+        var flick = Math.sin(t * 0.012 + c.seed) * 0.14 + Math.sin(t * 0.031 + c.seed * 2) * 0.08;
+        var lean = wind * 0.9 + flick * 0.35;
+        var L = 26 * Math.max(0.12, c.len) * (1 + Math.sin(t * 0.021 + c.seed) * 0.06);
+        // 外焰
+        ctx.fillStyle = 'rgba(255,150,60,0.78)';
+        flameShape(x, fy, L, lean, wobble(t, c.seed, 0.5));
+        // 内焰
+        ctx.fillStyle = 'rgba(255,235,170,0.95)';
+        flameShape(x, fy, L * 0.62, lean * 0.8, wobble(t, c.seed, 1.3));
+        // 蓝根
+        ctx.fillStyle = 'rgba(120,160,255,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(x + lean * 2, fy - 2, 2.2, 3.4, lean * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        // 光晕
+        var glow = ctx.createRadialGradient(x, fy - L * 0.4, 0, x, fy - L * 0.4, 46 * (0.6 + c.len * 0.4));
+        glow.addColorStop(0, 'rgba(255,190,100,0.16)');
+        glow.addColorStop(1, 'rgba(255,190,100,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - 46, fy - L * 0.4 - 46, 92, 92);
+      }
+    });
+
+    // 烟
+    smoke.forEach(function (m) {
+      ctx.fillStyle = 'rgba(190,198,208,' + Math.max(0, m.life * 0.14) + ')';
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 桌沿
+    ctx.fillStyle = '#0c0f16';
+    ctx.fillRect(0, floorY, w, h - floorY);
+    ctx.fillStyle = 'rgba(255,200,120,0.03)';
+    ctx.fillRect(0, floorY, w, 2);
+  }
+
+  function wobble(t, seed, k) {
+    return Math.sin(t * 0.017 * k + seed * 3) * 2.4;
+  }
+  function flameY(w, h) { return h * 0.66 - 40; }
+
+  function flameShape(x, fy, L, lean, wob) {
+    ctx.beginPath();
+    ctx.moveTo(x, fy);
+    ctx.bezierCurveTo(
+      x - 5, fy - L * 0.28,
+      x - 4 + lean * L * 0.4 + wob, fy - L * 0.62,
+      x + lean * L * 0.55 + wob, fy - L
+    );
+    ctx.bezierCurveTo(
+      x + 4 + lean * L * 0.4 + wob, fy - L * 0.62,
+      x + 5, fy - L * 0.28,
+      x, fy
+    );
+    ctx.fill();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  resize();
+  initCandles();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

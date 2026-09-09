@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜航飞机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .whisper {
+    position: absolute; bottom: 10vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.12em;
+    color: #a89f8e;
+    opacity: 0;
+    transition: opacity 1.1s ease;
+    z-index: 3;
+    pointer-events: none;
+    padding: 0 30px;
+  }
+  .whisper.show { opacity: 0.95; }
+  .count-line {
+    position: absolute; bottom: 5.5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.18em;
+    color: #4a4f58;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>夜航飞机</h1>
+  <p>夜里抬头，总有一架飞机在走。<br>对着它点一下——许个愿，它会闪两下说收到。</p>
+</div>
+
+<div class="whisper" id="whisper"></div>
+<div class="count-line" id="countLine">今晚已有 0 个愿望托付给它</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var whisper = document.getElementById('whisper');
+  var countLine = document.getElementById('countLine');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  var stars = [];
+  var wishes = 0;
+  var whisperTimer = null;
+
+  // 飞机：一次一班，横穿夜空
+  var plane = null;
+  var nextFlight = Date.now() + 4000;
+
+  function spawnPlane() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var fromLeft = Math.random() < 0.5;
+    var y = h * (0.18 + Math.random() * 0.4);
+    plane = {
+      x: fromLeft ? -40 : w + 40,
+      y: y,
+      vx: (fromLeft ? 1 : -1) * (26 + Math.random() * 16),
+      ph: Math.random() * Math.PI * 2,
+      blink: 0          // 许愿回应闪烁
+    };
+  }
+
+  function say(text) {
+    whisper.textContent = text;
+    whisper.classList.add('show');
+    if (whisperTimer) clearTimeout(whisperTimer);
+    whisperTimer = setTimeout(function () { whisper.classList.remove('show'); }, 4200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    stars = [];
+    for (var i = 0; i < 90; i++) {
+      stars.push({
+        x: Math.random(), y: Math.random(),
+        s: 0.5 + Math.random() * 1.2,
+        ph: Math.random() * Math.PI * 2
+      });
+    }
+  }
+  window.addEventListener('resize', resize);
+
+  canvas.addEventListener('click', function (e) {
+    if (!plane) return;
+    var d = Math.hypot(e.clientX - plane.x, e.clientY - plane.y);
+    if (d < 60) {
+      plane.blink = 1.4;
+      wishes++;
+      countLine.textContent = '今晚已有 ' + wishes + ' 个愿望托付给它';
+      say(wishes === 1
+        ? '它闪了两下。收到了，别熬夜等回音。'
+        : '又收到了。这架飞机今晚很忙，但每个愿望都记着。');
+    } else {
+      say('它飞它的。愿望要对着灯说。');
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    ctx.fillStyle = '#05070d';
+    ctx.fillRect(0, 0, w, h);
+
+    // 星
+    stars.forEach(function (s) {
+      var a = 0.25 + 0.75 * Math.abs(Math.sin(t * 0.0005 + s.ph));
+      ctx.fillStyle = 'rgba(215,225,250,' + (0.5 * a) + ')';
+      ctx.fillRect(s.x * w, s.y * h, s.s, s.s);
+    });
+
+    // 班次调度
+    if (!plane && now > nextFlight) spawnPlane();
+    if (plane) {
+      plane.x += plane.vx * dt;
+      plane.y += Math.sin(t * 0.0009 + plane.ph) * 3 * dt;
+      var off = plane.x < -80 || plane.x > w + 80;
+      if (off) {
+        plane = null;
+        nextFlight = now + 14000 + Math.random() * 16000;
+      }
+    }
+
+    // 绘制飞机：机身剪影（小）+ 频闪灯 + 翼尖红灯/绿灯
+    if (plane) {
+      var p = plane;
+      var dir = p.vx > 0 ? 1 : -1;
+      // 机身
+      ctx.fillStyle = 'rgba(20,26,38,0.95)';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, 15, 3.4, dir > 0 ? -0.06 : Math.PI + 0.06, 0, Math.PI * 2);
+      ctx.fill();
+      // 尾翼
+      ctx.beginPath();
+      ctx.moveTo(p.x - dir * 12, p.y - 1);
+      ctx.lineTo(p.x - dir * 17, p.y - 8);
+      ctx.lineTo(p.x - dir * 10, p.y - 1);
+      ctx.closePath();
+      ctx.fill();
+      // 机腹常亮灯（微弱）
+      ctx.fillStyle = 'rgba(200,210,235,0.5)';
+      ctx.beginPath();
+      ctx.arc(p.x - dir * 3, p.y + 2, 1.3, 0, Math.PI * 2);
+      ctx.fill();
+      // 频闪灯（每秒闪两下的白灯）
+      var strobe = (t % 1000) < 90 || ((t + 160) % 1000) < 70;
+      if (strobe) {
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(p.x - dir * 14, p.y - 1, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.beginPath();
+        ctx.arc(p.x - dir * 14, p.y - 1, 9, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 翼尖灯：左红右绿
+      ctx.fillStyle = 'rgba(255,90,80,0.95)';
+      ctx.beginPath(); ctx.arc(p.x, p.y + 2.5, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(90,220,130,0.9)';
+      ctx.beginPath(); ctx.arc(p.x + dir * 6, p.y + 2.5, 2, 0, Math.PI * 2); ctx.fill();
+
+      // 许愿回应：白光扩散
+      if (p.blink > 0) {
+        p.blink -= dt;
+        ctx.strokeStyle = 'rgba(255,240,200,' + Math.max(0, p.blink) * 0.5 + ')';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 14 + (1.4 - Math.max(0, p.blink)) * 22, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  resize();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

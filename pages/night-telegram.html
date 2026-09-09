@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜电报</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #07090d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 48px 20px 90px;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+  h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .lead { font-size: 13px; line-height: 2; color: #5d6169; text-align: center; letter-spacing: 0.06em; }
+  .lamp {
+    margin: 34px 0 26px;
+    width: 74px; height: 74px; border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%, #2b303b, #171b23 70%);
+    border: 2px solid #2b323f;
+    position: relative;
+    transition: box-shadow 0.12s linear;
+  }
+  .lamp.on {
+    background: radial-gradient(circle at 38% 34%, #fff3d0, #ffb84d 68%);
+    border-color: #d9a45a;
+    box-shadow: 0 0 34px 8px rgba(255,190,100,0.45), 0 0 90px 30px rgba(255,180,90,0.12);
+  }
+  .lamp::after {
+    content: ""; position: absolute; left: 50%; bottom: -26px;
+    width: 2px; height: 26px; background: #2b323f;
+  }
+  .code-line {
+    min-height: 30px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 17px; letter-spacing: 0.22em;
+    color: #d9b877;
+    word-break: break-all;
+    text-align: center;
+    max-width: 560px;
+  }
+  .sent { margin-top: 12px; font-size: 13px; color: #6d727c; letter-spacing: 0.1em; min-height: 20px; }
+  .row { margin-top: 30px; display: flex; gap: 10px; width: 100%; max-width: 560px; }
+  input {
+    flex: 1;
+    background: #10141c;
+    border: 1px solid #272e3b;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 15px;
+    padding: 11px 14px;
+    outline: none;
+    letter-spacing: 0.04em;
+    font-family: inherit;
+  }
+  input:focus { border-color: #4a5468; }
+  input::placeholder { color: #474d59; }
+  button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 14px;
+    letter-spacing: 0.12em;
+    padding: 0 22px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { border-color: #4a5468; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .note { margin-top: 22px; font-size: 12px; color: #4a4f58; letter-spacing: 0.05em; text-align: center; line-height: 1.9; }
+  footer {
+    position: absolute; bottom: 14px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<h1>深夜电报</h1>
+<p class="lead">写下那句话，值夜的报务员替你译成电码，<br>一盏灯，一下一下，发给没有地址的人。</p>
+
+<div class="lamp" id="lamp"></div>
+<div class="code-line" id="codeLine"></div>
+<div class="sent" id="sentLine"></div>
+
+<div class="row">
+  <input id="msg" maxlength="30" placeholder="想发的话（字母或数字）" autocomplete="off">
+  <button id="send">发报</button>
+</div>
+<p class="note">电码只认字母和数字。汉字得先查电码本译成四位数字——<br>那是另一个深夜的活了。</p>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var MORSE = {
+    A: '.-', B: '-...', C: '-.-.', D: '-..', E: '.', F: '..-.', G: '--.', H: '....',
+    I: '..', J: '.---', K: '-.-', L: '.-..', M: '--', N: '-.', O: '---', P: '.--.',
+    Q: '--.-', R: '.-.', S: '...', T: '-', U: '..-', V: '...-', W: '.--', X: '-..-',
+    Y: '-.--', Z: '--..',
+    0: '-----', 1: '.----', 2: '..---', 3: '...--', 4: '....-', 5: '.....',
+    6: '-....', 7: '--...', 8: '---..', 9: '----.'
+  };
+
+  var lamp = document.getElementById('lamp');
+  var codeLine = document.getElementById('codeLine');
+  var sentLine = document.getElementById('sentLine');
+  var msg = document.getElementById('msg');
+  var btn = document.getElementById('send');
+  var sending = false;
+  var timers = [];
+
+  // 时序：点 160ms 亮 / 划 440ms 亮；符间 140ms 灭；
+  // 字母间 420ms 灭；词间 900ms 灭（setTimeout 链，工艺定稿）
+  function schedule(fn, delay) { timers.push(setTimeout(fn, delay)); }
+
+  function send() {
+    if (sending) return;
+    var text = msg.value.trim().toUpperCase();
+    if (!text) return;
+    var chars = text.split('').filter(function (c) { return MORSE[c] || c === ' '; });
+    var coded = chars.filter(function (c) { return MORSE[c]; });
+    if (!coded.length) { sentLine.textContent = '这一句里没有电码认得的字。'; return; }
+
+    sending = true;
+    btn.disabled = true;
+    msg.disabled = true;
+    codeLine.textContent = '';
+    sentLine.textContent = '发报中……';
+
+    var t = 300;      // 起手静默
+    var shown = 0;
+    var total = coded.length;
+
+    chars.forEach(function (c, ci) {
+      if (c === ' ') { t += 760; return; }
+      var symbols = MORSE[c].split('');
+      symbols.forEach(function (s, si) {
+        var dur = s === '.' ? 160 : 440;
+        schedule(function () { lamp.classList.add('on'); }, t);
+        t += dur;
+        schedule(function () { lamp.classList.remove('on'); }, t);
+        // 电码行逐符吐出
+        schedule(function () {
+          codeLine.textContent += s === '.' ? '·' : '—';
+        }, t);
+        t += si === symbols.length - 1 ? 0 : 140;
+      });
+      shown++;
+      schedule(function () {
+        sentLine.textContent = '已发 ' + shown + ' / ' + total + ' 个字';
+      }, t);
+      // 字母收笔：电码行留一个空位，字母之间读得开
+      schedule(function () { codeLine.textContent += ' '; }, t);
+      t += 420;
+    });
+
+    schedule(function () {
+      sentLine.textContent = '拍发完毕。「' + coded.join('') + '」已入夜风。';
+      sending = false;
+      btn.disabled = false;
+      msg.disabled = false;
+    }, t + 400);
+  }
+
+  btn.addEventListener('click', send);
+  msg.addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
+})();
+</script>
+</body>
+</html>

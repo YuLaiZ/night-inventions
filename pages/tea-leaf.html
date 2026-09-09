@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>搅一杯茶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; line-height: 2;
+    letter-spacing: 0.08em;
+    color: #a89f8e;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    padding: 0 30px;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>搅一杯茶</h1>
+  <p>按住杯里搅一搅，转出漩涡。<br>盯着茶叶看——它们不去边上，反而往中间跑。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var swirl = 0;           // 漩涡强度 0..1
+  var leaves = [];         // 茶叶 {ang, rr, size, rot, col}
+  var said = false;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function seedLeaves() {
+    leaves = [];
+    for (var i = 0; i < 16; i++) {
+      leaves.push({
+        ang: Math.random() * Math.PI * 2,
+        rr: 0.3 + Math.random() * 0.62,     // 距中心比例
+        size: 3.4 + Math.random() * 3.2,
+        rot: Math.random() * Math.PI * 2,
+        col: ['#8a6a3a', '#6d5230', '#a3854e'][i % 3]
+      });
+    }
+  }
+  seedLeaves();
+
+  function say(text) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 拖动绕杯心旋转 → 加漩涡
+  var lastAng = null;
+  var dragging = false;
+  canvas.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    lastAng = Math.atan2(e.clientY - h_cup(), e.clientX - w_cup());
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var a = Math.atan2(e.clientY - h_cup(), e.clientX - w_cup());
+    if (lastAng !== null) {
+      var d = a - lastAng;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      swirl = Math.min(1, swirl + Math.abs(d) * 0.35);
+    }
+    lastAng = a;
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+
+  function w_cup() { return window.innerWidth / 2; }
+  function h_cup() { return window.innerHeight * 0.54; }
+  function cupR() { return Math.min(210, window.innerWidth * 0.4); }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var cx = w_cup(), cy = h_cup(), R = cupR();
+
+    swirl = Math.max(0, swirl - dt * 0.06);   // 漩涡慢慢平息
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 杯碟
+    ctx.fillStyle = '#12161f';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + R * 0.86, R * 1.18, R * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 杯身
+    ctx.fillStyle = '#1a2029';
+    ctx.beginPath();
+    ctx.moveTo(cx - R, cy - R * 0.1);
+    ctx.quadraticCurveTo(cx - R * 0.92, cy + R * 0.7, cx - R * 0.55, cy + R * 0.86);
+    ctx.lineTo(cx + R * 0.55, cy + R * 0.86);
+    ctx.quadraticCurveTo(cx + R * 0.92, cy + R * 0.7, cx + R, cy - R * 0.1);
+    ctx.closePath();
+    ctx.fill();
+    // 把手
+    ctx.strokeStyle = '#1a2029';
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(cx + R * 1.05, cy + R * 0.25, R * 0.24, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+
+    // 茶汤
+    var tea = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R * 0.94);
+    tea.addColorStop(0, '#8a5a2a');
+    tea.addColorStop(0.6, '#6d4322');
+    tea.addColorStop(1, '#4a2e18');
+    ctx.fillStyle = tea;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, R * 0.94, R * 0.86, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 旋转流线（swirl 越大越明显）
+    if (swirl > 0.02) {
+      ctx.lineWidth = 1.4;
+      for (var s2 = 0; s2 < 5; s2++) {
+        var sr = R * (0.25 + s2 * 0.15);
+        var start = t * 0.004 * (swirl * 2) + s2;
+        ctx.strokeStyle = 'rgba(220,190,140,' + (0.14 * swirl) + ')';
+        ctx.beginPath();
+        for (var a2 = 0; a2 <= Math.PI * 1.9; a2 += 0.15) {
+          var ang2 = start + a2;
+          var px2 = cx + Math.cos(ang2) * sr;
+          var py2 = cy + Math.sin(ang2) * sr * 0.86;
+          if (a2 === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 茶叶：漩涡强时向中心聚拢并公转；弱时散开
+    leaves.forEach(function (l) {
+      var targetR = l.rr;
+      if (swirl > 0.05) {
+        // 爱因斯坦：底层流速慢→压差把茶叶推向中心
+        l.rr = Math.max(0.08, l.rr - swirl * dt * 0.22);
+        l.ang += swirl * dt * 2.6 * (1.2 - l.rr);
+      } else {
+        l.rr = Math.min(0.9, l.rr + dt * 0.05);
+        l.ang += dt * 0.06;
+      }
+      var lx = cx + Math.cos(l.ang) * l.rr * R * 0.86;
+      var ly = cy + Math.sin(l.ang) * l.rr * R * 0.74;
+      l.rot += swirl * dt * 8;
+      ctx.save();
+      ctx.translate(lx, ly);
+      ctx.rotate(l.rot);
+      ctx.fillStyle = l.col;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, l.size, l.size * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // 杯沿高光
+    ctx.strokeStyle = 'rgba(220,200,160,0.22)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, R * 0.94, R * 0.86, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 首次搅出漩涡的解说
+    if (swirl > 0.5 && !said) {
+      said = true;
+      say('爱因斯坦 1926 年也盯着茶叶想过这件事：贴着杯底的水转得慢，把叶子推去了中间。科学史管它叫「茶叶悖论」。');
+    }
+    if (swirl < 0.05) said = false;
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

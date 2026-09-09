@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>早餐牛奶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1420;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 0.8s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #5a7086; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #4a5a68; letter-spacing: 0.08em; }
+  body.done .copy { opacity: 0; }
+  .scene {
+    position: absolute; left: 50%; top: 52%;
+    transform: translate(-50%, -50%);
+    width: 260px; height: 340px;
+    z-index: 2;
+    cursor: pointer;
+  }
+  .carton {
+    position: absolute; left: 50%; bottom: 30px;
+    transform: translateX(-50%);
+    width: 150px; height: 250px;
+    background: linear-gradient(165deg, #f4f1e8, #dcd6c4);
+    border-radius: 6px 6px 8px 8px;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.35);
+    transition: height 0.5s ease, opacity 0.5s ease;
+    overflow: hidden;
+  }
+  .carton .stripe {
+    position: absolute; left: 0; right: 0; top: 34%;
+    height: 16px;
+    background: repeating-linear-gradient(90deg, #7ba6c9 0 18px, #e8dfc8 18px 36px);
+  }
+  .carton .word {
+    position: absolute; left: 0; right: 0; top: 20%;
+    text-align: center;
+    font-size: 15px; letter-spacing: 0.3em;
+    color: #5a6a7a;
+    padding-left: 0.3em;
+  }
+  .straw {
+    position: absolute;
+    width: 12px; height: 120px;
+    background: repeating-linear-gradient(45deg, #d98a5a 0 8px, #e8a878 8px 16px);
+    border-radius: 6px;
+    transform-origin: bottom center;
+    transform: rotate(0deg);
+    top: -30px; left: 62%;
+    opacity: 0;
+    transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.4, 1.4, 0.5, 1);
+    z-index: 3;
+  }
+  body.straw .straw { opacity: 1; transform: rotate(14deg); }
+  body.done .straw { transform: rotate(24deg); }
+  .gulp {
+    position: absolute;
+    font-size: 20px;
+    color: #5a7086;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    z-index: 4;
+  }
+  .done-line {
+    position: absolute; left: 0; right: 0; top: 12%;
+    text-align: center;
+    font-size: 15px; letter-spacing: 0.14em;
+    color: #4a6a5a;
+    opacity: 0;
+    transition: opacity 1.2s ease;
+    z-index: 5;
+    pointer-events: none;
+  }
+  body.done .done-line { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5a7086;
+    text-decoration: none;
+    border-bottom: 1px dotted #5a7086;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a9ab0; border-color: #8a9ab0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>早餐牛奶</h1>
+  <p>出门前的那盒牛奶。<br>点一下插吸管——再点一下，就喝掉了。</p>
+</div>
+
+<div class="done-line">喝完了。今天也是被自己照顾好的一天。</div>
+
+<div class="scene" id="scene">
+  <div class="carton" id="carton">
+    <div class="word">牛 奶</div>
+    <div class="stripe"></div>
+  </div>
+  <div class="straw" id="straw"></div>
+</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var scene = document.getElementById('scene');
+  var carton = document.getElementById('carton');
+  var straw = document.getElementById('straw');
+  var gulpEl = null;
+  var stage = 0;          // 0 插管 → 喝 → 喝完
+  var sips = 0;
+
+  scene.addEventListener('click', function () {
+    if (stage === 0) {
+      stage = 1;
+      document.body.classList.add('straw');
+      var s = document.createElement('div');
+      s.className = 'gulp';
+      s.textContent = '咕咚';
+      s.style.left = '56%';
+      s.style.top = '30%';
+      scene.appendChild(s);
+      gulpEl = s;
+      setTimeout(function () { s.style.opacity = '0.9'; }, 30);
+      setTimeout(function () { s.style.opacity = '0'; }, 900);
+      return;
+    }
+    if (stage === 1) {
+      // 喝一口：盒子瘪一点
+      sips++;
+      var h2 = 250 - sips * 30;
+      carton.style.height = Math.max(120, h2) + 'px';
+      carton.style.opacity = String(1 - sips * 0.06);
+      if (sips >= 4) {
+        stage = 2;
+        document.body.classList.add('done');
+        return;
+      }
+      var s2 = document.createElement('div');
+      s2.className = 'gulp';
+      s2.textContent = '咕咚';
+      s2.style.left = '54%';
+      s2.style.top = '36%';
+      scene.appendChild(s2);
+      setTimeout(function () { s2.style.opacity = '0.9'; }, 30);
+      setTimeout(function () { s2.style.opacity = '0'; }, 850);
+      setTimeout(function () { if (s2.parentNode) s2.parentNode.removeChild(s2); }, 900);
+      return;
+    }
+    // 喝完：再来一盒
+    stage = 0;
+    sips = 0;
+    document.body.classList.remove('done', 'straw');
+    carton.style.height = '250px';
+    carton.style.opacity = '1';
+    if (gulpEl && gulpEl.parentNode) gulpEl.parentNode.removeChild(gulpEl);
+    if (straw.parentNode === scene) straw.parentNode.appendChild(straw);
+  });
+})();
+</script>
+</body>
+</html>

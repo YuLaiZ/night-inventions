@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜红绿灯</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-num {
+    position: absolute; left: 50%; top: 47%;
+    transform: translate(-50%, -50%);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 74px;
+    color: #e05a4a;
+    text-shadow: 0 0 30px rgba(224,90,74,0.4);
+    z-index: 3;
+    pointer-events: none;
+  }
+  body.green .count-num { color: #6ac97a; text-shadow: 0 0 30px rgba(106,201,122,0.4); }
+  .caption {
+    position: absolute; bottom: 10vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b3aa98;
+    min-height: 26px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    padding: 0 30px;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  .jaywalk {
+    position: absolute; bottom: 5.5vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 3;
+  }
+  .jaywalk button {
+    background: none;
+    border: none;
+    color: #4a4f58;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 4px;
+    font-family: inherit;
+  }
+  .jaywalk button:hover { color: #8a857a; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜红绿灯</h1>
+  <p>这个路口没有车，没有摄像头，也没有别人。<br>可红灯还是红的。等它，或者别等。</p>
+</div>
+
+<div class="count-num" id="countNum">23</div>
+<div class="caption" id="caption"></div>
+<div class="jaywalk"><button id="jay">红灯的时候，也可以走过去</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var countNum = document.getElementById('countNum');
+  var caption = document.getElementById('caption');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  var RED_LEN = 23, GREEN_LEN = 4;
+  var phase = 'red';           // red | green
+  var remain = RED_LEN;
+  var cycle = 0;               // 等过的红灯数
+  var captionTimer = null;
+
+  function say(text) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (captionTimer) clearTimeout(captionTimer);
+    captionTimer = setTimeout(function () { caption.classList.remove('show'); }, 4600);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  document.getElementById('jay').addEventListener('click', function () {
+    if (phase !== 'red') { say('现在是绿灯，堂堂正正地走。'); return; }
+    // 闯红灯：两道车灯光轨呼啸而过
+    headlights.push({ x: -w0() - 200, v: 1400, c: '255,230,170' });
+    headlights.push({ x: w0() + 200, v: -1200, c: '255,240,210' });
+    say('车流呼啸而过。闯可以，但明天的你会替今晚捏把汗。');
+  });
+
+  function w0() { return window.innerWidth; }
+  var headlights = [];
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    remain -= dt;
+    if (phase === 'red' && remain <= 0) {
+      phase = 'green';
+      remain = GREEN_LEN;
+      document.body.classList.add('green');
+      cycle++;
+      say(cycle === 1 ? '绿了。走的时候轻一点，别吵醒路。'
+        : cycle === 2 ? '今晚的绿灯，已经用过一次了。剩下的灯留给别人。'
+        : '又绿了。你看，该来的总会来，就是得等。');
+    } else if (phase === 'green' && remain <= 0) {
+      phase = 'red';
+      remain = RED_LEN;
+      document.body.classList.remove('green');
+    }
+    countNum.textContent = Math.max(0, Math.ceil(remain));
+
+    // 背景：夜街
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+    var roadY = h * 0.78;
+    ctx.fillStyle = '#0b0d13';
+    ctx.fillRect(0, roadY, w, h - roadY);
+    // 车道虚线
+    ctx.fillStyle = 'rgba(200,190,150,0.16)';
+    for (var dx = (t * 0.02) % 90 - 90; dx < w; dx += 90) {
+      ctx.fillRect(dx, roadY + (h - roadY) * 0.52, 44, 4);
+    }
+
+    // 远处天际微光
+    var sky = ctx.createLinearGradient(0, 0, 0, roadY);
+    sky.addColorStop(0, '#07090e');
+    sky.addColorStop(1, '#0d1119');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, roadY);
+
+    // 车灯光轨
+    for (var i = headlights.length - 1; i >= 0; i--) {
+      var hl = headlights[i];
+      hl.x += hl.v * dt;
+      var grd = ctx.createRadialGradient(hl.x, roadY + 30, 0, hl.x, roadY + 30, 90);
+      grd.addColorStop(0, 'rgba(' + hl.c + ',0.5)');
+      grd.addColorStop(1, 'rgba(' + hl.c + ',0)');
+      ctx.fillStyle = grd;
+      ctx.fillRect(hl.x - 90, roadY - 40, 180, 140);
+      if (hl.x < -300 || hl.x > w + 300) headlights.splice(i, 1);
+    }
+
+    // 红绿灯：立柱 + 三灯
+    var lx = w * 0.5, top = h * 0.24, lw = 64, lh = 172;
+    ctx.fillStyle = '#151a24';
+    ctx.fillRect(lx - 4, top + lh, 8, roadY - (top + lh));
+    ctx.fillStyle = '#12161f';
+    ctx.strokeStyle = '#2c3542';
+    ctx.lineWidth = 2;
+    roundRect(lx - lw / 2, top, lw, lh, 12);
+    ctx.fill(); ctx.stroke();
+
+    function lamp(cy, on, color, glow) {
+      ctx.beginPath();
+      ctx.arc(lx, cy, 17, 0, Math.PI * 2);
+      ctx.fillStyle = on ? color : 'rgba(255,255,255,0.05)';
+      ctx.fill();
+      if (on) {
+        var g2 = ctx.createRadialGradient(lx, cy, 0, lx, cy, 55);
+        g2.addColorStop(0, glow);
+        g2.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g2;
+        ctx.fillRect(lx - 55, cy - 55, 110, 110);
+      }
+    }
+    var breathe = 0.82 + 0.18 * Math.sin(t * 0.0022);
+    lamp(top + 40, phase === 'red', 'rgba(224,74,58,' + breathe + ')', 'rgba(255,90,70,0.3)');
+    lamp(top + 86, false, 'rgba(255,255,255,0.06)', '');
+    lamp(top + 132, phase === 'green', '#5ac96a', 'rgba(90,220,130,0.3)');
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

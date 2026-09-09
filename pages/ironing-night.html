@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜熨衣</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.16em;
+    color: #8f897c;
+    z-index: 3;
+  }
+  .again {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 4;
+    display: none;
+  }
+  body.done .count-line { display: none; }
+  body.done .again { display: block; }
+  .again button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 9px 24px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜熨衣</h1>
+  <p>明天要穿的那件衬衫，还皱着。<br>推熨斗——慢慢来，褶皱是一根一根消失的。</p>
+</div>
+
+<div class="count-line" id="countLine"></div>
+<div class="again"><button id="again">再来一件</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var wrinkles = [];     // {x,y,len,ang,alpha,speed}
+  var steam = [];        // {x,y,r,vy,life}
+  var iron = { x: -100, y: -100, down: false };
+  var done = false;
+
+  // 衬衫区域（居中）
+  function shirtRect() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var sw = Math.min(430, w * 0.78);
+    return { x: (w - sw) / 2, y: h * 0.32, w: sw, h: sw * 0.92 };
+  }
+
+  function makeWrinkles() {
+    wrinkles = [];
+    var r = shirtRect();
+    for (var i = 0; i < 16; i++) {
+      wrinkles.push({
+        x: r.x + 26 + Math.random() * (r.w - 60),
+        y: r.y + 30 + Math.random() * (r.h - 60),
+        len: 30 + Math.random() * 60,
+        ang: (Math.random() - 0.5) * 1.4,
+        alpha: 0.5 + Math.random() * 0.4,
+        curve: (Math.random() - 0.5) * 20
+      });
+    }
+    done = false;
+    document.body.classList.remove('done');
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', function () {
+    resize();
+    makeWrinkles();
+  });
+
+  window.addEventListener('pointermove', function (e) {
+    iron.x = e.clientX; iron.y = e.clientY;
+    if (!done) press(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerdown', function (e) {
+    iron.down = true;
+    press(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', function () { iron.down = false; });
+
+  function press(x, y) {
+    var r = shirtRect();
+    if (x < r.x - 14 || x > r.x + r.w + 14 || y < r.y - 14 || y > r.y + r.h + 14) return;
+    wrinkles.forEach(function (wr) {
+      if (wr.alpha <= 0.01) return;
+      // 距离线段中点近就压平
+      var d = Math.hypot(wr.x - x, wr.y - y);
+      if (d < 62) {
+        wr.alpha = Math.max(0, wr.alpha - (1 - d / 62) * 0.3);
+        if (Math.random() < 0.3) {
+          steam.push({
+            x: x + (Math.random() - 0.5) * 40,
+            y: y - 8,
+            r: 4 + Math.random() * 5,
+            vy: -26 - Math.random() * 18,
+            life: 1
+          });
+        }
+      }
+    });
+    checkDone();
+  }
+
+  function checkDone() {
+    var remain = wrinkles.filter(function (w2) { return w2.alpha > 0.01; }).length;
+    countLine.textContent = '还剩 ' + remain + ' 道褶皱';
+    if (remain === 0 && !done) {
+      done = true;
+      document.body.classList.add('done');
+      setTimeout(function () {
+        countLine.textContent = '平整了。谁也不知道它昨晚被熨了这么久。';
+      }, 100);
+    }
+  }
+
+  document.getElementById('again').addEventListener('click', function () {
+    makeWrinkles();
+    checkDone();
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // 按住不动也能持续熨
+    if (iron.down && !done) press(iron.x, iron.y);
+
+    // 熨衣板背景
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+    var r = shirtRect();
+
+    // 板面
+    ctx.fillStyle = '#0e1118';
+    roundRect(r.x - 24, r.y - 20, r.w + 48, r.h + 40, 14);
+    ctx.fill();
+
+    // 衬衫：浅蓝布料 + 领子 + 纽扣线
+    ctx.fillStyle = '#cfd8e2';
+    roundRect(r.x, r.y, r.w, r.h, 10);
+    ctx.fill();
+    // 领子
+    ctx.fillStyle = '#bcc7d4';
+    ctx.beginPath();
+    ctx.moveTo(r.x + r.w / 2 - 34, r.y);
+    ctx.lineTo(r.x + r.w / 2, r.y + 44);
+    ctx.lineTo(r.x + r.w / 2 + 34, r.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#9fadc0';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(r.x + r.w / 2, r.y + 44);
+    ctx.lineTo(r.x + r.w / 2, r.y + r.h - 24);
+    ctx.stroke();
+    // 纽扣
+    ctx.fillStyle = '#8fa0b5';
+    for (var by = r.y + 66; by < r.y + r.h - 30; by += 52) {
+      ctx.beginPath(); ctx.arc(r.x + r.w / 2 + 22, by, 4.4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 褶皱（阴影折线）
+    wrinkles.forEach(function (wr) {
+      if (wr.alpha <= 0.01) return;
+      ctx.strokeStyle = 'rgba(96,112,134,' + wr.alpha + ')';
+      ctx.lineWidth = 3.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(wr.x - Math.cos(wr.ang) * wr.len / 2, wr.y - Math.sin(wr.ang) * wr.len / 2);
+      ctx.quadraticCurveTo(
+        wr.x + Math.sin(wr.ang) * wr.curve, wr.y - Math.cos(wr.ang) * wr.curve,
+        wr.x + Math.cos(wr.ang) * wr.len / 2, wr.y + Math.sin(wr.ang) * wr.len / 2
+      );
+      ctx.stroke();
+    });
+
+    // 蒸汽
+    for (var i = steam.length - 1; i >= 0; i--) {
+      var s = steam[i];
+      s.y += s.vy * dt;
+      s.r += 9 * dt;
+      s.life -= dt * 0.8;
+      if (s.life <= 0) { steam.splice(i, 1); continue; }
+      var g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r);
+      g.addColorStop(0, 'rgba(226,232,240,' + (0.3 * s.life) + ')');
+      g.addColorStop(1, 'rgba(226,232,240,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 熨斗（跟随指针）
+    ctx.save();
+    ctx.translate(iron.x, iron.y);
+    // 底板
+    ctx.fillStyle = '#3a4250';
+    ctx.beginPath();
+    ctx.moveTo(-34, 16);
+    ctx.lineTo(30, 16);
+    ctx.quadraticCurveTo(38, 16, 30, 4);
+    ctx.lineTo(-26, 4);
+    ctx.closePath();
+    ctx.fill();
+    // 机身
+    ctx.fillStyle = '#4c5568';
+    ctx.beginPath();
+    ctx.moveTo(-28, 4);
+    ctx.quadraticCurveTo(-30, -18, -8, -22);
+    ctx.lineTo(16, -22);
+    ctx.quadraticCurveTo(30, -20, 30, 4);
+    ctx.closePath();
+    ctx.fill();
+    // 手柄
+    ctx.strokeStyle = '#2c3340';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(-2, -24, 12, Math.PI * 1.1, Math.PI * 1.95);
+    ctx.stroke();
+    // 指示灯
+    ctx.fillStyle = iron.down ? '#7ac96a' : '#5a6478';
+    ctx.beginPath(); ctx.arc(20, -12, 3.2, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  resize();
+  makeWrinkles();
+  checkDone();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

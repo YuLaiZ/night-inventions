@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给明天插一瓶花</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .tray {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 22px;
+    z-index: 3;
+  }
+  .tray .flower-btn {
+    width: 62px; height: 62px;
+    border-radius: 50%;
+    border: 2px solid #39414f;
+    background: #10141c;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+  .tray .flower-btn:hover { transform: translateY(-4px); border-color: #5a6478; }
+  .caption {
+    position: absolute; bottom: 15vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #cfc6b2;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  .reset-row {
+    position: absolute; bottom: 15vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 4;
+    display: none;
+  }
+  body.done .reset-row { display: block; }
+  .reset-row button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 9px 24px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给明天插一瓶花</h1>
+  <p>夜里插的花，白天看刚刚好。<br>点一支，插一支——插满这瓶，送给明天早上。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+<div class="tray" id="tray">
+  <div class="flower-btn" data-type="sun">🌻</div>
+  <div class="flower-btn" data-type="daisy">🌼</div>
+  <div class="flower-btn" data-type="tulip">🌷</div>
+  <div class="flower-btn" data-type="rose">🌹</div>
+  <div class="flower-btn" data-type="wild">🌾</div>
+  <div class="flower-btn" data-type="clover">🍀</div>
+  <div class="flower-btn" data-type="bloom">🌸</div>
+</div>
+<div class="reset-row"><button id="reset">倒出来重新插</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var flowers = [];      // {type, x, top, sway, ph}
+  var MAX = 7;
+  var done = false;
+
+  function say(text) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 花瓣色池（深夜柔色）
+  var PETALS = ['#e8b4c8', '#f0d8a8', '#c9d8f0', '#d8e8c8', '#f0c8b8', '#e8e0f8'];
+  var CENTERS = ['#e8c84a', '#d98a5a', '#8fb5a0'];
+
+  function addFlower(type) {
+    if (done || flowers.length >= MAX) return;
+    var w = window.innerWidth;
+    var mouthX = w / 2;
+    var mouthY = h_mouth();
+    var idx = flowers.length;                       // push 前的序号 0..6
+    flowers.push({
+      type: type,
+      x: mouthX,
+      top: mouthY - 90 - Math.random() * 70,
+      ang: (idx - (MAX - 1) / 2) * 0.26,            // 扇形展开角（弧度），±0.78
+      petal: PETALS[idx % PETALS.length],
+      center: CENTERS[idx % CENTERS.length],
+      ph: Math.random() * Math.PI * 2,
+      grow: 0
+    });
+    say(['好。', '这支不错。', '插稳了。', '再来一支。', '颜色很衬夜色。', '快满了。'][Math.min(flowers.length - 1, 5)]);
+    if (flowers.length === MAX) {
+      done = true;
+      document.body.classList.add('done');
+      setTimeout(function () {
+        say('这一瓶，是给明天早上的。');
+      }, 600);
+    }
+  }
+
+  function h_mouth() { return window.innerHeight * 0.6; }
+  function h_base() { return window.innerHeight * 0.82; }
+
+  document.querySelectorAll('.flower-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { addFlower(btn.dataset.type); });
+  });
+
+  document.getElementById('reset').addEventListener('click', function () {
+    flowers = [];
+    done = false;
+    document.body.classList.remove('done');
+    caption.classList.remove('show');
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var mouthY = h_mouth(), baseY = h_base();
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 桌沿
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillRect(0, baseY + 60, w, h - baseY - 60);
+    ctx.strokeStyle = 'rgba(200,190,160,0.08)';
+    ctx.beginPath(); ctx.moveTo(0, baseY + 60); ctx.lineTo(w, baseY + 60); ctx.stroke();
+
+    // 瓶（细口圆肚）
+    var bottleW = 108, bottleH = 150;
+    var bxc = w / 2;
+    ctx.fillStyle = 'rgba(60,80,90,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(bxc - 24, mouthY);
+    ctx.lineTo(bxc - 24, mouthY + 30);
+    ctx.quadraticCurveTo(bxc - bottleW / 2, mouthY + 52, bxc - bottleW / 2, mouthY + 80);
+    ctx.quadraticCurveTo(bxc - bottleW / 2, mouthY + bottleH, bxc, mouthY + bottleH);
+    ctx.quadraticCurveTo(bxc + bottleW / 2, mouthY + bottleH, bxc + bottleW / 2, mouthY + 80);
+    ctx.quadraticCurveTo(bxc + bottleW / 2, mouthY + 52, bxc + 24, mouthY + 30);
+    ctx.lineTo(bxc + 24, mouthY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(160,200,220,0.25)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 花（茎从瓶口散开到各自高度）
+    flowers.forEach(function (f) {
+      f.grow = Math.min(1, f.grow + dt * 2.2);
+      var g = f.grow;
+      var sway = Math.sin(t * 0.0012 + f.ph) * 4;
+      var tipX = f.x + f.ang * 220 * g + sway;
+      var tipY = mouthY - (mouthY - f.top) * g;
+      // 茎
+      ctx.strokeStyle = '#5a7a52';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(w / 2, mouthY + 10);
+      ctx.quadraticCurveTo(w / 2 + f.ang * 100, (mouthY + tipY) / 2, tipX, tipY);
+      ctx.stroke();
+      if (g < 1) return;
+      // 花头
+      drawHead(f.type, tipX, tipY, t, f);
+    });
+
+    // 瓶口前的两支已经插好的（画在瓶后）
+    function drawHead(type, x, y, t, f) {
+      var rot = Math.sin(t * 0.001 + f.ph) * 0.08;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      if (type === 'sun') {
+        ctx.fillStyle = '#e8c84a';
+        for (var i = 0; i < 8; i++) {
+          ctx.save(); ctx.rotate(i * Math.PI / 4);
+          ctx.beginPath(); ctx.ellipse(0, -13, 4.4, 9, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+        ctx.fillStyle = '#7a5a2e';
+        ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+      } else if (type === 'daisy' || type === 'bloom') {
+        ctx.fillStyle = type === 'daisy' ? '#f0ead8' : '#e8b4c8';
+        for (var j = 0; j < 6; j++) {
+          ctx.save(); ctx.rotate(j * Math.PI / 3);
+          ctx.beginPath(); ctx.ellipse(0, -10, 3.8, 8, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+        ctx.fillStyle = '#e8c84a';
+        ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+      } else if (type === 'tulip') {
+        ctx.fillStyle = '#d9788a';
+        ctx.beginPath();
+        ctx.moveTo(-9, 2);
+        ctx.quadraticCurveTo(-10, -14, 0, -12);
+        ctx.quadraticCurveTo(10, -14, 9, 2);
+        ctx.quadraticCurveTo(0, 8, -9, 2);
+        ctx.fill();
+      } else if (type === 'rose') {
+        ctx.fillStyle = '#c95a6a';
+        ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#a8404f';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(0, 0, 5.5, 0.4, Math.PI * 1.6); ctx.stroke();
+        ctx.beginPath(); ctx.arc(1, 1, 3, Math.PI * 0.8, Math.PI * 2.2); ctx.stroke();
+      } else if (type === 'wild') {
+        ctx.strokeStyle = '#c9b26a';
+        ctx.lineWidth = 2;
+        for (var k = -2; k <= 2; k++) {
+          ctx.beginPath();
+          ctx.moveTo(k * 3, 4);
+          ctx.lineTo(k * 5, -9 - Math.abs(k) * -2);
+          ctx.stroke();
+        }
+      } else if (type === 'clover') {
+        ctx.fillStyle = '#6a9a5c';
+        for (var m = 0; m < 3; m++) {
+          ctx.save(); ctx.rotate(m * Math.PI * 2 / 3);
+          ctx.beginPath(); ctx.ellipse(0, -7, 5.5, 7, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

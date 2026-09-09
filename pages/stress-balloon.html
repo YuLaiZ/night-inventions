@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>压力气球</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .stats {
+    position: absolute; bottom: 4.5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.14em;
+    color: #7d7668;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>压力气球</h1>
+  <p>心里那口气别咽回去——按住，吹出来。<br>松手它悬停等你发落：轻拍，拍爆；一甩，放它飞。</p>
+</div>
+
+<div class="stats" id="stats">放飞的 0 只 · 爆掉的 0 只</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var stats = document.getElementById('stats');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  var COLORS = [
+    { main: '#d97f6a', hi: 'rgba(255,220,205,0.55)' },
+    { main: '#7ba6c9', hi: 'rgba(220,238,255,0.55)' },
+    { main: '#c9b26a', hi: 'rgba(255,244,210,0.55)' },
+    { main: '#8fb573', hi: 'rgba(228,250,205,0.55)' },
+    { main: '#b98cc9', hi: 'rgba(244,222,255,0.55)' }
+  ];
+
+  // 状态：idle（待吹）→ inflating（按住吹）→ flying（松手飞）→ 回到 idle
+  var mode = 'idle';
+  var balloon = null;       // {x,y,r,col,vx,vy,ph}
+  var debris = [];          // 爆裂碎片
+  var released = 0, popped = 0;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function newBalloon() {
+    var w = window.innerWidth, h = window.innerHeight;
+    balloon = {
+      x: w / 2, y: h * 0.58,
+      r: 22,
+      col: COLORS[Math.floor(Math.random() * COLORS.length)],
+      vx: 0, vy: 0,
+      ph: Math.random() * Math.PI * 2
+    };
+    mode = 'idle';
+  }
+
+  function updateStats() {
+    stats.textContent = '放飞的 ' + released + ' 只 · 爆掉的 ' + popped + ' 只';
+  }
+
+  // ── 交互：按住吹气 → 松手悬停 → 点一下拍爆 / 按住甩动放飞 ───
+  var downAt = 0, downX = 0, downY = 0;
+  canvas.addEventListener('pointerdown', function (e) {
+    downAt = Date.now();
+    downX = e.clientX; downY = e.clientY;
+    if (mode === 'idle') mode = 'inflating';
+  });
+  window.addEventListener('pointerup', function (e) {
+    if (mode !== 'inflating' && mode !== 'hover') return;
+    var held = Date.now() - downAt;
+    var drag = Math.hypot(e.clientX - downX, e.clientY - downY);
+    if (held < 260 && drag < 14) {
+      if (mode === 'hover' && balloon.r > 40) { pop(); return; }   // 悬停时轻拍：爆
+      mode = 'idle';                                               // 太小，瘪回
+      balloon.r = 22;
+      return;
+    }
+    if (mode === 'hover') {
+      // 甩动放飞
+      if (balloon.r < 42) { mode = 'idle'; balloon.r = 22; return; }
+      mode = 'flying';
+      var sp = 90 + balloon.r * 2.4;
+      var dx = e.clientX - downX, dy = e.clientY - downY;
+      var dl = Math.max(1, Math.hypot(dx, dy));
+      balloon.vx = dx / dl * sp;
+      balloon.vy = dy / dl * sp - 60;
+      released++;
+      updateStats();
+    } else {
+      // 吹完直接松手：原地悬停
+      balloon.baseY = balloon.y;
+      mode = 'hover';
+    }
+  });
+
+  function pop() {
+    for (var i = 0; i < 22; i++) {
+      var a = Math.random() * Math.PI * 2;
+      var sp = 60 + Math.random() * 260;
+      debris.push({
+        x: balloon.x, y: balloon.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
+        life: 0.6 + Math.random() * 0.5,
+        col: balloon.col.main,
+        s: 2 + Math.random() * 3.5
+      });
+    }
+    popped++;
+    updateStats();
+    newBalloon();
+  }
+
+  // ── 物理 ─────────────────────────────────────────────
+  function step(dt, t) {
+    if (mode === 'inflating' && balloon) {
+      balloon.r = Math.min(150, balloon.r + dt * 34);
+      balloon.x += Math.sin(t * 0.02) * balloon.r * 0.012 * (balloon.r / 40); // 越大越颤
+      balloon.y -= dt * 4;
+    }
+    if (mode === 'hover' && balloon) {
+      balloon.y = (balloon.baseY || balloon.y) + Math.sin(t * 0.0018 + balloon.ph) * 7;
+    }
+    if (mode === 'flying' && balloon) {
+      // 放气的乱飞：推进+摆动+微弱重力
+      var thrust = (balloon.r - 22) * 3.2;
+      var ang = Math.atan2(balloon.vy, balloon.vx);
+      balloon.vx += Math.cos(ang) * thrust * dt * 2.4;
+      balloon.vy += Math.sin(ang) * thrust * dt * 2.4 + 60 * dt;
+      balloon.vx += Math.sin(t * 0.011 + balloon.ph) * 130 * dt;
+      balloon.vx *= (1 - dt * 0.35);
+      balloon.vy *= (1 - dt * 0.35);
+      balloon.x += balloon.vx * dt;
+      balloon.y += balloon.vy * dt;
+      balloon.r = Math.max(20, balloon.r - dt * 9);   // 一边飞一边漏气
+      var w = window.innerWidth, h = window.innerHeight;
+      // 撞墙反弹
+      if (balloon.x < balloon.r) { balloon.x = balloon.r; balloon.vx = Math.abs(balloon.vx) * 0.8; }
+      if (balloon.x > w - balloon.r) { balloon.x = w - balloon.r; balloon.vx = -Math.abs(balloon.vx) * 0.8; }
+      if (balloon.y < balloon.r + 40) { balloon.y = balloon.r + 40; balloon.vy = Math.abs(balloon.vy) * 0.8; }
+      // 瘪到底了，落地——换一只新的来
+      if (balloon.r <= 20.5 && balloon.y > h * 0.75) {
+        newBalloon();
+      }
+    }
+    for (var i = debris.length - 1; i >= 0; i--) {
+      var d = debris[i];
+      d.vy += 480 * dt;
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      d.life -= dt;
+      if (d.life <= 0) debris.splice(i, 1);
+    }
+  }
+
+  // ── 绘制 ─────────────────────────────────────────────
+  function draw(t) {
+    var w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    if (balloon) {
+      var b = balloon;
+      var shake = (mode === 'inflating' ? (b.r - 22) / 128 : 0);
+      var sx = Math.sin(t * 0.03) * shake * 2.2;
+      var sy = Math.cos(t * 0.027) * shake * 1.6;
+      // 绳
+      ctx.strokeStyle = 'rgba(200,195,180,0.4)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(b.x + sx, b.y + b.r + 6);
+      ctx.quadraticCurveTo(b.x + Math.sin(t * 0.002 + b.ph) * 10, b.y + b.r + 30, b.x + sx, b.y + b.r + 52);
+      ctx.stroke();
+      // 球体
+      ctx.fillStyle = b.col.main;
+      ctx.beginPath();
+      ctx.ellipse(b.x + sx, b.y + sy, b.r * 0.88, b.r, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 结
+      ctx.beginPath();
+      ctx.moveTo(b.x + sx - 5, b.y + sy + b.r - 2);
+      ctx.lineTo(b.x + sx + 5, b.y + sy + b.r - 2);
+      ctx.lineTo(b.x + sx, b.y + sy + b.r + 7);
+      ctx.closePath();
+      ctx.fill();
+      // 高光
+      ctx.fillStyle = b.col.hi;
+      ctx.beginPath();
+      ctx.ellipse(b.x + sx - b.r * 0.32, b.y + sy - b.r * 0.38, b.r * 0.22, b.r * 0.3, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+      // 充气提示光圈
+      if (mode === 'idle' || mode === 'hover') {
+        var tw = 0.4 + 0.3 * Math.sin(t * 0.002);
+        ctx.strokeStyle = 'rgba(200,195,180,' + tw + ')';
+        ctx.setLineDash([3, 6]);
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r + 16, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    debris.forEach(function (d) {
+      ctx.fillStyle = d.col;
+      ctx.globalAlpha = Math.max(0, Math.min(1, d.life * 1.6));
+      ctx.fillRect(d.x, d.y, d.s, d.s);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    step(dt, now);
+    draw(now);
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  newBalloon();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

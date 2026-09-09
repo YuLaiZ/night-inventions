@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>初雪</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.1em;
+    color: #a89f8e;
+    min-height: 22px;
+    z-index: 3;
+    pointer-events: none;
+    padding: 0 30px;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>初雪</h1>
+  <p>今年夜里的第一场雪，落得很轻。<br>点一下路灯——光柱里的雪，看得最清楚。</p>
+</div>
+
+<div class="caption" id="caption">雪还在下。积厚了，明早的脚印会很好看。</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  var flakes = [];         // {x,y,r,vx,vy,ph}
+  var lampOn = true;
+  var lampX, lampTop;
+  var depth = 0;           // 积雪厚度 0..1
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    lampX = window.innerWidth * 0.78;
+    lampTop = window.innerHeight * 0.3;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function spawn() {
+    if (flakes.length > 240) return;
+    var w = window.innerWidth;
+    flakes.push({
+      x: Math.random() * (w + 80) - 40,
+      y: -10,
+      r: 1 + Math.random() * 2.6,
+      vy: 18 + Math.random() * 30,
+      drift: 8 + Math.random() * 16,
+      ph: Math.random() * Math.PI * 2,
+      depth: Math.random() < 0.25 ? 1 : 0   // 1 = 近景大雪花
+    });
+  }
+
+  canvas.addEventListener('click', function (e) {
+    // 点路灯切换开关
+    if (Math.hypot(e.clientX - lampX, e.clientY - (lampTop + 30)) < 90) {
+      lampOn = !lampOn;
+      return;
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var groundY = h * 0.82;
+
+    if (Math.random() < dt * 22) spawn();
+    if (Math.random() < dt * 4) spawn();
+
+    // 天空
+    var sky = ctx.createLinearGradient(0, 0, 0, groundY);
+    sky.addColorStop(0, '#05070c');
+    sky.addColorStop(1, '#0d1220');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, groundY);
+
+    // 路灯（先画灯和光柱，雪压在光上面会亮）
+    var poleX = lampX;
+    ctx.strokeStyle = '#1c222d';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(poleX, groundY);
+    ctx.lineTo(poleX, lampTop);
+    ctx.stroke();
+    // 灯臂+灯头
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(poleX, lampTop);
+    ctx.quadraticCurveTo(poleX - 30, lampTop - 12, poleX - 52, lampTop - 8);
+    ctx.stroke();
+    if (lampOn) {
+      var cone = ctx.createLinearGradient(poleX - 52, lampTop, poleX - 30, groundY);
+      cone.addColorStop(0, 'rgba(255,226,160,0.16)');
+      cone.addColorStop(1, 'rgba(255,226,160,0.02)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(poleX - 52, lampTop - 6);
+      ctx.lineTo(poleX - 30, groundY);
+      ctx.lineTo(poleX - 110, groundY);
+      ctx.lineTo(poleX - 74, lampTop - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ffe9b8';
+      ctx.beginPath();
+      ctx.ellipse(poleX - 52, lampTop - 6, 9, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      var halo = ctx.createRadialGradient(poleX - 52, lampTop - 6, 0, poleX - 52, lampTop - 6, 60);
+      halo.addColorStop(0, 'rgba(255,226,160,0.5)');
+      halo.addColorStop(1, 'rgba(255,226,160,0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(poleX - 112, lampTop - 66, 120, 120);
+    }
+
+    // 雪花（远景先画，近景后画；光柱里的更亮）
+    flakes.forEach(function (f2) {
+      f2.y += f2.vy * dt;
+      f2.x += Math.sin(t * 0.0008 + f2.ph) * f2.drift * dt + 6 * dt;
+      if (f2.y > groundY + 4) { f2.y = -10; f2.x = Math.random() * (w + 80) - 40; }
+      if (f2.x > w + 40) f2.x = -40;
+      var inLight = lampOn && Math.abs(f2.x - (poleX - 60)) < 55 && f2.y > lampTop;
+      var a = f2.depth ? 0.9 : 0.55;
+      var size = f2.depth ? f2.r * 1.35 : f2.r;
+      if (inLight) a = Math.min(1, a * 1.9);
+      ctx.fillStyle = 'rgba(235,240,250,' + a + ')';
+      ctx.beginPath();
+      ctx.arc(f2.x, f2.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 地面 + 积雪（厚度随时间缓增）
+    depth = Math.min(1, depth + dt * 0.004);
+    var snowH = 8 + depth * 26;
+    ctx.fillStyle = '#dfe6f0';
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(0, groundY - snowH + 6);
+    for (var sx = 0; sx <= w; sx += 40) {
+      ctx.lineTo(sx, groundY - snowH + Math.sin(sx * 0.02 + 1) * 5 + Math.sin(sx * 0.007) * 8);
+    }
+    ctx.lineTo(w, groundY - snowH);
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
+    // 积雪上的蓝影
+    ctx.fillStyle = 'rgba(140,160,200,0.12)';
+    for (var sx2 = 20; sx2 < w; sx2 += 130) {
+      ctx.beginPath();
+      ctx.ellipse(sx2, groundY - snowH + 10, 46, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

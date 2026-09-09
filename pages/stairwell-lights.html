@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>声控灯楼道</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #05070b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 5;
+    transition: opacity 1s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.done .copy { opacity: 0; }
+  .well {
+    position: absolute; inset: 0;
+    overflow: hidden;
+  }
+  .floors {
+    position: absolute; left: 0; right: 0;
+    transition: transform 0.9s cubic-bezier(0.5, 0.05, 0.3, 1);
+  }
+  .floor {
+    position: relative;
+    height: 56vh; min-height: 300px;
+    border-bottom: 3px solid #1a2030;
+    background: #07090f;
+    cursor: pointer;
+  }
+  .floor .stairwell-lamp {
+    position: absolute; top: 8px; left: 50%;
+    transform: translateX(-50%);
+    width: 44px; height: 14px;
+    border-radius: 0 0 8px 8px;
+    background: #1c222d;
+    border: 1px solid #2c3546;
+    transition: background 1s ease, box-shadow 1s ease;
+  }
+  .floor.lit .stairwell-lamp {
+    background: #ffe9b8;
+    box-shadow: 0 0 26px 8px rgba(255,226,160,0.4);
+  }
+  .floor .glow {
+    position: absolute; inset: 0;
+    opacity: 0;
+    transition: opacity 1.3s ease;
+    background: radial-gradient(ellipse at 50% 12%, rgba(255,232,175,0.20), rgba(255,232,175,0.05) 45%, transparent 72%);
+    pointer-events: none;
+  }
+  .floor.lit .glow { opacity: 1; }
+  .floor .graffiti {
+    position: absolute; left: 0; right: 0; top: 46%;
+    text-align: center;
+    font-size: 14px; line-height: 2.1;
+    color: #b9b3a3;
+    letter-spacing: 0.1em;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 1.6s ease 0.5s, transform 1.6s ease 0.5s;
+    padding: 0 30px;
+    pointer-events: none;
+  }
+  .floor.lit .graffiti { opacity: 0.95; transform: translateY(0); }
+  .floor .floor-no {
+    position: absolute; right: 22px; bottom: 14px;
+    font-size: 11px; letter-spacing: 0.2em;
+    color: #3f4550;
+  }
+  .floor.lit .floor-no { color: #6d675c; }
+  .floor .tap-hint {
+    position: absolute; left: 0; right: 0; top: 30%;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.22em;
+    color: #4a4f58;
+    animation: blink 1.8s ease infinite;
+    pointer-events: none;
+  }
+  .floor.lit .tap-hint, .floor.past .tap-hint { display: none; }
+  @keyframes blink { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+  .skyline {
+    position: absolute; inset: 0;
+    opacity: 0;
+    transition: opacity 2.4s ease 0.8s;
+    pointer-events: none;
+    z-index: 4;
+    text-align: center;
+  }
+  body.done .skyline { opacity: 1; }
+  .skyline svg {
+    position: absolute; left: 0; right: 0; bottom: 40px;
+    width: 100%; height: 44vh;
+  }
+  .skyline .city {
+    position: absolute; left: 0; right: 0; bottom: calc(44vh + 46px);
+    font-size: 17px; letter-spacing: 0.26em;
+    color: #e8d9b0;
+    text-shadow: 0 0 24px rgba(255,220,150,0.35);
+  }
+  .skyline .city-sub {
+    position: absolute; left: 0; right: 0; bottom: calc(44vh + 12px);
+    font-size: 13px; letter-spacing: 0.14em;
+    color: #8f897c;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 6;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 6;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>声控灯楼道</h1>
+  <p>老楼没有电梯，声控灯要一层一层跺亮。<br>点击楼道，跺脚——看看墙上都记着什么。</p>
+</div>
+
+<div class="well"><div class="floors" id="floors"></div></div>
+
+<div class="skyline">
+  <svg id="citySvg" preserveAspectRatio="none" viewBox="0 0 1000 320"></svg>
+  <div class="city">风很大，城市很亮。</div>
+  <div class="city-sub">值得爬上来。下楼的时候，灯会一盏一盏送你。</div>
+</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var FLOORS = [
+    { no: '1 楼', text: '信箱塞满了传单，最上面那封，是昨天的月亮。' },
+    { no: '2 楼', text: '墙上有人写「到此一游」，旁边有人回：游到几楼了？' },
+    { no: '3 楼', text: '这层住着一只不出门的猫，猫粮碗就摆在门口。' },
+    { no: '4 楼', text: '琴声从门缝里漏出来，弹错的地方也很好听。' },
+    { no: '5 楼', text: '墙上那道划痕是搬家时蹭的，柜子到现在还记得。' },
+    { no: '6 楼', text: '谁的伞忘在这儿三天了，一直没人认领。' },
+    { no: '7 楼', text: '今晚的声控灯特别灵，大概是想让你早点到家。' },
+    { no: '天台', text: '门没锁。推开它。' }
+  ];
+
+  var container = document.getElementById('floors');
+  var current = 0;          // 当前应跺亮的层
+
+  FLOORS.forEach(function (f, i) {
+    var el = document.createElement('div');
+    el.className = 'floor';
+    el.innerHTML =
+      '<div class="stairwell-lamp"></div>' +
+      '<div class="glow"></div>' +
+      '<div class="tap-hint">跺 · 脚</div>' +
+      '<div class="graffiti">' + f.text + '</div>' +
+      '<div class="floor-no">' + f.no + '</div>';
+    container.appendChild(el);
+    el.addEventListener('click', function () {
+      if (i !== current) return;
+      el.classList.add('lit', 'past');
+      if (i === FLOORS.length - 1) {
+        // 天台：推门
+        setTimeout(function () { document.body.classList.add('done'); }, 900);
+        return;
+      }
+      current++;
+      scrollToFloor(current + 1);   // 视口上移，露出上一层
+    });
+  });
+
+  function scrollToFloor(idx) {
+    var fh = container.children[0].offsetHeight;
+    var H = window.innerHeight;
+    container.style.transform = 'translateY(' + Math.max(0, idx * fh - H * 0.62) + 'px)';
+  }
+
+  window.addEventListener('resize', function () { scrollToFloor(current); });
+
+  // 天台城市天际线：楼群剪影 + 零星亮窗（seed 固定，每次同一座城）
+  (function buildCity() {
+    var svg = document.getElementById('citySvg');
+    var seed = 7;
+    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+    var html = '';
+    var x = -10;
+    while (x < 1010) {
+      var bw = 40 + rnd() * 90;
+      var bh = 60 + rnd() * 200;
+      html += '<rect x="' + x.toFixed(0) + '" y="' + (320 - bh).toFixed(0) + '" width="' + bw.toFixed(0) + '" height="' + bh.toFixed(0) + '" fill="#0c101a"/>';
+      // 每栋楼撒几扇亮窗
+      var wins = Math.floor(rnd() * 6);
+      for (var k = 0; k < wins; k++) {
+        var wx = x + 6 + rnd() * (bw - 14);
+        var wy = 320 - bh + 10 + rnd() * (bh - 24);
+        var warm = rnd() < 0.8;
+        html += '<rect x="' + wx.toFixed(0) + '" y="' + wy.toFixed(0) + '" width="3.4" height="4.6" fill="rgba(' + (warm ? '255,208,130' : '178,208,240') + ',0.85)"/>';
+      }
+      x += bw + 6 + rnd() * 22;
+    }
+    svg.innerHTML = html;
+  })();
+})();
+</script>
+</body>
+</html>

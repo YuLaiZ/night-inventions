@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>还亮着的灯</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .sky {
+    position: absolute; inset: 0;
+    background: linear-gradient(#05070c 0%, #0a0f1a 55%, #10141f 100%);
+    transition: background 3s ease;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  .count-line {
+    position: absolute; bottom: 4.5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.14em;
+    color: #7d7668;
+    z-index: 3;
+    transition: opacity 1s ease;
+  }
+  .whisper {
+    position: absolute; bottom: 9vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.1em;
+    color: #8f897c;
+    opacity: 0;
+    transition: opacity 1.1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .whisper.show { opacity: 0.9; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<div class="sky" id="sky"></div>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>还亮着的灯</h1>
+  <p>凌晨的楼里，总有人和你一起醒着。<br>点一盏灯，送那位邻居入睡。</p>
+</div>
+
+<div class="whisper" id="whisper"></div>
+<div class="count-line" id="countLine"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var countLine = document.getElementById('countLine');
+  var whisper = document.getElementById('whisper');
+  var sky = document.getElementById('sky');
+
+  var buildings = [];      // 楼：{x,w,h,windows:[[wx,wy,on,state]]}
+  var litCount = 0;
+  var allOff = false;
+  var DPR = window.devicePixelRatio || 1;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    buildCity();
+  }
+
+  // ── 生成楼群：随机宽高、随机窗格 ──────────────────────
+  function buildCity() {
+    buildings = [];
+    litCount = 0;
+    var W = window.innerWidth, H = window.innerHeight;
+    var groundY = H - Math.max(70, H * 0.1);   // 楼底基线
+    var x = -20;
+    var i = 0;
+    while (x < W + 20) {
+      var bw = 54 + Math.random() * 90;
+      var bh = groundY * (0.22 + Math.random() * 0.52);
+      if (i % 7 === 0) bh *= 1.25;             // 偶尔一栋高的
+      bh = Math.min(bh, groundY - 90);
+      var b = { x: x, w: bw, h: bh, base: groundY, wins: [] };
+      var cols = Math.max(2, Math.floor(bw / 22));
+      var rows = Math.max(2, Math.floor(bh / 30));
+      var padX = (bw - cols * 12) / (cols + 1);
+      var padY = (bh - rows * 16) / (rows + 1);
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          // 每扇窗 8% 概率亮着
+          var on = Math.random() < 0.08;
+          b.wins.push({
+            x: x + padX + c * (12 + padX),
+            y: groundY - bh + padY + r * (16 + padY),
+            on: on,
+            glow: 0,          // 0 熄 → 1 亮（渐变过渡）
+            warm: Math.random() < 0.82,
+            ph: Math.random() * Math.PI * 2
+          });
+          if (on) litCount++;
+        }
+      }
+      buildings.push(b);
+      x += bw + (2 + Math.random() * 26);
+      i++;
+    }
+    updateCount();
+  }
+
+  function updateCount() {
+    countLine.textContent = allOff
+      ? '都睡了。你也早点。'
+      : '还有 ' + litCount + ' 盏灯陪你';
+  }
+
+  // ── 点击：找最近的亮窗 ────────────────────────────────
+  var WHISPERS = ['那位的晚安，收到了。', '又一位睡了。', '灯灭了，梦该开场了。', '替那扇窗说了声晚安。', '世界上少了一份失眠。'];
+
+  canvas.addEventListener('click', function (e) {
+    if (allOff) return;
+    var mx = e.clientX, my = e.clientY;
+    var best = null, bestD = 34 * 34;
+    buildings.forEach(function (b) {
+      b.wins.forEach(function (w) {
+        if (!w.on) return;
+        var dx = (w.x + 6) - mx, dy = (w.y + 8) - my;
+        var d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = w; }
+      });
+    });
+    if (best) {
+      best.on = false;
+      litCount--;
+      if (litCount <= 0) {
+        allOff = true;
+        sky.style.background = 'linear-gradient(#060a12 0%, #0c1526 55%, #16243c 100%)';
+      }
+      updateCount();
+      showWhisper(allOff ? '全城的灯都由你送睡了。' : WHISPERS[Math.floor(Math.random() * WHISPERS.length)]);
+    }
+  });
+
+  var whisperTimer = null;
+  function showWhisper(text) {
+    whisper.textContent = text;
+    whisper.classList.add('show');
+    if (whisperTimer) clearTimeout(whisperTimer);
+    whisperTimer = setTimeout(function () { whisper.classList.remove('show'); }, 3400);
+  }
+
+  // ── 偶发事件：有人睡了 / 有人也睡不着 ─────────────────
+  function randomEvent() {
+    if (allOff) return;
+    if (Math.random() < 0.55 && litCount > 3) {
+      // 一盏灯自己熄了
+      var onWins = [];
+      buildings.forEach(function (b) { b.wins.forEach(function (w) { if (w.on) onWins.push(w); }); });
+      if (onWins.length) { onWins[Math.floor(Math.random() * onWins.length)].on = false; litCount--; updateCount(); }
+    } else {
+      // 一扇暗窗亮起
+      var offWins = [];
+      buildings.forEach(function (b) { b.wins.forEach(function (w) { if (!w.on) offWins.push(w); }); });
+      if (offWins.length) { var w = offWins[Math.floor(Math.random() * offWins.length)]; w.on = true; litCount++; updateCount(); }
+    }
+  }
+  setInterval(function () { if (!allOff) randomEvent(); }, 9000);
+
+  // ── 绘制 ─────────────────────────────────────────────
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var groundY = h - Math.max(70, h * 0.1);
+
+    ctx.clearRect(0, 0, w, h);
+
+    // 楼体剪影
+    buildings.forEach(function (b) {
+      ctx.fillStyle = '#0d1119';
+      ctx.fillRect(b.x, b.base - b.h, b.w, b.h);
+      ctx.fillStyle = '#111624';
+      ctx.fillRect(b.x, b.base - b.h, b.w, 3);
+    });
+
+    // 窗与灯
+    buildings.forEach(function (b) {
+      ctx.fillStyle = '#151a28';
+      b.wins.forEach(function (win) {
+        ctx.fillRect(win.x, win.y, 9, 13);
+      });
+      b.wins.forEach(function (win) {
+        var target = win.on ? 1 : 0;
+        win.glow += (target - win.glow) * 0.045;   // 渐亮渐熄
+        if (win.glow < 0.01) return;
+        var breath = 0.82 + 0.18 * Math.sin(t * 0.0009 + win.ph);
+        var a = win.glow * breath;
+        var col = win.warm ? '255,196,110' : '190,215,255';
+        ctx.fillStyle = 'rgba(' + col + ',' + (0.75 * a) + ')';
+        ctx.fillRect(win.x, win.y, 9, 13);
+        if (win.glow > 0.12) {
+          ctx.fillStyle = 'rgba(' + col + ',' + (0.10 * a) + ')';
+          ctx.fillRect(win.x - 5, win.y - 6, 19, 25);
+        }
+      });
+    });
+
+    // 地平线
+    ctx.fillStyle = '#0a0d15';
+    ctx.fillRect(0, groundY, w, h - groundY);
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>冰箱贴诗</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #23272e;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #3a3f47;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    /* 冰箱门：金属拉丝质感 */
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px);
+    background-size: 3px 3px;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #5b6069; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #70757e; letter-spacing: 0.08em; }
+  .poem-area {
+    position: absolute; top: 150px; left: 0; right: 0; bottom: 110px;
+    z-index: 5;
+  }
+  .magnet {
+    position: absolute;
+    background: linear-gradient(170deg, #fdfaf2, #efe9da);
+    color: #2f3339;
+    font-size: 15px;
+    letter-spacing: 0.06em;
+    padding: 7px 13px;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.28), inset 0 -2px 3px rgba(0,0,0,0.08);
+    cursor: grab;
+    touch-action: none;
+    white-space: nowrap;
+  }
+  .magnet:active { cursor: grabbing; box-shadow: 0 5px 12px rgba(0,0,0,0.4); }
+  .tools {
+    position: absolute; bottom: 44px; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 14px;
+    z-index: 6;
+  }
+  .tools button {
+    background: #2c313a;
+    border: 1px solid #454c57;
+    border-radius: 8px;
+    color: #b9b3a5;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    padding: 9px 20px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .tools button:hover { border-color: #5f6774; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565b63;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a7f88;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a7f88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a5aab2; border-color: #a5aab2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>冰箱贴诗</h1>
+  <p>夜里写的诗不用发表，贴在冰箱上就行。<br>拖一枚词，再拖一枚——拼不拼得通，它都算数。</p>
+</div>
+
+<div class="poem-area" id="board"></div>
+
+<div class="tools">
+  <button id="shuffle">打乱重来</button>
+  <button id="compose">替我拼一首</button>
+</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var board = document.getElementById('board');
+  var WORDS = [
+    '夜', '风', '月亮', '梦', '灯', '你', '我', '想', '睡', '不',
+    '又', '还', '在', '等', '雨', '猫', '晚安', '半', '一起', '慢慢',
+    '明天', '温柔', '心事', '口袋', '星星', '困', '原谅', '答案', '自由', '白日梦',
+    '偏要', '有点', '冰箱', '橡皮', '备忘', '缺', '一枚', '很多', '以后', '刚刚好'
+  ];
+
+  var magnets = [];      // {el, x, y, w, h}
+
+  function spawn(word, x, y) {
+    var el = document.createElement('div');
+    el.className = 'magnet';
+    el.textContent = word;
+    board.appendChild(el);
+    var m = { el: el, x: x, y: y, w: el.offsetWidth, h: el.offsetHeight };
+    place(m);
+    magnets.push(m);
+    bind(m);
+    return m;
+  }
+
+  function place(m) {
+    m.el.style.left = m.x + 'px';
+    m.el.style.top = m.y + 'px';
+  }
+
+  function bind(m) {
+    var drag = null;
+    m.el.addEventListener('pointerdown', function (e) {
+      drag = { dx: e.clientX - m.x, dy: e.clientY - m.y };
+      m.el.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    m.el.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      m.x = e.clientX - drag.dx;
+      m.y = e.clientY - drag.dy;
+      place(m);
+    });
+    m.el.addEventListener('pointerup', function () { drag = null; });
+    m.el.addEventListener('pointercancel', function () { drag = null; });
+  }
+
+  function scatter() {
+    magnets.forEach(function (m) { m.el.remove(); });
+    magnets = [];
+    var W = board.clientWidth, H = board.clientHeight;
+    WORDS.forEach(function (word, i) {
+      var x = 20 + Math.random() * Math.max(10, W - 120);
+      var y = 14 + Math.random() * Math.max(10, H - 60);
+      spawn(word, x, y);
+    });
+  }
+
+  var POEMS = [
+    ['夜', '有点', '温柔', '你', '睡', '不睡'],
+    ['月亮', '缺', '一枚', '我', '想', '你'],
+    ['风', '把', '心事', '口袋', '装满', '晚安'],
+    ['灯', '还', '亮', '猫', '一起', '慢慢', '困'],
+    ['梦', '是', '白日梦', '缺', '的', '那一枚'],
+    ['等', '雨', '等', '你', '等', '明天'],
+    ['冰箱', '里', '有', '半', '个', '月亮'],
+    ['星星', '很多', '答案', '刚刚好', '夜', '自由']
+  ];
+
+  function composePoem() {
+    magnets.forEach(function (m) { m.el.remove(); });
+    magnets = [];
+    var poem = POEMS[Math.floor(Math.random() * POEMS.length)];
+    var used = new Set(poem);
+    var W = board.clientWidth;
+    var y = H_center();
+    // 计算整行宽度后居中摆放
+    var probe = document.createElement('div');
+    probe.className = 'magnet';
+    probe.style.visibility = 'hidden';
+    board.appendChild(probe);
+    var widths = poem.map(function (w) {
+      probe.textContent = w;
+      return probe.offsetWidth + 8;
+    });
+    probe.remove();
+    var total = widths.reduce(function (a, b) { return a + b; }, -8);
+    var x = Math.max(10, (W - total) / 2);
+    poem.forEach(function (word, i) {
+      spawn(word, x, y + (i % 2) * 4);
+      x += widths[i];
+    });
+    // 其余词散到诗行上下的两带，随时可取用
+    var bandH = Math.max(60, (y - 30) / 2);
+    WORDS.forEach(function (word) {
+      if (used.has(word)) return;
+      var top = Math.random() < 0.5;
+      var bx = 16 + Math.random() * Math.max(10, W - 110);
+      var by = top
+        ? 12 + Math.random() * bandH
+        : y + 80 + Math.random() * Math.max(10, board.clientHeight - y - 130);
+      spawn(word, bx, by);
+    });
+  }
+
+  function H_center() {
+    return Math.max(10, board.clientHeight / 2 - 26);
+  }
+
+  document.getElementById('shuffle').addEventListener('click', scatter);
+  document.getElementById('compose').addEventListener('click', composePoem);
+
+  scatter();
+})();
+</script>
+</body>
+</html>

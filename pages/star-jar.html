@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>折星星的罐子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .make {
+    position: absolute; bottom: 13vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 3;
+  }
+  .make button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 10px 26px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .make button:hover { border-color: #4a5468; }
+  .caption {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.1em;
+    color: #a89f8e;
+    min-height: 22px;
+    opacity: 0;
+    transition: opacity 0.9s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 0.95; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>折星星的罐子</h1>
+  <p>小时候存过幸运星的都懂。<br>点一下折一颗——攒的是没说出口的念头。</p>
+</div>
+
+<div class="make"><button id="make">折一颗星星</button></div>
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var JAR = { x: 0, y: 0, w: 200, h: 260 };
+  var stars = [];          // 已入罐 {ox,oy 相对罐,col,rot,ph}
+  var falling = [];        // 下落中 {x,y,vy,vx,rot,rotV,col}
+  var COLORS = ['#e8b4c8', '#f0d8a8', '#a8c8e8', '#b8e0c8', '#e8c8b8', '#c8b8e8', '#f0e0b0'];
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    JAR.x = window.innerWidth / 2 - JAR.w / 2;
+    JAR.y = window.innerHeight * 0.66 - JAR.h;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function say(text) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4200);
+  }
+
+  function drawStar(x, y, r, rot, col, alpha) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var rad = i % 2 === 0 ? r : r * 0.45;
+      var a = -Math.PI / 2 + i * Math.PI / 5;
+      if (i === 0) ctx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+      else ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 桌沿
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, JAR.y + JAR.h, w, h - JAR.y - JAR.h);
+    ctx.strokeStyle = 'rgba(200,190,160,0.08)';
+    ctx.beginPath(); ctx.moveTo(0, JAR.y + JAR.h); ctx.lineTo(w, JAR.y + JAR.h); ctx.stroke();
+
+    // 罐身
+    ctx.strokeStyle = 'rgba(170,195,220,0.4)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(JAR.x + 14, JAR.y);
+    ctx.lineTo(JAR.x + 14, JAR.y + JAR.h - 10);
+    ctx.quadraticCurveTo(JAR.x + 14, JAR.y + JAR.h, JAR.x + 34, JAR.y + JAR.h);
+    ctx.lineTo(JAR.x + JAR.w - 34, JAR.y + JAR.h);
+    ctx.quadraticCurveTo(JAR.x + JAR.w - 14, JAR.y + JAR.h, JAR.x + JAR.w - 14, JAR.y + JAR.h - 10);
+    ctx.lineTo(JAR.x + JAR.w - 14, JAR.y);
+    ctx.stroke();
+    ctx.strokeRect(JAR.x + 8, JAR.y - 12, JAR.w - 16, 12);
+    ctx.strokeStyle = 'rgba(220,235,250,0.14)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(JAR.x + 30, JAR.y + 16);
+    ctx.lineTo(JAR.x + 30, JAR.y + JAR.h - 24);
+    ctx.stroke();
+
+    // 已入罐的星
+    stars.forEach(function (s) {
+      var tw = 0.75 + 0.25 * Math.sin(t * 0.002 + s.ph);
+      drawStar(JAR.x + s.x, JAR.y + s.y, 7, s.rot, s.col, 0.55 + 0.45 * tw);
+    });
+
+    // 下落中的星
+    for (var i = falling.length - 1; i >= 0; i--) {
+      var f = falling[i];
+      f.vy += 380 * dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.rot += f.rotV * dt;
+      var floor = JAR.y + JAR.h - 12 - Math.floor(stars.length / 9) * 11;
+      if (f.y >= floor) {
+        stars.push({ x: f.x - JAR.x, y: f.y - JAR.y, col: f.col, rot: f.rot, ph: Math.random() * 6.28 });
+        falling.splice(i, 1);
+        continue;
+      }
+      drawStar(f.x, f.y, 7, f.rot, f.col);
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  document.getElementById('make').addEventListener('click', function () {
+    if (stars.length + falling.length >= 40) {
+      say('罐子满了。哪天想谁了，就打开看看。');
+      return;
+    }
+    falling.push({
+      x: window.innerWidth / 2, y: JAR.y - 46,
+      vx: 0, vy: 60,
+      rot: 0, rotV: (Math.random() - 0.5) * 4,
+      col: COLORS[Math.floor(Math.random() * COLORS.length)]
+    });
+  });
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

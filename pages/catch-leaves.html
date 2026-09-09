@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>接落叶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.18em;
+    color: #b9a57a;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>接落叶</h1>
+  <p>秋夜，树在一片一片地放手中。<br>移动你的筐，接住它们——接多少片，算多少温柔。</p>
+</div>
+
+<div class="count-line" id="countLine">接住了 0 片</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var LEAF_COLORS = ['#c98a3a', '#b3663a', '#d9a84a', '#a86a3a', '#c9b04a'];
+  var leaves = [];          // 空中的叶
+  var groundLeaves = [];    // 落在地上的
+  var caught = 0, missed = 0;
+  var basketX = 0.5;        // 筐位置（屏占比）
+  var bounce = 0;
+
+  var CANOPY = { x: 0, y: 0, r: 0 };
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var w = window.innerWidth;
+    CANOPY.x = w * 0.56;
+    CANOPY.y = h_treeBase() - 190;
+    CANOPY.r = Math.min(190, w * 0.3);
+  }
+  window.addEventListener('resize', resize);
+
+  function h_treeBase() { return window.innerHeight * 0.7; }
+  function h_ground() { return window.innerHeight * 0.88; }
+
+  window.addEventListener('pointermove', function (e) {
+    basketX = e.clientX / window.innerWidth;
+  });
+
+  function spawnLeaf() {
+    var a = Math.random() * Math.PI * 2;
+    var r = Math.random() * CANOPY.r * 0.8;
+    leaves.push({
+      x: CANOPY.x + Math.cos(a) * r,
+      y: CANOPY.y + Math.sin(a) * r * 0.7,
+      vy: 22 + Math.random() * 26,
+      swayA: 20 + Math.random() * 26,
+      swayF: 0.0016 + Math.random() * 0.002,
+      ph: Math.random() * Math.PI * 2,
+      rot: Math.random() * Math.PI * 2,
+      rotV: (Math.random() - 0.5) * 2.4,
+      size: 5 + Math.random() * 4,
+      col: LEAF_COLORS[Math.floor(Math.random() * LEAF_COLORS.length)],
+      born: Date.now()
+    });
+  }
+  setInterval(function () { if (leaves.length < 8) spawnLeaf(); }, 1100);
+  setTimeout(spawnLeaf, 600);
+
+  function drawLeaf(x, y, rot, size, col, alpha) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(0, -size);
+    ctx.quadraticCurveTo(size * 0.7, -size * 0.2, 0, size);
+    ctx.quadraticCurveTo(-size * 0.7, -size * 0.2, 0, -size);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,40,20,0.5)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.8);
+    ctx.lineTo(0, size * 0.8);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var groundY = h_ground();
+    var treeBaseY = h_treeBase();
+    bounce = Math.max(0, bounce - dt * 3.4);
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 树干
+    ctx.strokeStyle = '#1a1512';
+    ctx.lineWidth = 13;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(CANOPY.x, groundY + 8);
+    ctx.quadraticCurveTo(CANOPY.x - 14, treeBaseY - 80, CANOPY.x, CANOPY.y + 40);
+    ctx.stroke();
+    // 两根枝
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(CANOPY.x, treeBaseY - 60);
+    ctx.quadraticCurveTo(CANOPY.x - 50, treeBaseY - 105, CANOPY.x - 78, CANOPY.y + 30);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(CANOPY.x, treeBaseY - 70);
+    ctx.quadraticCurveTo(CANOPY.x + 55, treeBaseY - 115, CANOPY.x + 80, CANOPY.y + 26);
+    ctx.stroke();
+
+    // 树冠（三团圆簇）
+    var cl = [[0, 0, 1], [-0.55, 0.25, 0.72], [0.58, 0.2, 0.68]];
+    cl.forEach(function (c) {
+      ctx.fillStyle = 'rgba(28,38,26,0.85)';
+      ctx.beginPath();
+      ctx.arc(CANOPY.x + c[0] * CANOPY.r, CANOPY.y + c[1] * CANOPY.r * 0.6, CANOPY.r * 0.52 * c[2], 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // 树冠微光（月照边）
+    ctx.strokeStyle = 'rgba(140,160,140,0.12)';
+    ctx.lineWidth = 2;
+    cl.forEach(function (c) {
+      ctx.beginPath();
+      ctx.arc(CANOPY.x + c[0] * CANOPY.r, CANOPY.y + c[1] * CANOPY.r * 0.6, CANOPY.r * 0.52 * c[2], Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    });
+
+    // 地面
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillRect(0, groundY, w, h - groundY);
+
+    // 空中叶
+    var basketTop = groundY - 46;
+    var bx = basketX * w;
+    for (var i = leaves.length - 1; i >= 0; i--) {
+      var lf = leaves[i];
+      lf.y += lf.vy * dt;
+      lf.x += Math.sin(t * lf.swayF + lf.ph) * lf.swayA * dt;
+      lf.rot += lf.rotV * dt;
+
+      // 进筐判定
+      var inBasketX = Math.abs(lf.x - bx) < 46;
+      var inBasketY = lf.y > basketTop && lf.y < groundY - 6;
+      if (inBasketX && inBasketY) {
+        leaves.splice(i, 1);
+        caught++;
+        bounce = 1;
+        countLine.textContent = '接住了 ' + caught + ' 片';
+        continue;
+      }
+      // 落地
+      if (lf.y >= groundY - 2) {
+        leaves.splice(i, 1);
+        groundLeaves.push({ x: lf.x, y: groundY - 2 - Math.random() * 3, rot: lf.rot, size: lf.size, col: lf.col });
+        if (groundLeaves.length > 46) groundLeaves.shift();
+        missed++;
+        continue;
+      }
+      drawLeaf(lf.x, lf.y, lf.rot, lf.size, lf.col);
+    }
+
+    // 地上落叶
+    groundLeaves.forEach(function (g) {
+      drawLeaf(g.x, g.y, g.rot, g.size * 0.9, g.col, 0.85);
+    });
+
+    // 筐：半圆编织篮，跟随鼠标，接住时弹一下
+    var b = 1 + bounce * 0.08;
+    ctx.save();
+    ctx.translate(bx, groundY);
+    ctx.scale(b, b);
+    ctx.fillStyle = '#4a3b28';
+    ctx.beginPath();
+    ctx.moveTo(-46, -46);
+    ctx.quadraticCurveTo(-40, -2, -30, 0);
+    ctx.lineTo(30, 0);
+    ctx.quadraticCurveTo(40, -2, 46, -46);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,220,160,0.18)';
+    ctx.lineWidth = 1.2;
+    for (var s2 = 1; s2 < 4; s2++) {
+      ctx.beginPath();
+      ctx.moveTo(-46 + s2 * 3, -46 + s2 * 11);
+      ctx.lineTo(46 - s2 * 3, -46 + s2 * 11);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#6b5a3d';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-46, -46);
+    ctx.lineTo(46, -46);
+    ctx.stroke();
+    ctx.restore();
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  resize();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

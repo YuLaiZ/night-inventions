@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>吹蒲公英</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 1s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.done .copy { opacity: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .done-line {
+    position: absolute; top: 42%; left: 0; right: 0;
+    text-align: center;
+    font-size: 17px; letter-spacing: 0.26em;
+    color: #e8d9b0;
+    opacity: 0;
+    transition: opacity 2s ease 0.6s;
+    z-index: 3;
+    pointer-events: none;
+    padding-left: 0.26em;
+  }
+  body.done .done-line { opacity: 1; }
+  .hint {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.2em;
+    color: #4a4f58;
+    z-index: 3;
+    pointer-events: none;
+    transition: opacity 0.8s ease;
+  }
+  .hint.dim { opacity: 0.3; }
+  .again {
+    position: absolute; bottom: 3vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 4;
+    display: none;
+  }
+  body.done .again { display: block; }
+  .again button {
+    background: none;
+    border: none;
+    color: #6d675c;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 4px;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+    transition: opacity 1s ease;
+  }
+  body.done footer { opacity: 0.4; }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>吹蒲公英</h1>
+  <p>一朵完整的蒲公英，绒毛都齐。<br>长按屏幕，吹——许愿都免了，就是想吹。</p>
+</div>
+
+<div class="done-line">吹完了。它们去落地生根。</div>
+<div class="hint" id="hint">长按屏幕 · 吹气</div>
+<div class="again"><button id="again">再长一朵</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var hint = document.getElementById('hint');
+
+  var seeds = [];          // 还挂在头上的种子 {ang, len, det, sway}
+  var flyers = [];         // 飘走的种子 {x,y,vx,vy,rot,rotV,sway,life}
+  var blowing = false;
+  var blowPower = 0;       // 按住的气流强度 0..1
+  var allGone = false;
+
+  var HEAD = { x: 0, y: 0 };
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function place() {
+    HEAD.x = window.innerWidth * 0.5;
+    HEAD.y = window.innerHeight * 0.42;
+  }
+  place();
+
+  function grow() {
+    seeds = [];
+    flyers = [];
+    allGone = false;
+    document.body.classList.remove('done');
+    hint.classList.remove('dim');
+    hint.textContent = '长按屏幕 · 吹气';
+    var N = 22;
+    for (var i = 0; i < N; i++) {
+      seeds.push({
+        ang: -Math.PI / 2 + (i - (N - 1) / 2) * 0.24 + (Math.random() - 0.5) * 0.1,
+        len: 62 + Math.random() * 14,
+        det: 0,               // 脱离进度 0..1
+        sway: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function () {
+    if (allGone) return;
+    blowing = true;
+    hint.classList.add('dim');
+  });
+  window.addEventListener('pointerup', function () { blowing = false; });
+
+  document.getElementById('again').addEventListener('click', function () {
+    grow();
+  });
+
+  // 脱离一枚
+  function detach(s) {
+    s.det = 1;
+    var tipX = HEAD.x + Math.cos(s.ang) * s.len;
+    var tipY = HEAD.y + Math.sin(s.ang) * s.len;
+    flyers.push({
+      x: tipX, y: tipY,
+      vx: 40 + Math.random() * 60,
+      vy: -30 - Math.random() * 40,
+      rot: s.ang,
+      rotV: (Math.random() - 0.5) * 3,
+      sway: Math.random() * Math.PI * 2,
+      life: 1
+    });
+    hint.textContent = '还剩 ' + seeds.filter(function (x) { return x.det === 0; }).length + ' 根绒毛';
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    blowPower += ((blowing && !allGone ? 1 : 0) - blowPower) * Math.min(1, dt * 3);
+
+    // 按住时按概率吹落（从一侧开始，像真的风）
+    if (blowPower > 0.25) {
+      var attached = seeds.filter(function (s) { return s.det === 0; });
+      if (attached.length && Math.random() < blowPower * dt * 3.2) {
+        detach(attached[Math.floor(Math.random() * attached.length)]);
+      }
+    }
+
+    // 剩余为 0 → done
+    var remain = seeds.filter(function (s) { return s.det === 0; }).length;
+    if (remain === 0 && !allGone && seeds.length > 0) {
+      allGone = true;
+      document.body.classList.add('done');
+    }
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 风：几条淡淡的流线（按住时更明显）
+    if (blowPower > 0.05) {
+      ctx.strokeStyle = 'rgba(190,205,225,' + (0.06 + blowPower * 0.08) + ')';
+      ctx.lineWidth = 1.2;
+      for (var wi = 0; wi < 5; wi++) {
+        var ly = HEAD.y - 90 + wi * 44 + Math.sin(t * 0.001 + wi) * 8;
+        ctx.beginPath();
+        ctx.moveTo(-10, ly);
+        ctx.bezierCurveTo(w * 0.3, ly - 14, w * 0.6, ly + 14, w + 10, ly);
+        ctx.stroke();
+      }
+    }
+
+    // 茎（从底部弯上来）
+    ctx.strokeStyle = '#3f5a3a';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(HEAD.x - 30, h);
+    ctx.quadraticCurveTo(HEAD.x - 34, HEAD.y + 130, HEAD.x, HEAD.y + 16);
+    ctx.stroke();
+
+    // 茎顶小盘
+    ctx.fillStyle = '#3f5a3a';
+    ctx.beginPath();
+    ctx.arc(HEAD.x, HEAD.y + 12, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 还挂着的种子（放射绒毛）
+    seeds.forEach(function (s) {
+      if (s.det === 1) return;
+      var tipX = HEAD.x + Math.cos(s.ang) * s.len;
+      var tipY = HEAD.y + 12 + Math.sin(s.ang) * s.len;
+      var wob = Math.sin(t * 0.003 + s.sway) * 2 * (0.5 + blowPower);
+      // 杆
+      ctx.strokeStyle = 'rgba(220,225,235,0.75)';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(HEAD.x, HEAD.y + 12);
+      ctx.lineTo(tipX + wob, tipY);
+      ctx.stroke();
+      // 顶端绒毛星（放射小线）
+      ctx.strokeStyle = 'rgba(235,240,248,0.9)';
+      ctx.lineWidth = 0.9;
+      for (var r = 0; r < 6; r++) {
+        var ra = r / 6 * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(tipX + wob, tipY);
+        ctx.lineTo(tipX + wob + Math.cos(ra) * 4.5, tipY + Math.sin(ra) * 4.5);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(235,240,248,0.9)';
+      ctx.beginPath();
+      ctx.arc(tipX + wob, tipY, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // 飘走的种子（随风摆动+旋转+远去）
+    for (var i = flyers.length - 1; i >= 0; i--) {
+      var f = flyers[i];
+      f.x += f.vx * dt + Math.sin(t * 0.002 + f.sway) * 26 * dt;
+      f.y += f.vy * dt;
+      f.vy += 14 * dt;
+      f.rot += f.rotV * dt;
+      f.life -= dt * 0.12;
+      if (f.life <= 0 || f.x > w + 60 || f.y < -60) { flyers.splice(i, 1); continue; }
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(f.rot);
+      ctx.globalAlpha = Math.min(1, f.life * 1.6);
+      ctx.strokeStyle = 'rgba(225,232,242,0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(0, -3); ctx.stroke();
+      for (var r2 = 0; r2 < 6; r2++) {
+        var ra2 = r2 / 6 * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -3);
+        ctx.lineTo(Math.cos(ra2) * 3.6, -3 + Math.sin(ra2) * 3.6);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  grow();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

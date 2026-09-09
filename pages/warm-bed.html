@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暖被窝</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .temp {
+    position: absolute; left: 50%; top: 47%;
+    transform: translate(-50%, -50%);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 64px;
+    z-index: 3;
+    pointer-events: none;
+    transition: color 1s ease;
+  }
+  .hint {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 12px; letter-spacing: 0.2em;
+    color: #4a4f58;
+    z-index: 3;
+    pointer-events: none;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>暖被窝</h1>
+  <p>被窝很凉，明天很早。<br>按住它——把手心的温度存一点进去。</p>
+</div>
+
+<div class="temp" id="temp">15°</div>
+<div class="hint" id="hint">按住暖被窝 · 到 32° 就好了</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var tempEl = document.getElementById('temp');
+  var hint = document.getElementById('hint');
+
+  var temp = 15;           // 15..32
+  var warming = false;
+  var doneShown = false;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  canvas.addEventListener('pointerdown', function () { warming = true; });
+  window.addEventListener('pointerup', function () { warming = false; });
+  window.addEventListener('pointercancel', function () { warming = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (warming && temp < 32) {
+      temp = Math.min(32, temp + dt * 2.4);
+      if (temp >= 32 && !doneShown) {
+        doneShown = true;
+        hint.textContent = '被窝暖好了。钻进去吧。';
+      }
+    }
+    var k = (temp - 15) / 17;
+
+    // 背景：随温度从冷蓝到暖橙
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mix('#06080d', '#1a0f08', k));
+    bg.addColorStop(1, mix('#0a0d13', '#2b1a0c', k));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 被窝（大圆角被面，颜色随温度）
+    var bw = Math.min(380, w * 0.76), bh = bw * 0.72;
+    var bx = w / 2, by = h * 0.55;
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(-0.05);
+    var quilt = ctx.createLinearGradient(-bw / 2, -bh / 2, bw / 2, bh / 2);
+    quilt.addColorStop(0, mix('#252c3d', '#c96a4a', k));
+    quilt.addColorStop(1, mix('#1c2334', '#a84f38', k));
+    ctx.fillStyle = quilt;
+    roundRect(-bw / 2, -bh / 2, bw, bh, 26);
+    ctx.fill();
+    // 被面缝线
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.06 + k * 0.08) + ')';
+    ctx.lineWidth = 1.4;
+    for (var i = 1; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-bw / 2 + 10, -bh / 2 + i * bh / 4);
+      ctx.lineTo(bw / 2 - 10, -bh / 2 + i * bh / 4);
+      ctx.stroke();
+    }
+    // 枕头
+    ctx.fillStyle = mix('#39435c', '#e8c89a', k);
+    roundRect(-bw / 2 + 24, -bh / 2 + 14, 86, 40, 14);
+    ctx.fill();
+    ctx.restore();
+
+    // 温度字
+    tempEl.textContent = Math.round(temp) + '°';
+    tempEl.style.color = mix('#7a9ec9', '#e8a05a', k);
+  }
+
+  function mix(a, b, k) {
+    if (k <= 0) return a;
+    var pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    var r = Math.round(((pa >> 16) & 255) + (((pb >> 16) & 255) - ((pa >> 16) & 255)) * k);
+    var g = Math.round(((pa >> 8) & 255) + (((pb >> 8) & 255) - ((pa >> 8) & 255)) * k);
+    var bl = Math.round((pa & 255) + ((pb & 255) - (pa & 255)) * k);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

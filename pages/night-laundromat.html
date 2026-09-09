@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜洗衣房</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 40px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 14px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  .machine {
+    position: absolute; left: 50%; bottom: 13vh;
+    transform: translateX(-50%);
+    width: 300px; height: 300px;
+    background: linear-gradient(165deg, #2b323f, #1c212b);
+    border-radius: 18px;
+    border: 2px solid #3c4453;
+    box-shadow: 0 16px 50px rgba(0,0,0,0.6);
+    z-index: 2;
+  }
+  .porthole {
+    position: absolute; left: 50%; top: 46%;
+    transform: translate(-50%, -50%);
+    width: 172px; height: 172px;
+    border-radius: 50%;
+    background: #0b0e14;
+    border: 10px solid #454e5f;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.85), 0 0 0 2px #2b323f;
+    overflow: hidden;
+  }
+  .drum-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .panel {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 64px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px;
+  }
+  .coin-slot {
+    width: 44px; height: 8px; border-radius: 3px;
+    background: #10141c;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.9), 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .start-btn {
+    background: #232b3a;
+    border: 1px solid #3f4a5e;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 9px 18px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .start-btn:hover:not(:disabled) { border-color: #5a6880; }
+  .start-btn:disabled { opacity: 0.45; cursor: default; }
+  .status {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.12em;
+    color: #8f897c;
+    z-index: 3;
+  }
+  .rack {
+    position: absolute; left: 50%; bottom: calc(13vh + 322px);
+    transform: translateX(-50%);
+    width: 340px; height: 46px;
+    z-index: 1;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>深夜洗衣房</h1>
+  <p>凌晨的洗衣房，是这座城市孤独的收容所。<br>投一枚币，把今天揉一揉，洗一洗。</p>
+</div>
+
+<div class="rack"><canvas id="rackCv" width="340" height="46"></canvas></div>
+
+<div class="machine">
+  <div class="porthole"><canvas class="drum-canvas" id="drum"></canvas></div>
+  <div class="panel">
+    <div class="coin-slot"></div>
+    <button class="start-btn" id="startBtn">投币开洗</button>
+  </div>
+</div>
+
+<div class="status" id="status">机器空着。今天的烦恼塞得下一缸。</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var drum = document.getElementById('drum');
+  var dctx = drum.getContext('2d');
+  var rackCv = document.getElementById('rackCv');
+  var rctx = rackCv.getContext('2d');
+  var status = document.getElementById('status');
+  var btn = document.getElementById('startBtn');
+
+  // Dirty lints 洗涤的布块：灰暗色洗后变亮
+  var DIRTY = ['#5a564e', '#4e5450', '#5c5248', '#504a56', '#565e60'];
+  var CLEAN = ['#d9a05a', '#8fb573', '#d97f6a', '#7ba6c9', '#c9b26a'];
+  var clothes = [];         // 滚筒里的 {ang, dist, spin, size, shape, idx}
+  var hung = [];            // 晾杆上的 {x, sway, ph, idx, len}
+  var washing = false;
+  var washT = 0;            // 已洗秒数
+  var WASH_LEN = 40;        // 一缸 40 秒
+  var drumAng = 0;
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  drum.width = 152 * DPR;
+  drum.height = 152 * DPR;
+  dctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  function loadMachine() {
+    clothes = [];
+    for (var i = 0; i < 9; i++) {
+      clothes.push({
+        ang: Math.random() * Math.PI * 2,
+        dist: 20 + Math.random() * 30,
+        spin: Math.random() * Math.PI * 2,
+        spinV: (Math.random() - 0.5) * 5,
+        size: 12 + Math.random() * 9,
+        idx: i % 5
+      });
+    }
+  }
+  loadMachine();
+
+  function drawDrum(t, dt) {
+    dctx.clearRect(0, 0, 152, 152);
+    var cx = 76, cy = 76;
+
+    // 滚筒内壁
+    dctx.fillStyle = '#10141c';
+    dctx.beginPath(); dctx.arc(cx, cy, 74, 0, Math.PI * 2); dctx.fill();
+
+    // 洗涤中：缸体旋转 + 布块翻腾
+    if (washing) drumAng += dt * 2.1;
+    var k = washing ? Math.min(1, washT / 6) : 0;   // 渐湿渐转
+
+    clothes.forEach(function (c) {
+      var wobble = washing ? Math.sin(t * 0.004 + c.spin * 3) * 10 : 0;
+      var dist = c.dist + (washing ? 8 * Math.sin(t * 0.002 + c.ang * 2) : 0) + wobble * 0.3;
+      var x = cx + Math.cos(c.ang + drumAng * (1 + (c.idx % 3) * 0.06)) * dist;
+      var y = cy + Math.sin(c.ang + drumAng * (1 + (c.idx % 3) * 0.06)) * dist + (washing ? 0 : 26);
+      // 颜色：灰暗 → 洗亮（按进度）
+      var col = mix(DIRTY[c.idx], CLEAN[c.idx], washing ? easeProgress() : (hung.length ? 1 : 0));
+      dctx.save();
+      dctx.translate(x, y);
+      dctx.rotate(c.spin);
+      c.spin += c.spinV * dt * (washing ? 1 : 0.1);
+      dctx.fillStyle = col;
+      // 不规则布块（四点贝塞尔）
+      var s = c.size;
+      dctx.beginPath();
+      dctx.moveTo(-s, -s * 0.4);
+      dctx.quadraticCurveTo(-s * 0.3, -s, s * 0.8, -s * 0.6);
+      dctx.quadraticCurveTo(s, s * 0.2, s * 0.4, s);
+      dctx.quadraticCurveTo(-s * 0.5, s * 0.9, -s, -s * 0.4);
+      dctx.fill();
+      dctx.restore();
+    });
+
+    // 圆窗玻璃反光
+    dctx.strokeStyle = 'rgba(200,215,235,0.10)';
+    dctx.lineWidth = 6;
+    dctx.beginPath(); dctx.arc(cx, cy, 66, -2.4, -1.4); dctx.stroke();
+    dctx.beginPath(); dctx.arc(cx, cy, 66, 0.5, 1.1); dctx.stroke();
+  }
+
+  function easeProgress() {
+    return washing ? Math.min(1, washT / WASH_LEN) : 1;
+  }
+  function mix(a, b, k) {
+    if (k <= 0) return a;
+    var pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    var r = Math.round(((pa >> 16) & 255) + (((pb >> 16) & 255) - ((pa >> 16) & 255)) * k);
+    var g = Math.round(((pa >> 8) & 255) + (((pb >> 8) & 255) - ((pa >> 8) & 255)) * k);
+    var bl = Math.round((pa & 255) + ((pb & 255) - (pa & 255)) * k);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+
+  function drawRack(t) {
+    rctx.clearRect(0, 0, 340, 46);
+    // 晾杆
+    rctx.strokeStyle = '#3c4453';
+    rctx.lineWidth = 3;
+    rctx.beginPath(); rctx.moveTo(10, 8); rctx.lineTo(330, 8); rctx.stroke();
+    hung.forEach(function (h) {
+      var sway = Math.sin(t * 0.0016 + h.ph) * 3;
+      var x = h.x + sway;
+      rctx.strokeStyle = '#4a5262';
+      rctx.lineWidth = 1.5;
+      rctx.beginPath(); rctx.moveTo(x, 8); rctx.lineTo(x, 16); rctx.stroke();
+      rctx.fillStyle = mix(DIRTY[h.idx], CLEAN[h.idx], 1);
+      var w2 = 17, hh = h.len;
+      rctx.beginPath();
+      rctx.moveTo(x - w2, 16);
+      rctx.quadraticCurveTo(x - w2 - 3, 16 + hh * 0.6, x - w2 + 2, 16 + hh);
+      rctx.lineTo(x + w2 - 2, 16 + hh);
+      rctx.quadraticCurveTo(x + w2 + 3, 16 + hh * 0.6, x + w2, 16);
+      rctx.closePath();
+      rctx.fill();
+    });
+  }
+
+  btn.addEventListener('click', function () {
+    if (washing) return;
+    washing = true;
+    washT = 0;
+    hung = [];
+    btn.disabled = true;
+    status.textContent = '进水，翻滚。今天的事在缸里转起来了。';
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    if (washing) {
+      washT += dt;
+      if (washT > WASH_LEN * 0.5 && washT < WASH_LEN * 0.5 + dt * 2) {
+        status.textContent = '漂洗。泡沫把白天的口气都带走了。';
+      }
+      if (washT >= WASH_LEN) {
+        washing = false;
+        btn.disabled = false;
+        // 出缸上杆
+        hung = [];
+        var xs = [40, 100, 160, 220, 280];
+        clothes.slice(0, 5).forEach(function (c, i) {
+          hung.push({ x: xs[i % 5], sway: 0, ph: Math.random() * 6.28, idx: c.idx, len: 20 + (c.size % 3) * 3 });
+        });
+        status.textContent = '叮——洗好了。挂上去了，趁它还带着温度。';
+      } else if (Math.floor(washT) % 12 === 0 && washT - Math.floor(washT) < dt) {
+        // 周期性小动作省略：状态保持
+      }
+    }
+
+    drawDrum(now, dt);
+    drawRack(now);
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

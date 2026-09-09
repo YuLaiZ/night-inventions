@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上发条的玩具</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .spring-ui {
+    position: absolute; left: 50%; bottom: 13vh;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 16px;
+    z-index: 3;
+  }
+  .key {
+    width: 74px; height: 74px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 42% 36%, #4a5468, #232a38 70%);
+    border: 3px solid #5a6478;
+    cursor: grab;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .key::after {
+    content: "";
+    width: 12px; height: 44px;
+    background: #8a94a8;
+    border-radius: 4px;
+  }
+  .energy {
+    width: 150px; height: 12px;
+    border: 1px solid #39414f;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #10141c;
+  }
+  .energy-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #d9a05a, #e8c84a);
+    transition: width 0.2s ease;
+  }
+  .status {
+    position: absolute; bottom: 6vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.14em;
+    color: #8f897c;
+    z-index: 3;
+    pointer-events: none;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>上发条的玩具</h1>
+  <p>铁皮跳蛙等了一整天了。<br>按住发条旋钮转圈——拧得越满，它蹦得越远。</p>
+</div>
+
+<div class="spring-ui">
+  <div class="key" id="key"></div>
+  <div class="energy"><div class="energy-fill" id="energyFill"></div></div>
+</div>
+<div class="status" id="status">拧发条：按住旋钮，转圈。</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var energyFill = document.getElementById('energyFill');
+  var statusEl = document.getElementById('status');
+  var keyEl = document.getElementById('key');
+
+  var energy = 0;          // 0..100 发条能量
+  var hop = null;          // 跳蛙 {x,y,vx,vy,dir,hopping}
+  var windAng = 0;
+  var lastWindAng = null;
+  var keyRot = 0;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 拧发条：按住旋钮转圈（顺时针累计角度→能量）
+  var dragging = false;
+  keyEl.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    lastWindAng = Math.atan2(e.clientY - (keyEl.getBoundingClientRect().top + 37),
+                             e.clientX - (keyEl.getBoundingClientRect().left + 37)) * 180 / Math.PI;
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var kr = keyEl.getBoundingClientRect();
+    var a = Math.atan2(e.clientY - (kr.top + 37), e.clientX - (kr.left + 37)) * 180 / Math.PI;
+    var d = a - lastWindAng;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    lastWindAng = a;
+    if (d > 0) {
+      energy = Math.min(100, energy + d * 0.55);
+      keyRot += d;
+      keyEl.style.transform = 'rotate(' + keyRot + 'deg)';
+      energyFill.style.width = energy + '%';
+    }
+  });
+  window.addEventListener('pointerup', function () {
+    if (!dragging) return;
+    dragging = false;
+    if (energy >= 12 && !hop) launch();
+    else if (energy < 12) statusEl.textContent = '发条太松了，再多拧几圈。';
+    else statusEl.textContent = '它还在路上蹦呢。';
+  });
+
+  function launch() {
+    hop = {
+      x: -40,
+      y: 0,                       // 相对地面高度
+      dir: 1,
+      hopping: true,
+      vy: 0,
+      jumps: 0
+    };
+    statusEl.textContent = '咔哒——出发！';
+  }
+
+  // ── 跳蛙 ─────────────────────────────────────────────
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var floorY = h * 0.72;
+
+    // 跳蛙推进：能量=可跳距离
+    if (hop && hop.hopping) {
+      if (hop.y === 0 && hop.vy === 0) {
+        // 起跳
+        hop.vy = 210;
+        hop.jumps++;
+        energy = Math.max(0, energy - 2.2);
+        energyFill.style.width = energy + '%';
+        if (energy <= 0) {
+          statusEl.textContent = '发条松完了。它停在夜色里，睡在原地。';
+        }
+      }
+      if (energy > 0 || hop.y > 0 || hop.vy > 0) {
+        hop.x += 105 * dt * dir1();
+        hop.vy -= 560 * dt;
+        hop.y += hop.vy * dt;
+        if (hop.y <= 0) { hop.y = 0; hop.vy = energy > 0 ? 0 : 0; if (energy > 0) hop.vy = 210; else hop.vy = 0; }
+      } else {
+        hop.hopping = false;
+        hop.vy = 0;
+      }
+    }
+    function dir1() { return 1; }
+
+    // 背景：夜色地板 + 一扇远处窗
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(255,220,150,0.06)';
+    ctx.fillRect(w * 0.08, h * 0.18, 52, 66);
+    ctx.strokeStyle = 'rgba(255,220,150,0.12)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(w * 0.08, h * 0.18, 52, 66);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.08 + 26, h * 0.18); ctx.lineTo(w * 0.08 + 26, h * 0.18 + 66);
+    ctx.moveTo(w * 0.08, h * 0.18 + 33); ctx.lineTo(w * 0.08 + 52, h * 0.18 + 33);
+    ctx.stroke();
+
+    // 地板线
+    ctx.strokeStyle = 'rgba(150,140,120,0.14)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, floorY);
+    ctx.lineTo(w, floorY);
+    ctx.stroke();
+
+    // 跳蛙（铁皮跳蛙：圆身+大眼+发条钥匙在背上）
+    if (hop) {
+      var fx = Math.min(w * 0.9, Math.max(-50, hop.x));
+      var fy = floorY - hop.y;
+      var squash = hop.y === 0 ? 1.12 : 0.94;
+      ctx.save();
+      ctx.translate(fx, fy);
+      ctx.scale(1, squash);
+      // 后腿
+      ctx.strokeStyle = '#3a7a5c';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-8, -8); ctx.lineTo(-18, 0); ctx.stroke();
+      // 身体
+      ctx.fillStyle = '#4a9a72';
+      ctx.beginPath();
+      ctx.ellipse(0, -13, 19, 14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 肚皮
+      ctx.fillStyle = '#a8d8b8';
+      ctx.beginPath();
+      ctx.ellipse(2, -9, 12, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 背上发条钥匙（随能量旋转）
+      ctx.save();
+      ctx.translate(-4, -24);
+      ctx.rotate(keyRot * 0.35);
+      ctx.strokeStyle = '#8a94a8';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(0, 7); ctx.stroke();
+      ctx.restore();
+      // 眼睛
+      ctx.fillStyle = '#f0ead8';
+      ctx.beginPath(); ctx.arc(9, -24, 5.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#181420';
+      ctx.beginPath(); ctx.arc(10.4, -24.6, 2.6, 0, Math.PI * 2); ctx.fill();
+      // 嘴
+      ctx.strokeStyle = '#181420';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(6, -17); ctx.lineTo(14, -18); ctx.stroke();
+      ctx.restore();
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

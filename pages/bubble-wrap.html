@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>捏泡泡纸</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 1s ease;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  body.done .copy { opacity: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .done-line {
+    position: absolute; top: 42%; left: 0; right: 0;
+    text-align: center;
+    font-size: 17px; letter-spacing: 0.24em;
+    color: #e8d9b0;
+    opacity: 0;
+    transition: opacity 2s ease 0.5s;
+    z-index: 3;
+    pointer-events: none;
+    padding-left: 0.24em;
+  }
+  body.done .done-line { opacity: 1; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.18em;
+    color: #7d7668;
+    z-index: 3;
+    transition: opacity 1s ease;
+  }
+  body.done .count-line { opacity: 0; }
+  .again {
+    position: absolute; bottom: 11vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 4;
+    display: none;
+  }
+  body.done .again { display: block; }
+  .again button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 9px 24px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+    transition: opacity 1s ease;
+  }
+  body.done footer { opacity: 0.4; }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>捏泡泡纸</h1>
+  <p>一整张气泡膜，都是你的。<br>点一下捏爆一个，按住拖过去可以连着捏。</p>
+</div>
+
+<div class="done-line">一整张都捏完了。心里舒服点了吗？</div>
+<div class="count-line" id="countLine"></div>
+<div class="again"><button id="again">再来一张</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var bubbles = [];        // {x,y,r,popped,flash}
+  var popped = 0, total = 0;
+  var done = false;
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  }
+  window.addEventListener('resize', resize);
+
+  function layout() {
+    bubbles = [];
+    popped = 0;
+    done = false;
+    document.body.classList.remove('done');
+    var w = window.innerWidth, h = window.innerHeight;
+    var r = 26, gap = 8;
+    var cols = Math.floor((w - 40) / (r * 2 + gap));
+    var rows = Math.floor((h - 40) / (r * 2 + gap));
+    var ox = (w - (cols * (r * 2 + gap) - gap)) / 2 + r;
+    var oy = (h - (rows * (r * 2 + gap) - gap)) / 2 + r;
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        bubbles.push({
+          x: ox + col * (r * 2 + gap),
+          y: oy + row * (r * 2 + gap),
+          r: r,
+          popped: false,
+          flash: 0
+        });
+      }
+    }
+    total = bubbles.length;
+    updateCount();
+  }
+
+  function updateCount() {
+    countLine.textContent = '捏爆 ' + popped + ' / ' + total;
+  }
+
+  function popAt(x, y) {
+    if (done) return;
+    bubbles.forEach(function (b) {
+      if (b.popped) return;
+      if (Math.hypot(b.x - x, b.y - y) < b.r + 6) {
+        b.popped = true;
+        b.flash = 1;
+        popped++;
+      }
+    });
+    updateCount();
+    if (popped >= total && !done) {
+      done = true;
+      document.body.classList.add('done');
+    }
+  }
+
+  var pressing = false;
+  canvas.addEventListener('pointerdown', function (e) {
+    pressing = true;
+    popAt(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (pressing) popAt(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+
+  document.getElementById('again').addEventListener('click', layout);
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+
+    ctx.fillStyle = '#0a0c12';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+    bubbles.forEach(function (b) {
+      if (b.flash > 0) b.flash = Math.max(0, b.flash - dt * 3);
+      if (!b.popped) {
+        // 完好泡泡：半透明球+高光
+        var g = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.35, b.r * 0.1, b.x, b.y, b.r);
+        g.addColorStop(0, 'rgba(175,190,225,0.5)');
+        g.addColorStop(0.7, 'rgba(120,135,170,0.30)');
+        g.addColorStop(1, 'rgba(90,100,135,0.22)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(190,205,235,0.35)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(240,245,255,0.55)';
+        ctx.beginPath();
+        ctx.ellipse(b.x - b.r * 0.3, b.y - b.r * 0.38, b.r * 0.24, b.r * 0.15, -0.6, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // 爆掉的：瘪掉的环
+        ctx.strokeStyle = 'rgba(100,115,150,0.28)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * 0.86, 0.3, Math.PI * 1.9);
+        ctx.stroke();
+        // 捏爆瞬间的闪光
+        if (b.flash > 0) {
+          ctx.fillStyle = 'rgba(255,250,220,' + b.flash * 0.7 + ')';
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.r * (0.4 + (1 - b.flash) * 0.3), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  resize();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

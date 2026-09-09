@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜下饺子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.16em;
+    color: #b9a57a;
+    z-index: 3;
+  }
+  .again {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 4;
+    display: none;
+  }
+  body.done .count-line { display: none; }
+  body.done .again { display: block; }
+  .again button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 9px 24px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜下饺子</h1>
+  <p>锅里咕嘟着，点一下下一只。<br>浮起来的就是熟了——点它，捞进碗里。</p>
+</div>
+
+<div class="count-line" id="countLine">碗里 0 只 · 锅里还空着</div>
+<div class="again"><button id="again">再下一锅</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var dumplings = [];      // {x,y,vy,cooked(0..1),inBowl?,ph,sunk}
+  var bubbles = [];
+  var bowlCount = 0;
+  var added = 0;
+  var TOTAL = 8;
+  var done = false;
+
+  function potGeometry() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var pw = Math.min(430, w * 0.8);
+    return { x: (w - pw) / 2, y: h * 0.38, w: pw, h: h * 0.34 };
+  }
+  function waterTop() { return potGeometry().y + 26; }
+  function waterBottom() { return potGeometry().y + potGeometry().h - 20; }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  canvas.addEventListener('click', function (e) {
+    if (done) return;
+    // 先判捞出：点浮起的熟饺子
+    for (var i = dumplings.length - 1; i >= 0; i--) {
+      var d = dumplings[i];
+      if (d.cooked > 0.92 && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 34) {
+        dumplings.splice(i, 1);
+        bowlCount++;
+        updateCount();
+        return;
+      }
+    }
+    // 再判下饺子：点锅内水面附近
+    var pot = potGeometry();
+    if (e.clientY > pot.y - 10 && e.clientY < waterTop() + 30 && e.clientX > pot.x && e.clientX < pot.x + pot.w) {
+      if (added < TOTAL && dumplings.length < 6) {
+        added++;
+        dumplings.push({
+          x: e.clientX + (Math.random() - 0.5) * 30,
+          y: waterTop() + 6,
+          vy: 26,
+          cooked: 0,
+          ph: Math.random() * Math.PI * 2,
+          wob: Math.random() * 10
+        });
+        updateCount();
+      }
+    }
+  });
+
+  function updateCount() {
+    if (done) return;
+    countLine.textContent = '碗里 ' + bowlCount + ' 只 · 已下锅 ' + (added - dumplings.length - bowlCount + dumplings.length) + ' 只';
+    if (bowlCount >= TOTAL) {
+      done = true;
+      document.body.classList.add('done');
+    }
+  }
+
+  document.getElementById('again').addEventListener('click', function () {
+    dumplings = []; bowlCount = 0; added = 0; done = false;
+    document.body.classList.remove('done');
+    updateCount();
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var pot = potGeometry();
+    var wTop = waterTop(), wBot = waterBottom();
+
+    // 厨房夜背景
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 锅（俯视偏侧：椭圆锅口 + 锅身）
+    ctx.fillStyle = '#1a1d24';
+    ctx.beginPath();
+    ctx.ellipse(w / 2, pot.y + pot.h / 2, pot.w / 2 + 16, pot.h / 2 + 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 锅内水面
+    var water = ctx.createLinearGradient(0, wTop, 0, wBot);
+    water.addColorStop(0, '#3a4a5c');
+    water.addColorStop(1, '#243140');
+    ctx.fillStyle = water;
+    ctx.beginPath();
+    ctx.ellipse(w / 2, pot.y + pot.h / 2, pot.w / 2 - 8, pot.h / 2 - 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 水面波光
+    ctx.strokeStyle = 'rgba(180,210,235,0.2)';
+    ctx.lineWidth = 1.6;
+    for (var wi = 0; wi < 3; wi++) {
+      ctx.beginPath();
+      var wy = wTop + 18 + wi * (wBot - wTop - 30) / 2.4;
+      for (var sx = pot.x + 14; sx <= pot.x + pot.w - 14; sx += 10) {
+        var sy = wy + Math.sin(sx * 0.04 + t * 0.002 + wi) * 2.6;
+        if (sx === pot.x + 14) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+      }
+      ctx.stroke();
+    }
+
+    // 沸腾气泡
+    if (Math.random() < dt * 5) {
+      bubbles.push({
+        x: pot.x + 20 + Math.random() * (pot.w - 40),
+        y: wBot - Math.random() * 20,
+        r: 1.5 + Math.random() * 2,
+        v: 30 + Math.random() * 20
+      });
+    }
+    for (var bi = bubbles.length - 1; bi >= 0; bi--) {
+      var b = bubbles[bi];
+      b.y -= b.v * dt;
+      if (b.y < wTop + 6) { bubbles.splice(bi, 1); continue; }
+      ctx.strokeStyle = 'rgba(200,225,245,0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 饺子：下沉 → 受热上浮
+    dumplings.forEach(function (d) {
+      var floatLine = wTop + 16;
+      if (d.cooked < 1) {
+        // 未熟：先沉
+        if (d.y < wBot - 24) d.y += d.vy * dt;
+        d.cooked = Math.min(1, d.cooked + dt * 0.09);   // 约 11 秒浮起
+        if (d.cooked >= 1) d.vy = -12;
+      } else {
+        // 浮起：向水面飘 + 轻轻打转
+        d.y += (floatLine - d.y) * dt * 1.6 + Math.sin(t * 0.003 + d.ph) * 6 * dt;
+        d.x += Math.sin(t * 0.0016 + d.wob) * 6 * dt;
+      }
+      // 画饺子：白胖椭圆 + 褶子纹
+      var bob = Math.sin(t * 0.004 + d.ph) * 1.6;
+      var doneness = 0.72 + d.cooked * 0.28;
+      ctx.save();
+      ctx.translate(d.x, d.y + bob);
+      ctx.rotate(Math.sin(t * 0.002 + d.ph) * 0.14);
+      ctx.fillStyle = 'rgba(' + Math.round(236 * doneness + 20) + ',' + Math.round(230 * doneness + 25) + ',' + Math.round(210 * doneness + 45) + ',0.96)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 15, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(160,140,110,0.5)';
+      ctx.lineWidth = 1;
+      for (var f2 = -2; f2 <= 2; f2++) {
+        ctx.beginPath();
+        ctx.moveTo(f2 * 5, -8);
+        ctx.lineTo(f2 * 5, 7);
+        ctx.stroke();
+      }
+      ctx.restore();
+    });
+
+    // 灶台
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, h * 0.88, w, h * 0.12);
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+
+  updateCount();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

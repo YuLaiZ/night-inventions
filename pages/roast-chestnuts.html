@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>糖炒栗子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.18em;
+    color: #b9a57a;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>糖炒栗子</h1>
+  <p>街角的锅刚出锅，黑砂还冒着热气。<br>点击裂了口的栗子——剥开，趁热吃。</p>
+</div>
+
+<div class="count-line" id="countLine">吃了 0 颗</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var nuts = [];           // {x,y,ang,cracked(0..1),eaten,ph}
+  var shells = [];         // 剥下的壳 {x,y,ang,vx,vy}
+  var eaten = 0;
+  var steamPuffs = [];
+
+  function potGeometry() {
+    var w = window.innerWidth;
+    var pw = Math.min(460, w * 0.82);
+    return { x: (w - pw) / 2, y: window.innerHeight * 0.4, w: pw, h: window.innerHeight * 0.32 };
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function addNut() {
+    var pot = potGeometry();
+    nuts.push({
+      x: pot.x + 30 + Math.random() * (pot.w - 60),
+      y: pot.y + 30 + Math.random() * (pot.h - 60),
+      ang: Math.random() * Math.PI * 2,
+      cracked: 0,          // 裂口展开 0..1
+      ph: Math.random() * Math.PI * 2,
+      e: 0
+    });
+  }
+  for (var i0 = 0; i0 < 7; i0++) addNut();
+  setInterval(function () { if (nuts.length < 8) addNut(); }, 5000);
+
+  canvas.addEventListener('click', function (e) {
+    var pot = potGeometry();
+    for (var i = nuts.length - 1; i >= 0; i--) {
+      var n = nuts[i];
+      if (Math.hypot(e.clientX - n.x, e.clientY - n.y) < 26) {
+        if (n.cracked < 1) {
+          n.cracked = 1;   // 剥开
+        } else {
+          // 吃掉：壳弹飞
+          shells.push({ x: n.x, y: n.y, ang: n.ang, vx: (Math.random() - 0.5) * 160, vy: -160 - Math.random() * 120, rot: 0, rotV: (Math.random() - 0.5) * 8 });
+          nuts.splice(i, 1);
+          eaten++;
+          countLine.textContent = '吃了 ' + eaten + ' 颗' + (eaten >= 10 ? ' · 够了，留几颗给下班的人' : '');
+          for (var s2 = 0; s2 < 4; s2++) {
+            steamPuffs.push({ x: n.x, y: n.y - 4, r: 3 + Math.random() * 4, vy: -24 - Math.random() * 14, life: 1 });
+          }
+        }
+        return;
+      }
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var pot = potGeometry();
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 锅：黑砂 + 栗子
+    ctx.fillStyle = '#15120d';
+    roundRect(pot.x - 14, pot.y - 14, pot.w + 28, pot.h + 28, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#2c2417';
+    ctx.lineWidth = 2;
+    roundRect(pot.x - 14, pot.y - 14, pot.w + 28, pot.h + 28, 16);
+    ctx.stroke();
+
+    // 黑砂底
+    ctx.fillStyle = '#221c12';
+    roundRect(pot.x, pot.y, pot.w, pot.h, 10);
+    ctx.fill();
+    // 砂粒
+    var seed = 5;
+    for (var gi = 0; gi < 90; gi++) {
+      seed = (seed * 16807) % 2147483647;
+      var gx2 = pot.x + (seed % 1000) / 1000 * pot.w;
+      var gy2 = pot.y + ((seed >> 3) % 1000) / 1000 * pot.h;
+      ctx.fillStyle = 'rgba(120,100,60,0.25)';
+      ctx.fillRect(gx2, gy2, 2, 2);
+    }
+
+    // 栗子
+    nuts.forEach(function (n) {
+      n.cracked = n.cracked;   // 保持
+      var wob = Math.sin(t * 0.002 + n.ph) * 1.2;
+      ctx.save();
+      ctx.translate(n.x + wob, n.y + wob * 0.6);
+      ctx.rotate(n.ang);
+      // 栗壳
+      ctx.fillStyle = '#6d4326';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 13, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(200,150,90,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(-4, -3, 5, 2.6, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+      // 裂口（剥开后壳分两半，露出黄果）
+      if (n.cracked > 0.5) {
+        var open = n.cracked * 5;
+        ctx.fillStyle = '#e8c46a';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 11, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 两片壳
+        ctx.fillStyle = '#6d4326';
+        ctx.beginPath();
+        ctx.ellipse(0, -open, 13, 8, 0, Math.PI, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(0, open * 0.6, 13, 8, 0, 0, Math.PI);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+
+    // 剥下的壳（弹飞后落下）
+    for (var si = shells.length - 1; si >= 0; si--) {
+      var sh = shells[si];
+      sh.vy += 420 * dt;
+      sh.x += sh.vx * dt; sh.y += sh.vy * dt;
+      sh.rot += sh.rotV * dt;
+      if (sh.y > h + 40) { shells.splice(si, 1); continue; }
+      ctx.save();
+      ctx.translate(sh.x, sh.y);
+      ctx.rotate(sh.rot);
+      ctx.fillStyle = '#6d4326';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 蒸汽
+    for (var pi = steamPuffs.length - 1; pi >= 0; pi--) {
+      var p = steamPuffs[pi];
+      p.y += p.vy * dt;
+      p.r += 8 * dt;
+      p.life -= dt * 0.9;
+      if (p.life <= 0) { steamPuffs.splice(pi, 1); continue; }
+      var pg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      pg.addColorStop(0, 'rgba(226,232,240,' + (0.28 * p.life) + ')');
+      pg.addColorStop(1, 'rgba(226,232,240,0)');
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 锅沿高光（热气微光）
+    var heat = ctx.createRadialGradient(w / 2, pot.y + pot.h / 2, 0, w / 2, pot.y + pot.h / 2, pot.w * 0.7);
+    heat.addColorStop(0, 'rgba(255,180,90,0.05)');
+    heat.addColorStop(1, 'rgba(255,180,90,0)');
+    ctx.fillStyle = heat;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

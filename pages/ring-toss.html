@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜市套圈</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .count-line {
+    position: absolute; bottom: 5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 13px; letter-spacing: 0.16em;
+    color: #b9a57a;
+    z-index: 3;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>夜市套圈</h1>
+  <p>收摊前的夜市还剩一个摊。<br>按住往后拉，松手把圈抛出去——远的那枚是月亮做的。</p>
+</div>
+
+<div class="count-line" id="countLine">套中 0 个 · 一圈都别浪费</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var countLine = document.getElementById('countLine');
+
+  var prizes = [];        // {x, groundY, label, col, won}
+  var rings = [];         // 飞行中的圈 {x,y,vx,vy}
+  var wonCount = 0;
+  var aim = null;         // {x0,y0,x1,y1}
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    setupPrizes();
+  }
+  window.addEventListener('resize', resize);
+
+  function setupPrizes() {
+    var w = window.innerWidth;
+    prizes = [
+      { x: w * 0.34, label: '橡皮', col: '#c98a5a', won: false },
+      { x: w * 0.5, label: '小台灯', col: '#d9c26a', won: false },
+      { x: w * 0.66, label: '月亮徽章', col: '#cfd8e8', won: false }
+    ];
+  }
+
+  var groundY = 0;
+  function ground() { return window.innerHeight * 0.82; }
+
+  // ── 投掷 ─────────────────────────────────────────────
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.clientY < window.innerHeight * 0.6) return;
+    aim = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (aim) { aim.x1 = e.clientX; aim.y1 = e.clientY; }
+  });
+  window.addEventListener('pointerup', function () {
+    if (!aim) return;
+    var pullX = aim.x1 - aim.x0, pullY = aim.y1 - aim.y0;   // 后拉向量
+    var power = Math.hypot(pullX, pullY);
+    aim = null;
+    if (power < 24 || pullY <= 10) return;                  // 要向后下方拉
+    rings.push({
+      x: window.innerWidth * 0.12, y: ground() - 10,
+      vx: -pullX * 3.2, vy: -pullY * 3.2,
+      rot: 0
+    });
+  });
+
+  function updateRings(dt) {
+    var gY = ground();
+    for (var i = rings.length - 1; i >= 0; i--) {
+      var r = rings[i];
+      r.vy += 520 * dt;
+      r.x += r.vx * dt;
+      r.y += r.vy * dt;
+      r.rot += dt * 7;
+      // 套中判定：圈心压在奖品桩顶附近且下落中
+      if (r.vy > 0) {
+        for (var p = 0; p < prizes.length; p++) {
+          var pz = prizes[p];
+          if (!pz.won && Math.abs(r.x - pz.x) < 22 && r.y > gY - 74 && r.y < gY - 40) {
+            pz.won = true;
+            wonCount++;
+            countLine.textContent = '套中 ' + wonCount + ' 个 · 最远那枚是月亮做的';
+            rings.splice(i, 1);
+            r = null;
+            break;
+          }
+        }
+        if (!r) continue;
+      }
+      // 落地弹跳消散
+      if (r.y > gY - 6) {
+        if (Math.abs(r.vy) > 90) { r.vy *= -0.42; r.vx *= 0.6; r.y = gY - 6; }
+        else { rings.splice(i, 1); }
+      }
+    }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var gY = ground();
+    groundY = gY;
+    updateRings(dt);
+
+    // 夜市摊位背景：条纹棚布
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+    for (var sx = 0; sx < w; sx += 60) {
+      ctx.fillStyle = (sx / 60) % 2 === 0 ? 'rgba(120,60,50,0.10)' : 'rgba(90,90,120,0.08)';
+      ctx.fillRect(sx, 0, 60, h * 0.16);
+    }
+    ctx.fillStyle = 'rgba(255,200,130,0.06)';
+    ctx.fillRect(0, 0, w, h * 0.16);
+
+    // 地面
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillRect(0, gY, w, h - gY);
+
+    // 奖品桩
+    prizes.forEach(function (p, idx) {
+      var px = p.x;
+      // 桩
+      ctx.fillStyle = '#2b2419';
+      ctx.fillRect(px - 4, gY - 52, 8, 52);
+      // 奖品
+      ctx.save();
+      ctx.translate(px, gY - 62);
+      var glow = p.won ? 0.5 + 0.3 * Math.sin(t * 0.004) : 0;
+      ctx.fillStyle = p.col;
+      if (idx === 0) {
+        ctx.fillRect(-11, -16, 22, 15);
+      } else if (idx === 1) {
+        ctx.fillRect(-9, -20, 18, 17);
+        ctx.fillRect(-4, -30, 8, 11);
+      } else {
+        ctx.beginPath(); ctx.arc(0, -12, 13, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#0e1118';
+        ctx.beginPath(); ctx.arc(5, -14, 10, 0, Math.PI * 2); ctx.fill();
+      }
+      if (p.won) {
+        ctx.strokeStyle = 'rgba(255,226,160,' + glow + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, -12, 20, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+      // 名牌
+      ctx.fillStyle = p.won ? '#e8d9b0' : '#565040';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(p.label, px, gY + 16);
+    });
+
+    // 拖拽瞄准线
+    if (aim) {
+      ctx.strokeStyle = 'rgba(217,184,119,0.45)';
+      ctx.setLineDash([5, 7]);
+      ctx.beginPath();
+      ctx.moveTo(aim.x0, aim.y0);
+      ctx.lineTo(aim.x1, aim.y1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 力度提示
+      var pw = Math.hypot(aim.x0 - aim.x1, aim.y0 - aim.y1);
+      ctx.fillStyle = 'rgba(217,184,119,0.7)';
+      ctx.font = '12px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.min(100, Math.round(pw / 3)) + '%', aim.x1, aim.y1 - 12);
+    }
+
+    // 飞行中的圈
+    rings.forEach(function (r) {
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.rotate(r.rot);
+      ctx.strokeStyle = '#d9a86a';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 20, 8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // 手边的圈（待投）
+    if (!aim) {
+      ctx.strokeStyle = '#d9a86a';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(w * 0.12, gY - 12, 20, 8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  window.__dbg = function () { return { rings: JSON.parse(JSON.stringify(rings)), prizes: prizes.map(function (q) { return { x: q.x, won: q.won }; }), gY: ground() }; };
+
+  resize();
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>装一只闹钟</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #c9c2b4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 36px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a857a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565a63; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 6.5vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #cfc6b2;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+    padding: 0 30px;
+  }
+  .caption.show { opacity: 1; }
+  .again {
+    position: absolute; bottom: 12.5vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 3;
+    display: none;
+  }
+  body.done .again { display: block; }
+  .again button {
+    background: #1c2230;
+    border: 1px solid #333d4f;
+    border-radius: 8px;
+    color: #d8d2c4;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    padding: 9px 24px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #3c4048;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565a63;
+    text-decoration: none;
+    border-bottom: 1px dotted #565a63;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9b948a; border-color: #9b948a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>装一只闹钟</h1>
+  <p>桌上散着齿轮、指针和外壳。<br>按装配顺序点它们——装好它，叫醒明天。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+<div class="again"><button id="again">拆开重装</button></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 装配顺序：外壳 → 大齿轮 → 小齿轮 → 时针 → 分针 → 闹铃
+  var PARTS = [
+    { key: 'shell',   name: '外壳',   line: '外壳归位。它开始有点闹钟的样子了。' },
+    { key: 'gearBig', name: '大齿轮', line: '大齿轮落座，咬合很顺。' },
+    { key: 'gearSml', name: '小齿轮', line: '小齿轮带上大齿轮——心跳有了。' },
+    { key: 'hourH',   name: '时针',   line: '时针装好。它从现在开始记时间。' },
+    { key: 'minH',    name: '分针',   line: '分针就位。快了，快走起来了。' },
+    { key: 'bell',    name: '闹铃',   line: '闹铃上好。滴答——它走了，明天会被叫醒。' }
+  ];
+  var installed = [];      // 已装 key 列表
+  var done = false;
+
+  function say(text) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 各零件的可点击区域（相对闹钟中心）
+  function partZones() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var cx = w / 2, cy = h * 0.52, R = Math.min(150, h * 0.22);
+    return [
+      { key: 'shell',   x: cx,        y: cy,         r: R + 24 },
+      { key: 'gearBig', x: cx - R * 0.42, y: cy + 6, r: 40 },
+      { key: 'gearSml', x: cx + R * 0.34, y: cy - 4, r: 28 },
+      { key: 'hourH',   x: cx,        y: cy,         r: R * 0.5 },
+      { key: 'minH',    x: cx,        y: cy,         r: R * 0.72 },
+      { key: 'bell',    x: cx - R * 0.62, y: cy - R * 0.72, r: 30 },
+      { key: 'bell2',   x: cx + R * 0.62, y: cy - R * 0.72, r: 30 }
+    ];
+  }
+
+  canvas.addEventListener('click', function (e) {
+    if (done) return;
+    var next = PARTS[installed.length];
+    if (!next) return;
+    var zones = partZones();
+    // 命中「下一个该装的零件」附近即装配（顺序引导，点错处给提示）
+    var idx = PARTS.map(function (p) { return p.key; }).indexOf(next.key);
+    var z = zones[idx === 0 ? 0 : idx];
+    var hit = false;
+    for (var i = 0; i < zones.length; i++) {
+      var zz = zones[i];
+      if (Math.hypot(e.clientX - zz.x, e.clientY - zz.y) < zz.r) { hit = true; break; }
+    }
+    if (!hit) return;
+    installed.push(next.key);
+    say(next.line);
+    if (installed.length === PARTS.length) {
+      done = true;
+      setTimeout(function () {
+        say('装好了。设定：06:30，温柔地响。');
+        document.body.classList.add('done');
+      }, 900);
+    }
+  });
+
+  document.getElementById('again').addEventListener('click', function () {
+    installed = [];
+    done = false;
+    document.body.classList.remove('done');
+    caption.classList.remove('show');
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var t = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var cx = w / 2, cy = h * 0.52, R = Math.min(150, h * 0.22);
+    var has = function (k) { return installed.indexOf(k) >= 0; };
+    var secAngle = t / 1000 % 60 / 60 * Math.PI * 2;
+
+    ctx.fillStyle = '#07090e';
+    ctx.fillRect(0, 0, w, h);
+
+    // 桌面
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, h * 0.86, w, h * 0.14);
+
+    // 待装零件（散在两侧，装一个少一个）
+    var loose = {
+      shell: { x: w * 0.12, y: h * 0.3 },
+      gearBig: { x: w * 0.86, y: h * 0.34 },
+      gearSml: { x: w * 0.9, y: h * 0.52 },
+      hourH: { x: w * 0.1, y: h * 0.52 },
+      minH: { x: w * 0.14, y: h * 0.68 },
+      bell: { x: w * 0.88, y: h * 0.7 }
+    };
+    Object.keys(loose).forEach(function (k) {
+      if (has(k)) return;
+      var p = loose[k];
+      ctx.globalAlpha = 0.75;
+      if (k === 'shell') {
+        ctx.strokeStyle = '#5a6478';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 34, 0, Math.PI * 2); ctx.stroke();
+      } else if (k === 'gearBig' || k === 'gearSml') {
+        drawGear(p.x, p.y, k === 'gearBig' ? 24 : 16, t * (k === 'gearBig' ? 0.3 : 0.5), '#5a6478');
+      } else if (k === 'hourH') {
+        ctx.strokeStyle = '#8a94a8';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 22, p.y - 14); ctx.stroke();
+      } else if (k === 'minH') {
+        ctx.strokeStyle = '#8a94a8';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 14, p.y - 26); ctx.stroke();
+      } else if (k === 'bell') {
+        ctx.fillStyle = '#8a94a8';
+        ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    });
+
+    // 外壳
+    if (has('shell')) {
+      ctx.fillStyle = '#20283a';
+      ctx.beginPath();
+      ctx.arc(cx, cy, R + 22, 0, Math.PI * 2);
+      ctx.fill();
+      // 双铃
+      if (has('bell')) {
+        [-1, 1].forEach(function (s) {
+          ctx.fillStyle = '#8a94a8';
+          ctx.beginPath();
+          ctx.arc(cx + s * (R + 22) * 0.72, cy - (R + 22) * 0.72, 12, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        // 小锤
+        ctx.fillStyle = '#5a6478';
+        ctx.fillRect(cx - 2.4, cy - (R + 22) * 0.72 + 12, 4.8, 10);
+      }
+      // 表盘
+      ctx.fillStyle = '#e8e0cc';
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fill();
+      // 刻度
+      ctx.strokeStyle = '#4a4034';
+      for (var i = 0; i < 12; i++) {
+        var a = i / 12 * Math.PI * 2;
+        ctx.lineWidth = i % 3 === 0 ? 3.4 : 1.8;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.sin(a) * (R - 10), cy - Math.cos(a) * (R - 10));
+        ctx.lineTo(cx + Math.sin(a) * (R - (i % 3 === 0 ? 22 : 16)), cy - Math.cos(a) * (R - (i % 3 === 0 ? 22 : 16)));
+        ctx.stroke();
+      }
+    }
+
+    // 齿轮（装了才显示在壳内下沿，转动）
+    if (has('gearBig')) drawGear(cx - R * 0.42, cy + R * 0.62, 20, t * 0.5, '#7a7362');
+    if (has('gearSml')) drawGear(cx + R * 0.3, cy + R * 0.68, 13, -t * 0.9, '#7a7362');
+
+    // 指针（以真实时间走）
+    if (has('hourH')) {
+      var hA = (new Date().getHours() % 12 + new Date().getMinutes() / 60) / 12 * Math.PI * 2;
+      hand(cx, cy, R * 0.5, hA, 5, '#33302a');
+    }
+    if (has('minH')) {
+      var mA = new Date().getMinutes() / 60 * Math.PI * 2 + new Date().getSeconds() / 3600 * Math.PI * 2;
+      hand(cx, cy, R * 0.74, mA, 3.4, '#33302a');
+    }
+    if (has('shell')) {
+      ctx.fillStyle = '#33302a';
+      ctx.beginPath(); ctx.arc(cx, cy, 4.4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 完工：整个闹钟轻微摇摆 + 铃波纹
+    if (done) {
+      var shake = Math.sin(t * 0.008) * 0.015;
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#e8d9b0';
+      ctx.lineWidth = 1.6;
+      for (var r2 = 1; r2 <= 2; r2++) {
+        ctx.beginPath();
+        ctx.arc(cx, cy - (R + 22) * 0.72, (R + 30) * r2 + Math.sin(t * 0.004) * 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+      void shake;
+    }
+  }
+
+  function drawGear(x, y, r, ang, col) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var a1 = i / 10 * Math.PI * 2;
+      var a2 = (i + 0.5) / 10 * Math.PI * 2;
+      ctx.lineTo(Math.cos(a1) * (r + 5), Math.sin(a1) * (r + 5));
+      ctx.lineTo(Math.cos(a2) * r, Math.sin(a2) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#0a0d13';
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function hand(cx, cy, len, ang, lw, col) {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = lw;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.sin(ang) * len, cy - Math.cos(ang) * len);
+    ctx.stroke();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+})();
+</script>
+</body>
+</html>
