@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分你一只耳机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1420;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #55606e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6472; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #55606e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>分你一只耳机</h1>
+  <p>深夜的歌要两个人听才算数。<br>点那只白耳机，把它递过去。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var SONGS = ['晚安练习曲', '末班车开走以后', '冰箱的嗡嗡声（重混版）', '路灯下的小步舞'];
+  var songIdx = 0;
+
+  var shared = false;        // 白耳机是否已递出去
+  var moveT = 0;             // 递出动画进度
+  var saidShare = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 耳塞位置：黑的一直在左下（自己），白的递出后到右侧（你），都离开手机两侧
+  function buds(g) {
+    var baseX = g.w / 2, baseY = g.h * 0.46;
+    var dark = { x: baseX - g.w * 0.26, y: g.h * 0.70 };
+    var white = shared
+      ? { x: baseX + g.w * 0.26, y: g.h * 0.62 }
+      : { x: baseX - g.w * 0.03, y: g.h * 0.78 };
+    return { dark: dark, white: white };
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var g = geo();
+    var b = buds(g);
+    var r = Math.min(g.w, g.h) * 0.05;
+    if (!shared && Math.hypot(ev.clientX - b.white.x, ev.clientY - b.white.y) < r + 26) {
+      shared = true;
+      saidShare = true;
+      say('左边给我，右边给你。点一下手机，还能换首。', true);
+      return;
+    }
+    // 点手机换歌
+    var phW = Math.min(g.w * 0.30, 150), phH = phW * 1.9;
+    var phX = g.w / 2 - phW / 2, phY = g.h * 0.20;
+    if (ev.clientX > phX && ev.clientX < phX + phW && ev.clientY > phY && ev.clientY < phY + phH) {
+      songIdx = (songIdx + 1) % SONGS.length;
+      if (shared) say('换一首：' + SONGS[songIdx] + '。', false);
+    }
+  });
+
+  function geo() {
+    return { w: window.innerWidth, h: window.innerHeight };
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    if (shared && moveT < 1) moveT = Math.min(1, moveT + dt * 1.1);
+    var b = buds({ w: w, h: h });
+    // 递出动画：从原位插值
+    var whiteFrom = { x: w / 2 - w * 0.05, y: h * 0.64 };
+    var wx = whiteFrom.x + (b.white.x - whiteFrom.x) * easeOut(moveT);
+    var wy = whiteFrom.y + (b.white.y - whiteFrom.y) * easeOut(moveT);
+
+    // 背景
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1420');
+    bg.addColorStop(1, '#0a0f18');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 手机剪影（播放器）
+    var phW = Math.min(w * 0.30, 150), phH = phW * 1.9;
+    var phX = w / 2 - phW / 2, phY = h * 0.20;
+    ctx.fillStyle = '#141b28';
+    roundRect(phX, phY, phW, phH, 14);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(150,165,190,0.3)';
+    ctx.lineWidth = 1.6;
+    roundRectStroke(phX, phY, phW, phH, 14);
+    // 屏幕：歌名 + 波形条
+    ctx.fillStyle = 'rgba(190,210,235,0.75)';
+    ctx.font = '500 ' + Math.round(phW * 0.085) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(SONGS[songIdx], phX + phW / 2, phY + phH * 0.30);
+    var bars = 9;
+    for (var i = 0; i < bars; i++) {
+      var bx = phX + phW * (0.22 + i * 0.07);
+      var amp = Math.abs(Math.sin(now / (340 + i * 61) + i * 1.9)) * phH * 0.09 + 2;
+      ctx.fillStyle = 'rgba(242,199,110,' + (0.55 + 0.25 * Math.sin(now / 500 + i)) + ')';
+      ctx.fillRect(bx, phY + phH * 0.46 - amp / 2, 4.5, amp);
+    }
+    // 播放键区
+    ctx.fillStyle = 'rgba(140,155,175,0.5)';
+    ctx.beginPath();
+    ctx.arc(phX + phW / 2, phY + phH * 0.72, phW * 0.075, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#141b28';
+    ctx.beginPath();
+    ctx.moveTo(phX + phW / 2 - phW * 0.02, phY + phH * 0.72 - phW * 0.032);
+    ctx.lineTo(phX + phW / 2 + phW * 0.038, phY + phH * 0.72);
+    ctx.lineTo(phX + phW / 2 - phW * 0.02, phY + phH * 0.72 + phW * 0.032);
+    ctx.closePath();
+    ctx.fill();
+
+    // 耳机线：从手机底部到分叉点，再到两只耳塞
+    var forkX = w / 2, forkY = phY + phH + Math.min(60, h * 0.06);
+    ctx.strokeStyle = 'rgba(170,185,205,0.55)';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, phY + phH - 4);
+    ctx.quadraticCurveTo(w / 2 + 8, (phY + phH + forkY) / 2, forkX, forkY);
+    ctx.stroke();
+    // 分叉到黑耳塞
+    ctx.beginPath();
+    ctx.moveTo(forkX, forkY);
+    ctx.quadraticCurveTo(lerp(forkX, b.dark.x, 0.4), lerp(forkY, b.dark.y, 0.55) + 26, b.dark.x, b.dark.y - 10);
+    ctx.stroke();
+    // 分叉到白耳塞（动画中跟随插值位置）
+    ctx.beginPath();
+    ctx.moveTo(forkX, forkY);
+    ctx.quadraticCurveTo(lerp(forkX, wx, 0.5) - 20, lerp(forkY, wy, 0.5) + 34, wx, wy - 10);
+    ctx.stroke();
+
+    // 耳塞（两颗小胶囊+入耳头）
+    drawBud(b.dark.x, b.dark.y, '#39434f', now);
+    drawBud(wx, wy, '#e8e4da', now);
+
+    // 共享后：两颗耳塞旁各自的微光波形（同节奏）
+    if (shared && moveT > 0.9) {
+      pulseRings(b.dark.x, b.dark.y, now, 0.5);
+      pulseRings(wx, wy, now, 0.5);
+    }
+    if (!shared && !saidShare) {
+      ctx.fillStyle = 'rgba(110,120,135,' + (0.3 + 0.22 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住那只白的，递过去', wx, wy + 52);
+    }
+  }
+
+  function pulseRings(x, y, now, alpha) {
+    for (var r = 0; r < 2; r++) {
+      var ph = ((now / 1500) + r * 0.5) % 1;
+      ctx.strokeStyle = 'rgba(242,199,110,' + (alpha * (1 - ph) * 0.5) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 26 + ph * 40, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function drawBud(x, y, bodyColor, now) {
+    var breathe = Math.sin(now / 1100) * 1.2;
+    ctx.save();
+    ctx.translate(x, y + breathe);
+    // 入耳头
+    ctx.fillStyle = bodyColor === '#e8e4da' ? '#cfc9bb' : '#2b333d';
+    ctx.beginPath();
+    ctx.arc(0, -8, 5.2, 0, Math.PI * 2);
+    ctx.fill();
+    // 胶囊身
+    ctx.fillStyle = bodyColor;
+    roundRect(-7.5, -6, 15, 22, 7.5);
+    ctx.fill();
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(-2.5, 1, 2, 6.5, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function easeOut(k) { return 1 - Math.pow(1 - k, 3); }
+  function lerp(a, b, k) { return a + (b - a) * k; }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+  function roundRectStroke(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__earphone = {
+    shared: function () { return shared; },
+    moveT: function () { return +moveT.toFixed(2); },
+    song: function () { return songIdx; },
+    nextSong: function () { songIdx = (songIdx + 1) % SONGS.length; return songIdx; },
+    share: function () { shared = true; }
+  };
+})();
+</script>
+</body>
+</html>

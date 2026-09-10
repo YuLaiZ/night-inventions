@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我到家了</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #10151f;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8b96ad;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a8b2c4; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6472; letter-spacing: 0.08em; }
+  .chat {
+    position: absolute; top: 24vh; left: 0; right: 0;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 14px;
+  }
+  .bubble {
+    max-width: 72%;
+    padding: 12px 18px;
+    border-radius: 16px;
+    font-size: 15px;
+    line-height: 1.8;
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .bubble.show { opacity: 1; transform: translateY(0); }
+  .bubble.mine {
+    align-self: flex-end;
+    margin-right: max(8vw, 28px);
+    background: #24314a;
+    color: #dbe4f2;
+    border-bottom-right-radius: 5px;
+  }
+  .bubble.theirs {
+    align-self: flex-start;
+    margin-left: max(8vw, 28px);
+    background: rgba(156, 200, 255, 0.10);
+    color: #aebdd4;
+    border-bottom-left-radius: 5px;
+  }
+  .bubble .t {
+    display: block;
+    margin-top: 5px;
+    font-size: 10.5px;
+    color: rgba(139, 150, 173, 0.55);
+    letter-spacing: 0.05em;
+    font-variant-numeric: tabular-nums;
+  }
+  .dots { display: inline-flex; gap: 4px; padding: 4px 2px; }
+  .dots i {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #6a7688;
+    animation: blink 1.1s infinite;
+  }
+  .dots i:nth-child(2) { animation-delay: 0.18s; }
+  .dots i:nth-child(3) { animation-delay: 0.36s; }
+  @keyframes blink { 0%, 70%, 100% { opacity: 0.25; } 35% { opacity: 1; } }
+  .send-row {
+    position: absolute; bottom: 16vh; left: 0; right: 0;
+    text-align: center;
+    z-index: 3;
+  }
+  #send {
+    font-size: 15px;
+    letter-spacing: 0.14em;
+    color: #10151f;
+    background: #f2c76e;
+    border: none;
+    border-radius: 999px;
+    padding: 13px 34px;
+    cursor: pointer;
+    transition: transform 0.12s ease, filter 0.2s ease, opacity 0.4s ease;
+  }
+  #send:hover { filter: brightness(1.07); }
+  #send:active { transform: scale(0.97); }
+  #send.sent {
+    background: none;
+    color: #5a6472;
+    border: 1px solid rgba(139, 150, 173, 0.3);
+    cursor: default;
+    opacity: 0.75;
+  }
+  .end-note {
+    margin-top: 18px;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    color: #5a6472;
+    opacity: 0;
+    transition: opacity 1.2s ease;
+  }
+  .end-note.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>我到家了</h1>
+  <p>报平安这件事，三个字就够。<br>发给那个会等你消息的人。</p>
+</div>
+
+<div class="chat" id="chat"></div>
+
+<div class="send-row">
+  <button id="send" type="button">发送：我到家了</button>
+  <div class="end-note" id="end-note">灯可以关了。有人知道你到了。</div>
+</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var chat = document.getElementById('chat');
+  var btn = document.getElementById('send');
+  var endNote = document.getElementById('end-note');
+  var sent = false;
+
+  function bubble(cls, text, withTime) {
+    var el = document.createElement('div');
+    el.className = 'bubble ' + cls;
+    el.textContent = text;
+    if (withTime) {
+      var d = new Date();
+      var hh = String(d.getHours()).padStart(2, '0');
+      var mm = String(d.getMinutes()).padStart(2, '0');
+      var t = document.createElement('span');
+      t.className = 't';
+      t.textContent = '今晚 ' + hh + ':' + mm;
+      el.appendChild(t);
+    }
+    chat.appendChild(el);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { el.classList.add('show'); });
+    });
+    return el;
+  }
+
+  btn.addEventListener('click', function () {
+    if (sent) return;
+    sent = true;
+    bubble('mine', '我到家了。', true);
+    btn.classList.add('sent');
+    btn.textContent = '今夜已报平安';
+    // 对方「正在输入」→ 回复
+    var typing = bubble('theirs', '');
+    var dots = document.createElement('span');
+    dots.className = 'dots';
+    dots.innerHTML = '<i></i><i></i><i></i>';
+    typing.appendChild(dots);
+    setTimeout(function () {
+      typing.textContent = '';
+      typing.className = 'bubble theirs show';
+      typing.textContent = '好。门锁好了就睡。';
+      var d = new Date();
+      var t = document.createElement('span');
+      t.className = 't';
+      t.textContent = '今晚 ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      typing.appendChild(t);
+      endNote.classList.add('show');
+    }, 2600);
+  });
+
+  // QA 钩子（无私人信息）
+  window.__imhome = {
+    sent: function () { return sent; },
+    send: function () { btn.click(); }
+  };
+})();
+</script>
+</body>
+</html>

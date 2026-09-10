@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>倒带的黄昏</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0e16;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7a8494; margin-bottom: 12px; padding-left: 0.28em;
+    text-shadow: 0 1px 8px rgba(10,14,22,0.55);
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6a7482; letter-spacing: 0.08em; text-shadow: 0 1px 8px rgba(10,14,22,0.55); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #6a7482;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+    text-shadow: 0 1px 8px rgba(10,14,22,0.8);
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>倒带的黄昏</h1>
+  <p>今晚的日落已经放完了。<br>按住屏幕，把它倒回去，再看一眼。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var t = 0;                   // 0 深夜 ↔ 1 日落最后一刻（倒带进度）
+  var rewinding = false;
+  var rewindCount = 0;
+  var saidPress = false, saidRelease = false, saidEnough = false;
+  var peak = 0;                // 本轮倒带到的最深处
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  canvas.addEventListener('pointerdown', function () {
+    rewinding = true;
+    peak = t;
+    if (!saidPress) { saidPress = true; say('倒带按住了。今晚的太阳，正往回浮。'); }
+  });
+  window.addEventListener('pointerup', function () {
+    if (!rewinding) return;
+    rewinding = false;
+    rewindCount++;
+    if (!saidRelease && peak > 0.5) { saidRelease = true; say('日落可以倒放，今天不能重来。'); }
+    else if (rewindCount >= 3 && !saidEnough) { saidEnough = true; say('看一眼就好。回去睡吧。'); }
+  });
+  window.addEventListener('pointercancel', function () { rewinding = false; });
+
+  // 星（确定性随机分布）
+  var stars = [];
+  (function seedStars() {
+    for (var i = 0; i < 70; i++) {
+      stars.push({
+        x: (Math.abs(Math.sin(i * 127.1) * 43758.5) % 1),
+        y: (Math.abs(Math.sin(i * 311.7) * 12543.8) % 1) * 0.62,
+        r: 0.5 + (Math.abs(Math.sin(i * 74.3) * 38951.2) % 1) * 1.1,
+        ph: (Math.abs(Math.sin(i * 53.9) * 27488.1) % 1) * Math.PI * 2
+      });
+    }
+  })();
+
+  function lerp(a, b, k) { return a + (b - a) * k; }
+  function hex(c) { var n = parseInt(c.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+  function mix(c1, c2, k) {
+    var a = hex(c1), b = hex(c2);
+    return 'rgb(' + Math.round(lerp(a[0], b[0], k)) + ',' + Math.round(lerp(a[1], b[1], k)) + ',' + Math.round(lerp(a[2], b[2], k)) + ')';
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var horizonY = h * 0.68;
+
+    if (rewinding) {
+      t = Math.min(1, t + dt * 0.28);
+      peak = Math.max(peak, t);
+    } else {
+      t = Math.max(0, t - dt * 0.032);   // 松手后，时间自己缓缓流回深夜（约 30 秒）
+    }
+    var k = t;
+
+    // ── 天空（深夜 ↔ 黄昏三段渐变）──
+    var top = mix('#0a0e16', '#3a3a5e', k);
+    var midC = mix('#101828', '#8a4a58', k);
+    var low = mix('#16202e', '#e08a52', k);
+    var sky = ctx.createLinearGradient(0, 0, 0, horizonY);
+    sky.addColorStop(0, top);
+    sky.addColorStop(0.62, midC);
+    sky.addColorStop(1, low);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, horizonY);
+
+    // ── 星（黄昏淡出）──
+    var starA = Math.pow(1 - k, 1.5);
+    if (starA > 0.02) {
+      for (var i = 0; i < stars.length; i++) {
+        var s = stars[i];
+        ctx.globalAlpha = starA * (0.25 + 0.5 * (0.5 + 0.5 * Math.sin(now / 1200 + s.ph)));
+        ctx.fillStyle = '#cfd8e8';
+        ctx.beginPath();
+        ctx.arc(s.x * w, s.y * horizonY, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── 太阳（倒放：从地平线下浮回半沉位置）──
+    var sunR = Math.min(w, h) * 0.085;
+    var sunY = horizonY + (1 - k) * sunR * 4.2 - sunR * 0.4;
+    if (k > 0.06) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,170,90,' + (0.55 * k) + ')';
+      ctx.shadowBlur = 60 * k + 16;
+      var sunG = ctx.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
+      sunG.addColorStop(0, '#ffd9a0');
+      sunG.addColorStop(1, '#ff9a56');
+      ctx.fillStyle = sunG;
+      ctx.beginPath();
+      ctx.arc(w * 0.5, sunY, sunR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 海平线上的日光倒影带
+      ctx.globalAlpha = 0.14 * k;
+      var refG = ctx.createLinearGradient(0, horizonY, 0, h);
+      refG.addColorStop(0, 'rgba(255,170,90,0.9)');
+      refG.addColorStop(1, 'rgba(255,170,90,0)');
+      ctx.fillStyle = refG;
+      ctx.fillRect(w * 0.5 - w * 0.16, horizonY, w * 0.32, h * 0.3);
+      ctx.globalAlpha = 1;
+    }
+
+    // ── 云（夜里剪影，黄昏染橘）──
+    drawCloud(w * 0.22, h * 0.30, w * 0.13, k, 0.9, now, 1.3);
+    drawCloud(w * 0.68, h * 0.22, w * 0.16, k, 0.75, now, 0.9);
+    drawCloud(w * 0.48, h * 0.42, w * 0.11, k, 0.5, now, 1.7);
+
+    // ── 地平线与远城剪影 ──
+    var ground = ctx.createLinearGradient(0, horizonY, 0, h);
+    ground.addColorStop(0, mix('#141b26', '#3a2a30', k));
+    ground.addColorStop(1, '#0a0d13');
+    ctx.fillStyle = ground;
+    ctx.fillRect(0, horizonY, w, h - horizonY);
+    // 城市剪影（两层视差不动即可，剪影颜色随 k 变暖）
+    drawSkyline(w, h, horizonY, '#0d121c', 0.9, h * 0.14, k);
+    drawSkyline(w, h, horizonY + 4, '#090d14', 1, h * 0.09, k);
+
+    // 倒带指示（按住时显示在暗地面上，不挡太阳）
+    if (rewinding) {
+      ctx.fillStyle = 'rgba(255,214,150,' + (0.5 + 0.3 * Math.sin(now / 300)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('◀◀ 倒带中', w / 2, horizonY + 46);
+    } else if (t < 0.02 && !saidEnough) {
+      ctx.fillStyle = 'rgba(110,120,135,' + (0.3 + 0.22 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，倒带', w / 2, horizonY - 26);
+    }
+  }
+
+  function drawCloud(x, y, cw, k, alpha, now, ph) {
+    var drift = Math.sin(now / 9000 + ph) * 6;
+    var col = mix('#161e2a', '#c86a4e', k);
+    ctx.globalAlpha = alpha * (0.55 + 0.35 * k);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.ellipse(x + drift, y, cw * 0.55, cw * 0.13, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + drift + cw * 0.3, y - cw * 0.09, cw * 0.34, cw * 0.11, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + drift - cw * 0.28, y - cw * 0.05, cw * 0.3, cw * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSkyline(w, h, groundY, color, alpha, maxH, k) {
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    var unit = 140;
+    var start = -1;
+    for (var i = start; i * unit < w + unit; i++) {
+      var bx = i * unit;
+      var seed = Math.abs(Math.sin(i * 127.1) * 43758.5) % 1;
+      var bh = maxH * (0.35 + seed * 0.65);
+      var bw = unit * (0.45 + ((Math.abs(Math.sin(i * 311.7) * 12543.8) % 1)) * 0.4);
+      ctx.fillRect(bx, groundY - bh, bw, bh + 2);
+      // 黄昏时零星亮窗
+      if (seed > 0.6) {
+        ctx.fillStyle = 'rgba(255,214,140,' + (0.10 + 0.08 * k) + ')';
+        ctx.fillRect(bx + bw * 0.3, groundY - bh * 0.66, 5, 7);
+        ctx.fillRect(bx + bw * 0.6, groundY - bh * 0.4, 5, 7);
+        ctx.fillStyle = color;
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__rewind = {
+    t: function () { return +t.toFixed(3); },
+    holding: function () { return rewinding; },
+    press: function () { rewinding = true; },
+    release: function () { rewinding = false; }
+  };
+})();
+</script>
+</body>
+</html>

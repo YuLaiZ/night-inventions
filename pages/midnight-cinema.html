@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一个人的电影院</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #080b11;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #55606e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6472; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #6a7482;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>一个人的电影院</h1>
+  <p>凌晨的重映场，观众只有你。<br>点一下银幕，换一部老片。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var FILMS = [
+    { name: '《海》 · 1962' },
+    { name: '《夜行》 · 1984' },
+    { name: '《夜行的猫》 · 1977' }
+  ];
+  var filmIdx = 0;
+  var switching = 0;          // 雪花过渡剩余秒数
+  var saidOnce = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function geo() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var sw = Math.min(w * 0.7, h * 0.62);
+    var sh = sw * 9 / 16;
+    var sx = w / 2 - sw / 2;
+    var sy = h * 0.245;
+    return { w: w, h: h, sx: sx, sy: sy, sw: sw, sh: sh };
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var g = geo();
+    if (ev.clientX > g.sx && ev.clientX < g.sx + g.sw && ev.clientY > g.sy && ev.clientY < g.sy + g.sh) {
+      if (switching <= 0) {
+        switching = 0.7;
+        filmIdx = (filmIdx + 1) % FILMS.length;
+        say('正在放映：' + FILMS[filmIdx].name, true);
+      }
+    }
+  });
+
+  var dust = [];
+  (function seedDust() {
+    for (var i = 0; i < 26; i++) {
+      dust.push({
+        x: Math.random(), y: Math.random(),
+        r: 0.6 + Math.random() * 1.4,
+        vx: (Math.random() - 0.5) * 0.012,
+        vy: -0.004 - Math.random() * 0.008
+      });
+    }
+  })();
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var g = geo();
+    var w = g.w, h = g.h;
+
+    if (switching > 0) switching -= dt;
+
+    // ── 暗厅 ──
+    ctx.fillStyle = '#080b11';
+    ctx.fillRect(0, 0, w, h);
+
+    // 放映光束（从左下观众席后方射向银幕）
+    var beam = ctx.createLinearGradient(w * 0.06, h, g.sx + g.sw * 0.3, g.sy + g.sh * 0.5);
+    beam.addColorStop(0, 'rgba(215,225,245,0.10)');
+    beam.addColorStop(1, 'rgba(215,225,245,0.015)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.03, h * 1.02);
+    ctx.lineTo(w * 0.12, h * 1.02);
+    ctx.lineTo(g.sx + g.sw * 0.42, g.sy + g.sh);
+    ctx.lineTo(g.sx + g.sw * 0.16, g.sy + g.sh * 0.72);
+    ctx.closePath();
+    ctx.fill();
+    // 光束里的尘埃
+    ctx.fillStyle = 'rgba(220,230,248,0.35)';
+    for (var i = 0; i < dust.length; i++) {
+      var d = dust[i];
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      if (d.y < 0.2 || d.x < 0 || d.x > 0.5) { d.x = 0.08 + Math.random() * 0.3; d.y = 0.95; }
+      var dx = d.x * w, dy = d.y * h;
+      // 只在光束带附近显示
+      if (dx > dy * 0.42 - 60 && dx < dy * 0.42 + 150) {
+        ctx.globalAlpha = 0.12 + 0.2 * Math.sin(now / 700 + i * 2.4);
+        ctx.beginPath();
+        ctx.arc(dx, dy, d.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 银幕 ──
+    var flicker = 0.92 + 0.08 * Math.sin(now / 90) * Math.sin(now / 700);
+    ctx.save();
+    ctx.shadowColor = 'rgba(235,240,250,' + (0.16 * flicker) + ')';
+    ctx.shadowBlur = 30;
+    ctx.fillStyle = '#0e1420';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh);
+    ctx.restore();
+
+    // 银幕内容（clip 内画片）
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(g.sx, g.sy, g.sw, g.sh);
+    ctx.clip();
+    ctx.globalAlpha = flicker;
+    if (switching > 0) {
+      drawSnow(g, now);
+    } else if (filmIdx === 0) {
+      drawSea(g, now);
+    } else if (filmIdx === 1) {
+      drawTrain(g, now);
+    } else {
+      drawCat(g, now);
+    }
+    // 胶片颗粒 + 暗角
+    drawGrain(g, now);
+    var vig = ctx.createRadialGradient(g.sx + g.sw / 2, g.sy + g.sh / 2, g.sh * 0.35, g.sx + g.sw / 2, g.sy + g.sh / 2, g.sw * 0.72);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.42)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh);
+    ctx.restore();
+
+    // 银幕边框
+    ctx.strokeStyle = 'rgba(150,165,190,0.22)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(g.sx - 4, g.sy - 4, g.sw + 8, g.sh + 8);
+
+    // ── 观众席剪影 ──
+    var seatY = h * 0.86;
+    drawAudience(w, h, seatY, now);
+
+    // 换片提示
+    if (!saidOnce) {
+      ctx.fillStyle = 'rgba(110,120,135,' + (0.3 + 0.22 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下银幕，换一部', w / 2, g.sy + g.sh + 40);
+    }
+  }
+
+  // 片一：《海》——层叠正弦浪 + 小船起伏
+  function drawSea(g, now) {
+    ctx.fillStyle = '#c9d2de';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh);
+    var horizon = g.sy + g.sh * 0.42;
+    ctx.fillStyle = '#eef2f7';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh * 0.42);
+    for (var L = 0; L < 4; L++) {
+      var base = horizon + g.sh * (0.10 + L * 0.13);
+      var amp = 4 + L * 2.6;
+      var speed = now / (1400 - L * 220);
+      ctx.fillStyle = 'rgba(60,76,96,' + (0.22 + L * 0.14) + ')';
+      ctx.beginPath();
+      ctx.moveTo(g.sx, base + 40);
+      for (var x = 0; x <= g.sw; x += 8) {
+        ctx.lineTo(g.sx + x, base + Math.sin(x / 46 + speed + L * 1.7) * amp);
+      }
+      ctx.lineTo(g.sx + g.sw, base + 60);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // 小船剪影（随浪起伏）
+    var bx = g.sx + g.sw * (0.5 + 0.06 * Math.sin(now / 2600));
+    var by = horizon + g.sh * 0.09 + Math.sin(now / 900) * 3.4;
+    var rock = Math.sin(now / 900) * 0.05;
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(rock);
+    ctx.fillStyle = '#2a3542';
+    ctx.beginPath();
+    ctx.moveTo(-26, 0);
+    ctx.lineTo(26, 0);
+    ctx.lineTo(16, 10);
+    ctx.lineTo(-18, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(-3, -22, 3, 22);
+    ctx.beginPath();
+    ctx.moveTo(-1, -22);
+    ctx.lineTo(14, -4);
+    ctx.lineTo(-1, -4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 片二：《夜行》——车窗外掠过的光影
+  function drawTrain(g, now) {
+    ctx.fillStyle = '#1a2230';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh);
+    var speed = now / 4.2;
+    for (var i = -1; i < 24; i++) {
+      var x = g.sx + ((i * 64 - speed) % (g.sw + 132) + g.sw + 132) % (g.sw + 132) - 66;
+      var seed = Math.abs(Math.sin(Math.floor((speed / 64) + i) * 91.7) * 23421.6) % 1;
+      var bw = 8 + seed * 20;
+      var bright = 0.16 + seed * 0.42;
+      ctx.fillStyle = 'rgba(210,220,238,' + bright + ')';
+      ctx.fillRect(x, g.sy + g.sh * 0.16, bw, g.sh * 0.5);
+      // 偶尔一根灯柱（更亮更细，贯穿）
+      if (seed > 0.82) {
+        ctx.fillStyle = 'rgba(255,225,170,' + (bright + 0.2) + ')';
+        ctx.fillRect(x + bw / 2 - 2, g.sy + g.sh * 0.08, 4, g.sh * 0.74);
+      }
+    }
+    // 窗框（车厢内壁的暗边）
+    ctx.fillStyle = 'rgba(8,11,17,0.85)';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh * 0.07);
+    ctx.fillRect(g.sx, g.sy + g.sh * 0.8, g.sw, g.sh * 0.2);
+  }
+
+  // 片三：《夜行的猫》——黑猫剪影走过银幕
+  function drawCat(g, now) {
+    ctx.fillStyle = '#d8dde6';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh);
+    // 月亮
+    ctx.fillStyle = 'rgba(255,244,214,0.9)';
+    ctx.beginPath();
+    ctx.arc(g.sx + g.sw * 0.78, g.sy + g.sh * 0.24, g.sh * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+    // 屋顶线
+    ctx.fillStyle = '#39424e';
+    ctx.fillRect(g.sx, g.sy + g.sh * 0.72, g.sw, g.sh * 0.28);
+    // 猫从右往左走（循环，慢悠悠）
+    var cycle = (now / 16000) % 1.25;
+    var cx = g.sx + g.sw * (1.12 - cycle * 1.24);
+    var cy = g.sy + g.sh * 0.72;
+    var s = g.sh / 230;
+    var legSwing = Math.sin(now / 220) * 4 * s;
+    ctx.fillStyle = '#14181f';
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(-1, 1); // 头朝左
+    // 身体
+    ctx.beginPath();
+    ctx.ellipse(0, -18 * s, 27 * s, 11 * s, -0.04, 0, Math.PI * 2);
+    ctx.fill();
+    // 头
+    ctx.beginPath();
+    ctx.arc(31 * s, -27 * s, 10.5 * s, 0, Math.PI * 2);
+    ctx.fill();
+    // 耳朵
+    ctx.beginPath();
+    ctx.moveTo(24 * s, -34 * s);
+    ctx.lineTo(25 * s, -44 * s);
+    ctx.lineTo(31 * s, -35 * s);
+    ctx.closePath();
+    ctx.moveTo(33 * s, -35 * s);
+    ctx.lineTo(39 * s, -43 * s);
+    ctx.lineTo(40 * s, -33 * s);
+    ctx.closePath();
+    ctx.fill();
+    // 四条腿（两组摆动）
+    ctx.lineWidth = 3.6 * s;
+    ctx.strokeStyle = '#14181f';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-15 * s, -11 * s);
+    ctx.lineTo(-15 * s + legSwing, 0);
+    ctx.moveTo(13 * s, -11 * s);
+    ctx.lineTo(13 * s - legSwing, 0);
+    ctx.moveTo(-6 * s, -11 * s);
+    ctx.lineTo(-6 * s - legSwing, 0);
+    ctx.moveTo(19 * s, -11 * s);
+    ctx.lineTo(19 * s + legSwing, 0);
+    ctx.stroke();
+    // 尾巴（上弯摆动）
+    ctx.lineWidth = 4 * s;
+    ctx.beginPath();
+    ctx.moveTo(-25 * s, -20 * s);
+    ctx.quadraticCurveTo(-40 * s, -24 * s + Math.sin(now / 300) * 5 * s, -43 * s, -42 * s + Math.sin(now / 300) * 4 * s);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 雪花噪点（换片过渡）
+  function drawSnow(g, now) {
+    ctx.fillStyle = '#0c1016';
+    ctx.fillRect(g.sx, g.sy, g.sw, g.sh);
+    for (var i = 0; i < 340; i++) {
+      var x = g.sx + Math.random() * g.sw;
+      var y = g.sy + Math.random() * g.sh;
+      ctx.fillStyle = 'rgba(200,210,225,' + (0.08 + Math.random() * 0.4) + ')';
+      ctx.fillRect(x, y, 2, 2);
+    }
+  }
+
+  // 胶片颗粒（轻微划痕感）
+  function drawGrain(g, now) {
+    for (var i = 0; i < 46; i++) {
+      if (Math.random() < 0.5) continue;
+      ctx.fillStyle = 'rgba(0,0,0,' + (0.05 + Math.random() * 0.08) + ')';
+      ctx.fillRect(g.sx + Math.random() * g.sw, g.sy + Math.random() * g.sh, 1.6, 1.6);
+    }
+    if (Math.random() < 0.06) {
+      // 偶发一道竖向划痕
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      var sx2 = g.sx + Math.random() * g.sw;
+      ctx.fillRect(sx2, g.sy, 1, g.sh);
+    }
+  }
+
+  // 观众席剪影（三两个头影，背光轮廓可读，中间是你）
+  function drawAudience(w, h, seatY, now) {
+    ctx.fillStyle = '#04060a';
+    ctx.fillRect(0, seatY, w, h - seatY);
+    var heads = [
+      { x: w * 0.24, r: 15 },
+      { x: w * 0.5, r: 16 },    // 你
+      { x: w * 0.76, r: 14 }
+    ];
+    for (var i = 0; i < heads.length; i++) {
+      var hd = heads[i];
+      var breathe = Math.sin(now / (1100 + i * 260) + i) * 1.2;
+      ctx.fillStyle = '#04060a';
+      ctx.beginPath();
+      ctx.arc(hd.x, seatY + 14 + breathe, hd.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(hd.x - hd.r * 1.5, seatY + 24 + breathe, hd.r * 3, h);
+      // 银幕反光勾出的轮廓（每个头影都有，弱的呼吸感）
+      ctx.strokeStyle = 'rgba(210,222,242,' + (i === 1 ? 0.16 : 0.09) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(hd.x, seatY + 13 + breathe, hd.r + 1, Math.PI * 1.1, Math.PI * 1.9);
+      ctx.stroke();
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__cinema = {
+    film: function () { return filmIdx; },
+    switching: function () { return +switching.toFixed(2); },
+    next: function () { if (switching <= 0) { switching = 0.7; filmIdx = (filmIdx + 1) % FILMS.length; return filmIdx; } return -1; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜游泳池</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a1018;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #4a6a7a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #52626e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #5a7484;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #4a5a68;
+    text-decoration: none;
+    border-bottom: 1px dotted #4a5a68;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #6a8494; border-color: #6a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜游泳池</h1>
+  <p>凌晨的泳池不查门票。<br>按住水面，跳进去搅一搅。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var inWater = false;         // 按住 = 泳者在水里搅动
+  var waveEnergy = 0;          // 水面波动能量 0-1（入水升、离水缓降）
+  var ripples = [];            // 涟漪 {x, r, a}
+  var bubbles = [];            // 水下气泡
+  var splash = [];             // 水花粒子
+  var saidIn = false, saidOut = false;
+  var splashX = 0.5;           // 入水点（相对宽）
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    inWater = true;
+    waveEnergy = Math.min(1, waveEnergy + 0.35);
+    splashX = ev.clientX / window.innerWidth;
+    ripples.push({ x: ev.clientX, r: 6, a: 1 });
+    for (var i = 0; i < 14; i++) {
+      splash.push({
+        x: ev.clientX + (Math.random() - 0.5) * 26,
+        y: waterY() - 4,
+        vx: (Math.random() - 0.5) * 150,
+        vy: -140 - Math.random() * 160,
+        r: 1.6 + Math.random() * 2.6
+      });
+    }
+    if (!saidIn) { saidIn = true; say('水花进去了。整池水都替你晃。', true); }
+  });
+  window.addEventListener('pointerup', function () {
+    if (inWater && waveEnergy > 0.3 && !saidOut) {
+      saidOut = true;
+      say('游完这一趟，把烦躁留在池子里。');
+    }
+    inWater = false;
+  });
+  window.addEventListener('pointercancel', function () { inWater = false; });
+
+  function waterY() { return window.innerHeight * 0.42; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var wy = waterY();
+
+    // 能量：入水升、离水缓降
+    if (inWater) {
+      waveEnergy = Math.min(1, waveEnergy + dt * 0.5);
+      if (Math.random() < dt * 5) {
+        ripples.push({ x: w * (splashX + (Math.random() - 0.5) * 0.2), r: 4, a: 0.8 });
+      }
+      if (Math.random() < dt * 7) {
+        bubbles.push({
+          x: w * splashX + (Math.random() - 0.5) * w * 0.3,
+          y: wy + 40 + Math.random() * (h - wy) * 0.5,
+          r: 1.4 + Math.random() * 3,
+          vy: 24 + Math.random() * 40
+        });
+      }
+      if (Math.random() < dt * 2.2) {
+        ripples.push({ x: w * (0.1 + Math.random() * 0.8), r: 3, a: 0.5 });
+      }
+    } else {
+      waveEnergy = Math.max(0, waveEnergy - dt * 0.14);
+    }
+
+    // ── 背景：暗色馆内 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, wy);
+    bg.addColorStop(0, '#0a1018');
+    bg.addColorStop(1, '#0e1824');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, wy);
+
+    // ── 池水（上层亮带 + 水体渐变）──
+    var water = ctx.createLinearGradient(0, wy, 0, h);
+    water.addColorStop(0, '#14344a');
+    water.addColorStop(0.5, '#0f2a40');
+    water.addColorStop(1, '#0a1e30');
+    ctx.fillStyle = water;
+    ctx.fillRect(0, wy, w, h - wy);
+
+    // 池底光网（caustics：缓摆的弧线，能量越高越亮）
+    var ca = 0.10 + waveEnergy * 0.14;
+    ctx.strokeStyle = 'rgba(150,220,240,' + ca + ')';
+    ctx.lineWidth = 1.6;
+    for (var c = 0; c < 7; c++) {
+      var cy = wy + (h - wy) * (0.16 + c * 0.12);
+      ctx.beginPath();
+      for (var x = 0; x <= w; x += 14) {
+        var yy = cy + Math.sin(x / 60 + now / (1800 + c * 240) + c * 2.1) * (7 + c * 1.4) * (0.4 + waveEnergy * 0.8);
+        if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+      }
+      ctx.stroke();
+    }
+
+    // 水面线（多条正弦，能量决定波幅）
+    var amp = 2.5 + waveEnergy * 12;
+    for (var s = 0; s < 3; s++) {
+      ctx.strokeStyle = 'rgba(170,220,240,' + (0.22 - s * 0.055) + ')';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (var x2 = 0; x2 <= w; x2 += 10) {
+        var y2 = wy + s * 7 + Math.sin(x2 / 52 + now / (520 - s * 90) + s * 2.4) * amp * (1 - s * 0.25);
+        if (x2 === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2);
+      }
+      ctx.stroke();
+    }
+    // 水面高光碎点
+    ctx.fillStyle = 'rgba(190,235,250,' + (0.10 + 0.10 * waveEnergy) + ')';
+    for (var g2 = 0; g2 < 16; g2++) {
+      var gx = (Math.abs(Math.sin(g2 * 127.1) * 43758.5) % 1) * w;
+      var gy = wy + 4 + Math.sin(now / 700 + g2 * 1.9) * amp * 0.6;
+      ctx.fillRect(gx, gy, 5 + (g2 % 3) * 4, 1.4);
+    }
+
+    // 泳道线（透视浮在水面：几条纵向虚线）
+    ctx.setLineDash([14, 18]);
+    ctx.lineWidth = 2;
+    for (var lane = 0; lane < 3; lane++) {
+      var lx = w * (0.25 + lane * 0.25);
+      var sway = Math.sin(now / 1600 + lane) * 6 * (0.4 + waveEnergy);
+      var grad = ctx.createLinearGradient(0, wy, 0, h);
+      grad.addColorStop(0, 'rgba(220,235,245,0.06)');
+      grad.addColorStop(0.5, 'rgba(220,235,245,' + (0.13 + 0.06 * waveEnergy) + ')');
+      grad.addColorStop(1, 'rgba(220,235,245,0.05)');
+      ctx.strokeStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(lx + sway, wy + 10);
+      ctx.quadraticCurveTo(lx + sway * 0.5, (wy + h) / 2, lx, h);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // 涟漪（扩散椭圆）
+    for (var r = ripples.length - 1; r >= 0; r--) {
+      var rp = ripples[r];
+      rp.r += dt * (60 + waveEnergy * 40);
+      rp.a -= dt * 0.5;
+      if (rp.a <= 0) { ripples.splice(r, 1); continue; }
+      ctx.strokeStyle = 'rgba(190,230,245,' + (rp.a * 0.5) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(rp.x, wy + 8, rp.r, rp.r * 0.22, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 水花粒子
+    for (var p = splash.length - 1; p >= 0; p--) {
+      var sp = splash[p];
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vy += 620 * dt;
+      if (sp.y > wy + 6) { splash.splice(p, 1); continue; }
+      ctx.fillStyle = 'rgba(190,230,250,0.8)';
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 水下气泡
+    for (var b = bubbles.length - 1; b >= 0; b--) {
+      var bb = bubbles[b];
+      bb.y -= bb.vy * dt;
+      if (bb.y < wy + 8) { bubbles.splice(b, 1); continue; }
+      ctx.strokeStyle = 'rgba(200,235,250,0.4)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(bb.x + Math.sin(now / 400 + bb.y * 0.05) * 4, bb.y, bb.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 泳池边沿（顶部一条池岸）
+    ctx.fillStyle = '#101a26';
+    ctx.fillRect(0, wy - 8, w, 8);
+    ctx.fillStyle = 'rgba(170,210,230,0.14)';
+    ctx.fillRect(0, wy - 8, w, 2);
+
+    // 引导提示
+    if (!saidIn) {
+      ctx.fillStyle = 'rgba(120,160,180,' + (0.3 + 0.22 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住水面', w / 2, wy + 64);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__pool = {
+    energy: function () { return +waveEnergy.toFixed(2); },
+    inWater: function () { return inWater; },
+    ripples: function () { return ripples.length; },
+    press: function (xr) { inWater = true; splashX = xr || 0.5; },
+    release: function () { inWater = false; }
+  };
+})();
+</script>
+</body>
+</html>

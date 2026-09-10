@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>二十秒的拥抱</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #10151f;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #55606e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #5a6472; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6472; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #55606e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>二十秒的拥抱</h1>
+  <p>有的日子，只需要一个二十秒的拥抱。<br>按住那团光——别松手。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var GOAL = 20;               // 二十秒
+  var holding = false;
+  var acc = 0;                 // 已拥抱秒数（墙钟累计）
+  var done = false;
+  var last = Date.now();
+  var beats = [];              // 心跳粒子
+  var sparks = [];             // 完成时的光屑
+  var said7 = false, said13 = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4200);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  canvas.addEventListener('pointerdown', function () {
+    if (done) return;
+    if (!holding && acc === 0) say('咚。咚。', false);
+    holding = true;
+  });
+  window.addEventListener('pointerup', function () {
+    if (holding && !done && acc > 1.5) say('松开不算输。从松开的地方，接着抱。');
+    holding = false;
+  });
+  window.addEventListener('pointercancel', function () { holding = false; });
+
+  var msg7 = '肩膀松下来了。就是现在这个力度。';
+  var msg13 = '别数了，就剩下「抱」这件事本身。';
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var cx = w / 2, cy = h * 0.52;
+    var R = Math.min(w, h) * 0.22;
+
+    if (holding && !done) {
+      acc += dt;
+      // 心跳粒子（约 60bpm，随进度加快）
+      if (Math.random() < dt * (1.1 + acc * 0.08)) {
+        var a = Math.random() * Math.PI * 2;
+        beats.push({
+          x: cx + Math.cos(a) * R * (0.92 + Math.random() * 0.2),
+          y: cy + Math.sin(a) * R * (0.92 + Math.random() * 0.2),
+          vx: Math.cos(a) * (24 + Math.random() * 40),
+          vy: Math.sin(a) * (24 + Math.random() * 40) - 12,
+          r: 1.6 + Math.random() * 2.4,
+          life: 1
+        });
+      }
+      if (acc >= 7 && !said7) { said7 = true; say(msg7); }
+      if (acc >= 13 && !said13) { said13 = true; say(msg13); }
+      if (acc >= GOAL) {
+        acc = GOAL;
+        done = true;
+        say('抱够了。可以松手了。晚安。', true);
+        for (var i = 0; i < 60; i++) {
+          var aa = Math.random() * Math.PI * 2;
+          var sp = 60 + Math.random() * 160;
+          sparks.push({
+            x: cx, y: cy,
+            vx: Math.cos(aa) * sp, vy: Math.sin(aa) * sp - 40,
+            r: 1.5 + Math.random() * 3, life: 1 + Math.random()
+          });
+        }
+      }
+    }
+
+    // 背景
+    var bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.75);
+    var warm = 0.16 + 0.5 * (acc / GOAL);
+    bg.addColorStop(0, 'rgba(70,58,44,' + (0.24 + warm * 0.5) + ')');
+    bg.addColorStop(1, '#10151f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 粒子
+    var beatColor = 'rgba(242,199,110,';
+    for (var b = beats.length - 1; b >= 0; b--) {
+      var p = beats[b];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt * 0.9;
+      if (p.life <= 0) { beats.splice(b, 1); continue; }
+      ctx.fillStyle = beatColor + (0.5 * p.life) + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (var s = sparks.length - 1; s >= 0; s--) {
+      var q = sparks[s];
+      q.x += q.vx * dt; q.y += q.vy * dt; q.vy += 60 * dt; q.life -= dt * 0.7;
+      if (q.life <= 0) { sparks.splice(s, 1); continue; }
+      ctx.fillStyle = beatColor + Math.min(0.9, 0.8 * q.life) + ')';
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 主环
+    var frac = Math.min(1, acc / GOAL);
+    var beat = Math.sin(now / (holding ? 860 - frac * 320 : 1400));
+    var glow = 0.35 + 0.3 * (frac) + 0.08 * beat;
+
+    // 底环
+    ctx.strokeStyle = 'rgba(90,100,115,0.25)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 进度弧（从顶部顺时针）
+    ctx.save();
+    ctx.shadowColor = 'rgba(242,199,110,' + glow + ')';
+    ctx.shadowBlur = 22 + 18 * frac;
+    ctx.strokeStyle = 'rgba(242,199,110,' + (0.75 + 0.2 * frac) + ')';
+    ctx.lineWidth = 4 + 2 * frac;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // 中央：两道相拥的弧（剪影示意，不描细节）
+    ctx.strokeStyle = 'rgba(242,199,110,' + (0.5 + 0.3 * frac) + ')';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx - R * 0.16, cy - R * 0.06, R * 0.34, Math.PI * 0.35, Math.PI * 1.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + R * 0.16, cy - R * 0.06, R * 0.34, Math.PI * 1.45, Math.PI * 2.65);
+    ctx.stroke();
+    // 相拥的手臂（进度增长时环得更紧）
+    var hug = 0.34 + frac * 0.1;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx - R * 0.16, cy - R * 0.06, R * hug * 1.18, -0.25, 0.85);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + R * 0.16, cy - R * 0.06, R * hug * 1.18, Math.PI - 0.85, Math.PI + 0.25);
+    ctx.stroke();
+
+    // 秒数（纯数字，等宽数字特性）
+    ctx.fillStyle = 'rgba(237,241,250,' + (0.75 + 0.2 * frac) + ')';
+    ctx.font = '500 ' + Math.round(R * 0.34) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '500 ' + Math.round(R * 0.34) + 'px ui-monospace, "SF Mono", Menlo, monospace';
+    var shown = done ? GOAL : Math.floor(acc);
+    ctx.fillText(String(shown), cx, cy - R * 0.02 + Math.sin(now / (holding ? 860 : 1400)) * 1.5);
+    ctx.fillStyle = 'rgba(140,150,165,0.7)';
+    ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+    ctx.fillText(done ? '秒 · 抱够了' : '/ ' + GOAL + ' 秒', cx, cy + R * 0.42);
+
+    // 引导
+    if (!holding && !done && acc === 0) {
+      ctx.fillStyle = 'rgba(120,130,145,' + (0.3 + 0.25 * Math.sin(now / 480)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.fillText('按住，别松手', cx, cy + R + 44);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息，供程序化断言）
+  window.__hug = {
+    acc: function () { return acc; },
+    done: function () { return done; },
+    isHolding: function () { return holding; },
+    press: function () { holding = true; },
+    release: function () { holding = false; }
+  };
+})();
+</script>
+</body>
+</html>

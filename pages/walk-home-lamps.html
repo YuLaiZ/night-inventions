@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数路灯回家</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0e16;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #55606e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6472; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #55606e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  .tally {
+    position: absolute; top: 18px; right: 20px;
+    font-size: 12px; letter-spacing: 0.08em;
+    color: #4a5462;
+    z-index: 3;
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>数路灯回家</h1>
+  <p>走夜路的人，有路灯陪着。<br>按住屏幕，往前走。</p>
+</div>
+
+<div class="tally" id="tally"></div>
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var tally = document.getElementById('tally');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // ── 世界参数 ──────────────────────────────
+  var LAMP_COUNT = 12;          // 一共 12 盏灯
+  var LAMP_GAP = 560;           // 灯间距（世界坐标 px，灯 k 在 (k+1)*LAMP_GAP）
+  var WORLD_END = LAMP_GAP * LAMP_COUNT + 470; // 家门：最后一盏灯后约 5 秒脚程
+  var flickerIdx = 1 + Math.floor(Math.random() * (LAMP_COUNT - 2)); // 哪盏灯接触不良
+
+  var px = 240;                 // 人所在世界坐标（第一盏灯前约 5 秒脚程）
+  var walking = false;
+  var stepPhase = 0;            // 步伐相位
+  var passed = 0;               // 已走过的灯数
+  var arrived = false;
+  var halfSaid = false;
+
+  // 世界坐标 → 屏幕：人固定在屏幕 1/3 处
+  function camX(w) { return w / 3 - px; }
+
+  // ── 画布 ──────────────────────────────
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var groundY = h * 0.80;
+
+    // 前进
+    if (walking && !arrived) {
+      px += 92 * dt;
+      stepPhase += dt * 7.4;
+      if (px >= WORLD_END) {
+        px = WORLD_END;
+        arrived = true;
+        say('到家了。今晚的风和影子，都陪到了。', true);
+      }
+    }
+
+    // 数灯（灯 k 的世界坐标 = (k+1)*LAMP_GAP，k = 0..11）
+    var nowPassed = Math.min(LAMP_COUNT, Math.floor((px + 40) / LAMP_GAP));
+    if (nowPassed > passed) passed = nowPassed;
+    tally.textContent = passed + ' / ' + LAMP_COUNT + ' 盏';
+
+    if (!halfSaid && passed >= 6 && !arrived) {
+      halfSaid = true;
+      say('过半了。影子一会儿在左，一会儿在右。');
+    }
+
+    // ── 背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0a0e16');
+    bg.addColorStop(0.72, '#0f1520');
+    bg.addColorStop(1, '#0a0d14');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    var cam = camX(w);
+
+    // 星（细碎随机颗粒，低吟）
+    drawStars(w, h, now);
+
+    // 远处楼影（两排，视差）
+    drawSkyline(w, h, groundY, cam * 0.25, '#0d121c', 0.35, h * 0.16);
+    drawSkyline(w, h, groundY, cam * 0.45, '#0f1522', 0.55, h * 0.10);
+
+    // 地面
+    ctx.fillStyle = '#0b0f15';
+    ctx.fillRect(0, groundY, w, h - groundY);
+
+    // 家（最后一盏灯之后）
+    drawHome(w, h, groundY, cam, now);
+
+    // 路灯与光锥
+    for (var i = 0; i < LAMP_COUNT; i++) {
+      var lx = (i + 1) * LAMP_GAP;
+      var sx = lx + cam;
+      if (sx < -220 || sx > w + 220) continue;
+      drawLamp(sx, groundY, h, i, now);
+    }
+
+    // 人与影子
+    drawWalker(w, groundY, cam, now);
+  }
+
+  // 星：固定随机分布（种子确定性），微风般明灭
+  var stars = [];
+  (function seedStars() {
+    for (var i = 0; i < 46; i++) {
+      stars.push({
+        x: (Math.abs(Math.sin(i * 127.1) * 43758.5) % 1),
+        y: (Math.abs(Math.sin(i * 311.7) * 12543.8) % 1) * 0.55,
+        r: 0.6 + (Math.abs(Math.sin(i * 74.3) * 38951.2) % 1) * 0.9,
+        ph: (Math.abs(Math.sin(i * 53.9) * 27488.1) % 1) * Math.PI * 2
+      });
+    }
+  })();
+  function drawStars(w, h, now) {
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      var tw = 0.5 + 0.5 * Math.sin(now / 1300 + s.ph);
+      ctx.globalAlpha = 0.06 + 0.16 * tw;
+      ctx.fillStyle = '#cfd8e8';
+      ctx.beginPath();
+      ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSkyline(w, h, groundY, shift, color, alpha, maxH) {
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    var unit = 150;
+    var start = Math.floor(shift / unit) - 1;
+    for (var i = start; i * unit - shift < w + unit; i++) {
+      var bx = i * unit - shift;
+      var seed = Math.abs(Math.sin(i * 127.1) * 43758.5) % 1;
+      var bh = maxH * (0.4 + seed * 0.6);
+      var bw = unit * (0.5 + ((Math.abs(Math.sin(i * 311.7) * 12543.8) % 1)) * 0.35);
+      ctx.fillRect(bx, groundY - bh, bw, bh);
+      // 零星亮窗
+      if (seed > 0.55) {
+        ctx.fillStyle = 'rgba(242,199,110,0.10)';
+        ctx.fillRect(bx + bw * 0.3, groundY - bh * 0.7, 5, 7);
+        ctx.fillRect(bx + bw * 0.62, groundY - bh * 0.45, 5, 7);
+        ctx.fillStyle = color;
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawLamp(sx, groundY, h, idx, now) {
+    var lampTop = groundY - h * 0.42;
+    var flick = (idx === flickerIdx);
+    var on = 1;
+    if (flick) {
+      // 接触不良：不规则闪烁（多正弦叠加，确定性随机）
+      on = 0.55 + 0.45 * Math.sin(now / 90) * Math.sin(now / 700 + idx);
+      on = Math.max(0.15, Math.min(1, on + 0.35));
+    }
+    var glow = 0.7 + 0.3 * Math.sin(now / 1400 + idx * 2.1);
+
+    // 光锥（地面椭圆光斑 + 锥形光）
+    ctx.save();
+    ctx.globalAlpha = 0.07 * on;
+    var cone = ctx.createLinearGradient(sx, lampTop, sx, groundY);
+    cone.addColorStop(0, 'rgba(255,225,160,0.9)');
+    cone.addColorStop(1, 'rgba(255,225,160,0.1)');
+    ctx.fillStyle = cone;
+    ctx.beginPath();
+    ctx.moveTo(sx - 8, lampTop + 6);
+    ctx.lineTo(sx + 8, lampTop + 6);
+    ctx.lineTo(sx + 88, groundY);
+    ctx.lineTo(sx - 88, groundY);
+    ctx.closePath();
+    ctx.fill();
+    // 地面光斑
+    ctx.globalAlpha = 0.10 * on;
+    ctx.fillStyle = '#ffe1a0';
+    ctx.beginPath();
+    ctx.ellipse(sx, groundY + 6, 96, 13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 灯杆
+    ctx.strokeStyle = '#2a3342';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(sx, groundY);
+    ctx.lineTo(sx, lampTop);
+    ctx.stroke();
+    // 悬臂
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(sx, lampTop + 4);
+    ctx.quadraticCurveTo(sx + 4, lampTop - 8, sx + 26, lampTop - 10);
+    ctx.stroke();
+    // 灯头
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,225,160,' + (0.55 * on * glow) + ')';
+    ctx.shadowBlur = 22 * on;
+    ctx.fillStyle = 'rgba(255,228,170,' + (0.75 + 0.25 * on) + ')';
+    ctx.beginPath();
+    ctx.ellipse(sx + 30, lampTop - 8, 9, 6, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 影子：由最近的灯决定方向与长度，次近的灯补一层淡影
+  function drawShadow(w, groundY, cam, sx, alphaMul) {
+    var near1 = -1, near2 = -1, d1 = 1e9, d2 = 1e9;
+    for (var i = 0; i < LAMP_COUNT; i++) {
+      var d = Math.abs((i + 1) * LAMP_GAP - px);
+      if (d < d1) { d2 = d1; near2 = near1; d1 = d; near1 = i; }
+      else if (d < d2) { d2 = d; near2 = i; }
+    }
+    if (near1 < 0) return;
+    // 主影：方向背离最近的灯，长度与到灯距离成正比
+    var away = (px > (near1 + 1) * LAMP_GAP) ? 1 : -1;
+    var len = Math.min(150, d1 * 0.34);
+    ctx.save();
+    ctx.globalAlpha = alphaMul * (0.58 - d1 / LAMP_GAP * 0.18);
+    ctx.fillStyle = '#02040a';
+    ctx.beginPath();
+    ctx.ellipse(sx + away * len * 0.5, groundY + 4, Math.max(14, len * 0.55), 4.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 影核（更深一层，让人形可读）
+    ctx.globalAlpha = alphaMul * (0.4 - d1 / LAMP_GAP * 0.12);
+    ctx.beginPath();
+    ctx.ellipse(sx + away * len * 0.42, groundY + 4, Math.max(8, len * 0.34), 3.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 头影
+    ctx.globalAlpha = alphaMul * (0.5 - d1 / LAMP_GAP * 0.14);
+    ctx.beginPath();
+    ctx.ellipse(sx + away * len * 0.88, groundY + 3, 6.5, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 次影（另一盏灯投的淡影，方向相反）
+    if (near2 >= 0) {
+      var away2 = (px > (near2 + 1) * LAMP_GAP) ? 1 : -1;
+      var len2 = Math.min(120, d2 * 0.30);
+      ctx.save();
+      ctx.globalAlpha = alphaMul * 0.2;
+      ctx.fillStyle = '#02040a';
+      ctx.beginPath();
+      ctx.ellipse(sx + away2 * len2 * 0.5, groundY + 5, len2 * 0.5, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawWalker(w, groundY, cam, now) {
+    var sx = px + cam;
+    if (sx < -60 || sx > w + 60) return;
+
+    drawShadow(w, groundY, cam, sx, 1);
+
+    var bob = walking ? Math.abs(Math.sin(stepPhase)) * 3 : Math.sin(now / 900) * 1.2;
+    var hipY = groundY - 34 - bob;
+    var legSwing = walking ? Math.sin(stepPhase) * 7 : 0;
+    var legSwing2 = walking ? Math.sin(stepPhase + Math.PI) * 7 : 0;
+
+    ctx.strokeStyle = '#2e3a48';
+    ctx.fillStyle = '#2e3a48';
+    ctx.lineCap = 'round';
+
+    // 腿
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, hipY + 12);
+    ctx.lineTo(sx + legSwing, groundY - 1);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sx, hipY + 12);
+    ctx.lineTo(sx + legSwing2, groundY - 1);
+    ctx.stroke();
+    // 身体
+    ctx.lineWidth = 6.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, hipY + 12);
+    ctx.lineTo(sx + 1, hipY - 12);
+    ctx.stroke();
+    // 手臂
+    ctx.lineWidth = 3.6;
+    ctx.beginPath();
+    ctx.moveTo(sx + 1, hipY - 6);
+    ctx.lineTo(sx + 5 - legSwing * 0.5, hipY + 6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sx + 1, hipY - 6);
+    ctx.lineTo(sx + 5 + legSwing * 0.5, hipY + 6);
+    ctx.stroke();
+    // 头
+    ctx.beginPath();
+    ctx.arc(sx + 2, hipY - 20, 6.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawHome(w, h, groundY, cam, now) {
+    var hx = WORLD_END + cam;
+    if (hx < -300 || hx > w + 400) return;
+    var bw = 150, bh = h * 0.30;
+    ctx.fillStyle = '#11161f';
+    ctx.fillRect(hx, groundY - bh, bw, bh);
+    ctx.fillStyle = '#0e131b';
+    ctx.beginPath();
+    ctx.moveTo(hx - 12, groundY - bh);
+    ctx.lineTo(hx + bw / 2, groundY - bh - 26);
+    ctx.lineTo(hx + bw + 12, groundY - bh);
+    ctx.closePath();
+    ctx.fill();
+    // 亮着的窗（家里的灯）
+    var winGlow = 0.8 + 0.2 * Math.sin(now / 1200);
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,214,140,' + (0.4 * winGlow) + ')';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = 'rgba(255,214,140,' + (0.82 * winGlow) + ')';
+    ctx.fillRect(hx + 26, groundY - bh + 26, 20, 26);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,214,140,0.16)';
+    ctx.fillRect(hx + 96, groundY - bh + 40, 18, 24);
+    // 门
+    ctx.fillStyle = '#0a0e15';
+    ctx.fillRect(hx + 58, groundY - 34, 26, 34);
+  }
+
+  // ── 交互：按住走 ──────────────────────────────
+  canvas.addEventListener('pointerdown', function () {
+    if (arrived) return;
+    if (!walking && px < 320) say('影子会替你数灯。', false);
+    walking = true;
+  });
+  window.addEventListener('pointerup', function () { walking = false; });
+  window.addEventListener('pointercancel', function () { walking = false; });
+
+  // rAF + interval 兜底（后台标签页 rAF 停摆）
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250);
+
+  // QA 钩子（无私人信息，供程序化断言）
+  window.__walk = {
+    pos: function () { return px; },
+    passed: function () { return passed; },
+    arrived: function () { return arrived; },
+    isWalking: function () { return walking; },
+    press: function () { walking = true; },
+    release: function () { walking = false; },
+    fastForward: function (dist) { px = Math.min(WORLD_END, px + dist); }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>八分满的水杯</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1420;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #2f3a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #55606e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a6472; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #55606e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a6470;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55606e;
+    text-decoration: none;
+    border-bottom: 1px dotted #55606e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7a8494; border-color: #7a8494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>八分满的水杯</h1>
+  <p>睡前给半夜渴醒的自己，备一杯水。<br>按住水壶——倒到八分满就好。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var FILL_GOAL = 0.8;         // 八分满
+  var pouring = false;
+  var level = 0.06;            // 杯内水位（0-1，杯高比例）
+  var placed = false;          // 已放去床头
+  var moveT = 0;               // 放置动画进度
+  var wave = [];               // 水面波纹
+  var drops = [];              // 水流粒子
+  var doneShown = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4600);
+  }
+
+  function resize() {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (placed) return;
+    var w = window.innerWidth, h = window.innerHeight;
+    // 点杯身 → 放去床头（需已到八分满）
+    var cx = w / 2, cupBase = h * 0.72, cupH = h * 0.24, cupW = cupH * 0.52;
+    if (level >= FILL_GOAL &&
+        Math.abs(ev.clientX - cx) < cupW && ev.clientY > cupBase - cupH - 20 && ev.clientY < cupBase + 20) {
+      placed = true;
+      say('半夜渴醒的时候，它就在。', true);
+      return;
+    }
+    if (level < FILL_GOAL) {
+      pouring = true;
+      if (level < 0.1) say('水线慢慢爬上来。');
+    }
+  });
+  window.addEventListener('pointerup', function () { pouring = false; });
+  window.addEventListener('pointercancel', function () { pouring = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var cupBase = h * 0.72;
+    var cupH = h * 0.24, cupW = cupH * 0.52;
+    var cx = w / 2;
+    if (placed) moveT = Math.min(1, moveT + dt * 1.4);
+    var ntX = w * 0.74, ntY = cupBase + cupH * 0.12;
+    var cupX = cx + moveT * (ntX - cx);
+    var cupY = cupBase + moveT * (ntY - 6 - cupBase); // 放置后杯底正好落在柜面
+
+    // 倒水
+    if (pouring && !placed && level < FILL_GOAL) {
+      level = Math.min(FILL_GOAL, level + dt * 0.16);
+      drops.push({
+        x: cupX - cupW * 0.62 + (Math.random() - 0.5) * 3,
+        y: h * 0.36,
+        vy: 300 + Math.random() * 60
+      });
+      if (Math.random() < dt * 8) {
+        wave.push({ x: (Math.random() - 0.5) * cupW * 0.7, t: 0 });
+      }
+      if (level >= FILL_GOAL && !doneShown) {
+        doneShown = true;
+        pouring = false;
+        say('八分满。留两分给空气。点一下杯子，放去床头。', true);
+      }
+    }
+
+    // 背景：夜里床头
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1420');
+    bg.addColorStop(0.72, '#111827');
+    bg.addColorStop(1, '#0c1119');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床头柜（放置后浮现，右侧）
+    if (moveT > 0.15) {
+      var ntA = Math.min(1, (moveT - 0.15) / 0.6);
+      ctx.globalAlpha = ntA * 0.9;
+      ctx.fillStyle = '#1a2230';
+      ctx.fillRect(ntX - w * 0.11, ntY, w * 0.22, h * 0.13);
+      ctx.fillStyle = '#202a3a';
+      ctx.fillRect(ntX - w * 0.115, ntY - 6, w * 0.23, 8);
+      // 柜上一盏小夜灯（暖光小球）
+      var lampGlow = 0.65 + 0.35 * Math.sin(now / 1300);
+      ctx.save();
+      ctx.globalAlpha = ntA;
+      ctx.shadowColor = 'rgba(255,214,140,' + (0.75 * lampGlow) + ')';
+      ctx.shadowBlur = 24 + 10 * lampGlow;
+      ctx.fillStyle = 'rgba(255,216,138,' + (0.75 + 0.25 * lampGlow) + ')';
+      ctx.beginPath();
+      ctx.arc(ntX - w * 0.092, ntY - 12, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    // 水壶（未放置时可倒水，按住时倾斜）
+    if (!placed) {
+      var potX = cupX - cupW * 1.5, potY = h * 0.30;
+      ctx.save();
+      ctx.translate(potX, potY);
+      ctx.rotate(pouring ? -0.55 : -0.06);
+      ctx.fillStyle = '#5c7488';
+      roundRect(-30, -22, 60, 46, 9);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-30, -8);
+      ctx.lineTo(-52, -20);
+      ctx.lineTo(-48, -8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#46607a';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(27, 0, 14, -Math.PI / 2, Math.PI / 2);
+      ctx.stroke();
+      ctx.restore();
+      if (!pouring && !doneShown) {
+        ctx.fillStyle = 'rgba(120,130,145,' + (0.3 + 0.25 * Math.sin(now / 480)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('按住水壶', potX, potY + 56);
+      }
+    }
+
+    // 水流粒子
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+      d.y += d.vy * dt;
+      var surfaceY = cupY - cupH * level;
+      if (d.y > surfaceY) { drops.splice(i, 1); continue; }
+      ctx.fillStyle = 'rgba(150,200,230,0.75)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, 2, 3.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 玻璃杯
+    var topW = cupW * 0.86, botW = cupW * 0.72;
+    ctx.strokeStyle = 'rgba(170,190,210,0.5)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cupX - topW / 2, cupY - cupH);
+    ctx.lineTo(cupX - botW / 2, cupY);
+    ctx.lineTo(cupX + botW / 2, cupY);
+    ctx.lineTo(cupX + topW / 2, cupY - cupH);
+    ctx.stroke();
+    // 杯内水（八分满为止的水体）
+    if (level > 0.01) {
+      var surfY = cupY - cupH * level;
+      var surfHalf = topW / 2 - (topW / 2 - botW / 2) * (level);
+      var bodyGrad = ctx.createLinearGradient(0, surfY, 0, cupY);
+      bodyGrad.addColorStop(0, 'rgba(140,190,225,0.5)');
+      bodyGrad.addColorStop(1, 'rgba(110,160,205,0.34)');
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.moveTo(cupX - surfHalf, surfY);
+      // 水面微波
+      for (var wx = -surfHalf; wx <= surfHalf; wx += 6) {
+        var dy = Math.sin(now / 260 + wx * 0.14) * 1.4;
+        var wv = 0;
+        for (var v = 0; v < wave.length; v++) {
+          var dv = Math.abs(wx - wave[v].x);
+          if (dv < 34) wv += Math.cos(dv / 34 * Math.PI / 2) * 3 * Math.exp(-wave[v].t * 2.2) * Math.sin(wave[v].t * 16 - dv * 0.2);
+        }
+        ctx.lineTo(cupX + wx, surfY + dy + wv);
+      }
+      ctx.lineTo(cupX + botW / 2, cupY);
+      ctx.lineTo(cupX - botW / 2, cupY);
+      ctx.closePath();
+      ctx.fill();
+      // 杯壁挂泡
+      for (var b = 0; b < 3; b++) {
+        var bx = cupX - botW * 0.3 + b * botW * 0.3;
+        var by = cupY - cupH * (0.1 + 0.06 * Math.sin(now / 900 + b * 2.1)) * Math.abs(Math.sin(b * 1.7 + 1));
+        ctx.fillStyle = 'rgba(220,240,250,0.4)';
+        ctx.beginPath();
+        ctx.arc(bx, by, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    for (var v2 = wave.length - 1; v2 >= 0; v2--) {
+      wave[v2].t += dt;
+      if (wave[v2].t > 2.4) wave.splice(v2, 1);
+    }
+    // 玻璃高光（淡，只在上半，避免读成吸管）
+    ctx.strokeStyle = 'rgba(255,255,255,0.09)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(cupX - topW * 0.26, cupY - cupH * 0.9);
+    ctx.lineTo(cupX - botW * 0.27, cupY - cupH * 0.45);
+    ctx.stroke();
+
+    // 刻度提示：八分满线
+    if (!placed && level < FILL_GOAL) {
+      var markY = cupY - cupH * FILL_GOAL;
+      ctx.strokeStyle = 'rgba(242,199,110,0.28)';
+      ctx.setLineDash([4, 5]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cupX - topW / 2 - 14, markY);
+      ctx.lineTo(cupX + topW / 2 + 14, markY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(242,199,110,0.4)';
+      ctx.font = '11px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('八分满', cupX + topW / 2 + 20, markY + 4);
+    }
+  }
+
+  function roundRect(x, y, w2, h2, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w2, y, x + w2, y + h2, r);
+    ctx.arcTo(x + w2, y + h2, x, y + h2, r);
+    ctx.arcTo(x, y + h2, x, y, r);
+    ctx.arcTo(x, y, x + w2, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__glass = {
+    level: function () { return +level.toFixed(3); },
+    placed: function () { return placed; },
+    isPouring: function () { return pouring; },
+    press: function () { if (level < FILL_GOAL) pouring = true; },
+    release: function () { pouring = false; },
+    place: function () { if (level >= FILL_GOAL) { placed = true; return true; } return false; }
+  };
+})();
+</script>
+</body>
+</html>
