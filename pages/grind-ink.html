@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜磨墨</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0f12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a8f96;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #9a7b4f; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6f747c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8d8474;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565b62;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6b6f76;
+    text-decoration: none;
+    border-bottom: 1px dotted #6b6f76;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9a8664; border-color: #9a8664; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜磨墨</h1>
+  <p>睡不着，就磨点墨。<br>按住墨锭，一圈一圈，慢慢来。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var grinding = false;        // 按住墨锭研磨中
+  var angle = -Math.PI / 2;    // 墨锭当前方位角
+  var turns = 0;               // 累计圈数
+  var strength = 0;            // 墨浓度 0-1
+  var saidHalf = false, saidDone = false;
+  var stroked = false;         // 已落笔
+  var strokeT = 0;             // 落笔动画进度 0-1
+  var inkBits = [];            // 墨池里的墨粒 {a, r, v, size}
+  var lampFlame = 0;           // 灯光呼吸
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 布局：砚台中心、纸的位置随视口自适应
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.68, Math.min(1, w / 860));
+    L.s = s;
+    L.w = w; L.h = h;
+    if (w / h > 0.9) {           // 横屏：砚在中左，纸在右
+      L.cx = w * 0.42; L.cy = h * 0.58;
+      L.paperX = w * 0.74; L.paperY = h * 0.64;
+    } else {                     // 竖屏：砚在中上，纸在下方
+      L.cx = w * 0.5; L.cy = h * 0.44;
+      L.paperX = w * 0.5; L.paperY = h * 0.78;
+    }
+    L.inkRx = 92 * s; L.inkRy = 58 * s;     // 墨池椭圆半径
+    L.stoneRx = 132 * s; L.stoneRy = 92 * s; // 砚缘椭圆半径
+    L.grindR = 52 * s;                       // 墨锭轨迹半径
+  }
+  window.addEventListener('resize', function () { layout(); });
+  layout();
+
+  function stickPos() {
+    return {
+      x: L.cx + Math.cos(angle) * L.grindR,
+      y: L.cy + Math.sin(angle) * L.grindR * 0.62   // 椭圆轨迹（俯视透视）
+    };
+  }
+
+  function feedTurns(d) {
+    turns += Math.abs(d) / (Math.PI * 2);
+    if (grinding) strength = Math.min(1, turns / 9);
+  }
+
+  function pointerInStone(x, y) {
+    var dx = (x - L.cx) / (L.stoneRx + 26 * L.s);
+    var dy = (y - L.cy) / (L.stoneRy + 26 * L.s);
+    return dx * dx + dy * dy <= 1;
+  }
+
+  var lastPointer = null;
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!pointerInStone(ev.clientX, ev.clientY)) return;
+    grinding = true;
+    lastPointer = ev;
+    angle = Math.atan2((ev.clientY - L.cy) / 0.62, ev.clientX - L.cx);
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!grinding) return;
+    var a = Math.atan2((ev.clientY - L.cy) / 0.62, ev.clientX - L.cx);
+    var d = a - angle;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    angle += d;
+    feedTurns(d);
+    lastPointer = ev;
+  });
+  window.addEventListener('pointerup', endGrind);
+  window.addEventListener('pointercancel', endGrind);
+  function endGrind() {
+    if (grinding && strength >= 1 && !saidDone) {
+      saidDone = true;
+      say('磨好了。往纸上落一笔，就去睡。');
+    } else if (grinding && strength > 0.2 && strength < 1 && !saidHalf && !saidDone) {
+      saidHalf = true;
+      say('墨醒了一半。不急。');
+    }
+    grinding = false;
+    lastPointer = null;
+  }
+
+  // 纸上落笔（只有磨浓后点纸有效）
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (strength >= 1 && !stroked) {
+      var w = window.innerWidth;
+      var pw = 96 * L.s, ph = 128 * L.s;
+      if (ev.clientX > L.paperX - pw && ev.clientX < L.paperX + pw &&
+          ev.clientY > L.paperY - ph && ev.clientY < L.paperY + ph) {
+        stroked = true;
+        strokeT = 0;
+      }
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    lampFlame = 0.9 + Math.sin(now / 700) * 0.06 + Math.sin(now / 293) * 0.04;
+
+    if (stroked && strokeT < 1) strokeT = Math.min(1, strokeT + dt / 1.1);
+
+    // 研磨时散出墨粒
+    if (grinding && Math.random() < dt * 9) {
+      inkBits.push({
+        a: angle + (Math.random() - 0.5) * 0.6,
+        r: L.grindR * (0.4 + Math.random() * 0.5),
+        v: 0.4 + Math.random() * 0.8,
+        size: 1 + Math.random() * 2.2,
+        life: 1
+      });
+    }
+    for (var i = inkBits.length - 1; i >= 0; i--) {
+      var b = inkBits[i];
+      b.a += b.v * dt * (grinding ? 1.6 : 0.35);
+      b.r += (L.inkRx * 0.82 - b.r) * dt * 0.5;
+      b.life -= dt * 0.22;
+      if (b.life <= 0) inkBits.splice(i, 1);
+    }
+
+    // ── 背景：深夜书房 ──
+    var bg = ctx.createRadialGradient(w / 2, h * 0.42, 40, w / 2, h * 0.5, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#14161a');
+    bg.addColorStop(1, '#0a0c0f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 桌案（从砚台后方开始，砚台整个落在桌上）──
+    var deskTop = L.cy - L.stoneRy - 26 * L.s;
+    var desk = ctx.createLinearGradient(0, deskTop, 0, h);
+    desk.addColorStop(0, '#241d15');
+    desk.addColorStop(1, '#171310');
+    ctx.fillStyle = desk;
+    ctx.fillRect(0, deskTop, w, h - deskTop);
+
+    // 桌沿高光（灯光方向）
+    ctx.fillStyle = 'rgba(190,150,90,' + 0.14 * lampFlame + ')';
+    ctx.fillRect(0, deskTop, w, 2);
+
+    // ── 纸 ──
+    drawPaper();
+
+    // ── 砚台 ──
+    var sx = L.cx, sy = L.cy;
+    // 砚台投影
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(sx + 6 * L.s, sy + 12 * L.s, L.stoneRx * 1.02, L.stoneRy * 1.02, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 砚缘（石质）
+    var stone = ctx.createLinearGradient(sx, sy - L.stoneRy, sx, sy + L.stoneRy);
+    stone.addColorStop(0, '#3d4148');
+    stone.addColorStop(0.5, '#2c3036');
+    stone.addColorStop(1, '#23262b');
+    ctx.fillStyle = stone;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, L.stoneRx, L.stoneRy, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 砚缘高光
+    ctx.strokeStyle = 'rgba(200,190,170,' + 0.10 * lampFlame + ')';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy - 3 * L.s, L.stoneRx * 0.99, L.stoneRy * 0.99, 0, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+    // 砚堂（研磨面凹下去）
+    ctx.fillStyle = '#1e2126';
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, L.inkRx * 1.28, L.inkRy * 1.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 墨池 ──
+    // 墨色：清水浅灰微光 → 浓墨近黑
+    var inkL = 148 - strength * 124;   // 亮度
+    var pool = ctx.createRadialGradient(sx, sy - 6 * L.s, 6, sx, sy, L.inkRx);
+    pool.addColorStop(0, 'rgb(' + Math.round(inkL + 7) + ',' + Math.round(inkL + 9) + ',' + Math.round(inkL + 11) + ')');
+    pool.addColorStop(1, 'rgb(' + Math.round(inkL - 16) + ',' + Math.round(inkL - 14) + ',' + Math.round(inkL - 10) + ')');
+    ctx.fillStyle = pool;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, L.inkRx, L.inkRy, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 墨面高光（随转动微晃）
+    ctx.fillStyle = 'rgba(235,240,245,' + (0.10 - strength * 0.055) * (0.7 + 0.3 * lampFlame) + ')';
+    ctx.beginPath();
+    ctx.ellipse(sx - L.inkRx * 0.24 + Math.sin(now / 900) * 2, sy - L.inkRy * 0.3, L.inkRx * 0.4, L.inkRy * 0.22, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    // 旋涡细线（研磨强度决定圈数亮度）
+    if (strength > 0.03) {
+      ctx.strokeStyle = 'rgba(10,12,14,' + 0.25 * strength + ')';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (var t = 0; t <= 64; t++) {
+        var ta = t / 64 * Math.PI * 3 + now / 1400;
+        var tr = L.inkRx * (0.2 + 0.75 * t / 64);
+        var tx = sx + Math.cos(ta) * tr;
+        var ty = sy + Math.sin(ta) * tr * 0.62;
+        if (t === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
+      }
+      ctx.stroke();
+    }
+    // 墨粒
+    for (var p = 0; p < inkBits.length; p++) {
+      var pb = inkBits[p];
+      ctx.fillStyle = 'rgba(16,18,20,' + 0.5 * pb.life + ')';
+      ctx.beginPath();
+      ctx.arc(sx + Math.cos(pb.a) * pb.r, sy + Math.sin(pb.a) * pb.r * 0.62, pb.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 墨锭 ──
+    var sp = stickPos();
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(sp.x + 4 * L.s, sp.y + 7 * L.s, 17 * L.s, 8 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 锭身（俯视圆角矩形，随角度转向）
+    ctx.save();
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate(angle + Math.PI / 2 + (grinding ? Math.sin(now / 160) * 0.05 : 0));
+    var stick = ctx.createLinearGradient(0, -26 * L.s, 0, 20 * L.s);
+    stick.addColorStop(0, '#4a4038');
+    stick.addColorStop(0.55, '#332c26');
+    stick.addColorStop(1, '#221d18');
+    ctx.fillStyle = stick;
+    roundRect(-11 * L.s, -26 * L.s, 22 * L.s, 46 * L.s, 5 * L.s);
+    ctx.fill();
+    // 锭面金漆小字位（一道淡金，磨短暗示）
+    ctx.fillStyle = 'rgba(212,175,110,' + 0.5 * (1 - strength * 0.55) + ')';
+    ctx.fillRect(-6 * L.s, -16 * L.s, 12 * L.s, 22 * L.s);
+    // 顶面（磨损端面，磨得越浓端面越黑）
+    ctx.fillStyle = 'rgb(' + Math.round(96 - strength * 58) + ',' + Math.round(88 - strength * 56) + ',' + Math.round(78 - strength * 52) + ')';
+    roundRect(-9 * L.s, -24 * L.s, 18 * L.s, 10 * L.s, 4 * L.s);
+    ctx.fill();
+    ctx.restore();
+
+    // 研磨涟漪（按住时墨锭脚下小圈）
+    if (grinding) {
+      ctx.strokeStyle = 'rgba(220,225,230,' + 0.14 * (0.6 + 0.4 * Math.sin(now / 130)) + ')';
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.ellipse(sp.x, sp.y + 3 * L.s, 26 * L.s, 13 * L.s, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 引导提示（未磨时）
+    if (turns < 0.2 && !grinding) {
+      ctx.fillStyle = 'rgba(154,163,172,' + (0.34 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住墨锭，绕着圈磨', L.cx, sy + L.stoneRy + 34 * L.s);
+    }
+    // 磨浓未落笔：纸上轻提示
+    if (strength >= 1 && !stroked) {
+      ctx.fillStyle = 'rgba(154,163,172,' + (0.3 + 0.18 * Math.sin(now / 560)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点纸落笔', L.paperX, L.paperY - 78 * L.s);
+    }
+  }
+
+  function drawPaper() {
+    var px = L.paperX, py = L.paperY, s = L.s;
+    var pw = 96 * s, ph = 128 * s;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-0.05);
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.fillRect(-pw / 2 + 5 * s, -ph / 2 + 7 * s, pw, ph);
+    // 纸面（暖白）
+    ctx.fillStyle = '#d9d2c2';
+    ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+    ctx.fillStyle = 'rgba(255,252,240,0.5)';
+    ctx.fillRect(-pw / 2, -ph / 2, pw, 3 * s);
+    // 纸上淡格
+    ctx.strokeStyle = 'rgba(120,110,90,0.14)';
+    ctx.lineWidth = 1;
+    for (var gy = -ph / 2 + 26 * s; gy < ph / 2 - 10 * s; gy += 22 * s) {
+      ctx.beginPath();
+      ctx.moveTo(-pw / 2 + 10 * s, gy);
+      ctx.lineTo(pw / 2 - 10 * s, gy);
+      ctx.stroke();
+    }
+    // 落笔：一竖（带笔锋）
+    if (stroked) {
+      var prog = strokeT;
+      var sy0 = -ph / 2 + 30 * s;
+      var sy1 = ph / 2 - 34 * s;
+      var cxp = 0;
+      var endY = sy0 + (sy1 - sy0) * easeOut(prog);
+      var grd = ctx.createLinearGradient(cxp, sy0, cxp, sy1);
+      grd.addColorStop(0, 'rgba(24,26,30,0.92)');
+      grd.addColorStop(1, 'rgba(24,26,30,0.82)');
+      ctx.fillStyle = grd;
+      // 主笔：起笔细、中段饱满、收笔出锋
+      var midW = 7.5 * s;
+      ctx.beginPath();
+      ctx.moveTo(cxp - 1.2 * s, sy0);
+      ctx.quadraticCurveTo(cxp - midW, (sy0 + endY) / 2, cxp - 0.6 * s, endY);
+      ctx.lineTo(cxp, endY + 4 * s);
+      ctx.lineTo(cxp + 0.6 * s, endY);
+      ctx.quadraticCurveTo(cxp + midW, (sy0 + endY) / 2, cxp + 1.2 * s, sy0);
+      ctx.closePath();
+      ctx.fill();
+      // 飞白（收笔两侧细碎）
+      if (prog > 0.85) {
+        ctx.fillStyle = 'rgba(24,26,30,0.30)';
+        ctx.fillRect(cxp - midW * 0.7, endY - 10 * s, 1.1 * s, 9 * s);
+        ctx.fillRect(cxp + midW * 0.5, endY - 13 * s, 0.9 * s, 11 * s);
+      }
+    }
+    ctx.restore();
+    // 落笔完成文案（只发一次）
+    if (stroked && strokeT >= 1 && !drawPaper.said) {
+      drawPaper.said = true;
+      say('一竖。今晚就写到这。', true);
+    }
+  }
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 2.4); }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__ink = {
+    strength: function () { return +strength.toFixed(2); },
+    turns: function () { return +turns.toFixed(1); },
+    grinding: function () { return grinding; },
+    stroked: function () { return stroked; },
+    strokeT: function () { return +strokeT.toFixed(2); },
+    press: function () { grinding = true; },
+    spin: function (d) { angle += d; feedTurns(d); },
+    release: endGrind,
+    dot: function () { if (strength >= 1 && !stroked) { stroked = true; } }
+  };
+})();
+</script>
+</body>
+</html>

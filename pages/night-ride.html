@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>凌晨自行车</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0c10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7e848c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7e93a2; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5d666e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #7f8b96;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #52565a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #64686e;
+    text-decoration: none;
+    border-bottom: 1px dotted #64686e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7e93a2; border-color: #7e93a2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>凌晨自行车</h1>
+  <p>这条街六点钟没有别人。<br>按住，蹬起来——铃铛想按就按，反正没有交警。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var pedaling = false;     // 按住蹬踏
+  var speed = 0;            // 0-1
+  var wheelA = 0;           // 车轮转角
+  var scroll = 0;           // 背景滚动
+  var bellR = 0;            // 铃声圈半径
+  var bellA = 0;            // 铃声圈透明度
+  var litWindows = [];      // 被吵醒的窗 {x,y}
+  var saidWind = false, saidBell = false;
+  var bellBtn = { x: 0, y: 0, r: 26 };
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 800, h / 700)));
+    L.w = w; L.h = h; L.s = s;
+    L.groundY = h * 0.74;
+    L.bikeX = w * 0.42;
+    L.wheelR = 52 * s;
+    bellBtn.x = w - 74; bellBtn.y = h * 0.66;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 371.3) * 43758.5453) % 1; }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var s = L.s;
+    // 铃铛按钮
+    var bdx = ev.clientX - bellBtn.x, bdy = ev.clientY - bellBtn.y;
+    if (bdx * bdx + bdy * bdy < bellBtn.r * bellBtn.r * 1.4) {
+      bellR = 1;
+      bellA = 1;
+      // 远处楼亮一扇窗
+      litWindows.push({ x: rnd((now() | 0) + litWindows.length * 7) * L.w, y: L.h * (0.18 + rnd(litWindows.length) * 0.2) });
+      if (!saidBell) { saidBell = true; say('吵醒了一扇窗。抱歉，也谢谢你亮了一下。'); }
+      else say('又亮了一扇。这条街认识你了。');
+      return;
+    }
+    pedaling = true;
+  });
+  window.addEventListener('pointerup', function () { pedaling = false; });
+  window.addEventListener('pointercancel', function () { pedaling = false; });
+
+  function now() { return Date.now(); }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 速度：蹬加滑减
+    speed = Math.max(0, Math.min(1, speed + (pedaling ? dt * 0.4 : -dt * 0.28)));
+    wheelA += dt * (2 + speed * 16);
+    scroll += dt * speed * 260;
+    if (bellR > 0) { bellR += dt * 140; bellA -= dt * 1.4; }
+    if (earT()) { /* placeholder no-op */ }
+
+    // ── 背景：黎明前的天 ──
+    var sky = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    sky.addColorStop(0, '#0c1016');
+    sky.addColorStop(0.7, '#121821');
+    sky.addColorStop(1, '#1a222b');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, L.groundY);
+
+    // 远景楼（慢视差）
+    var p1 = scroll * 0.2;
+    for (var b = 0; b < 8; b++) {
+      var bw = 70 + rnd(b) * 60;
+      var bh = 80 + rnd(b + 9) * 110;
+      var bx = ((b * 180 - p1) % (w + 260) + w + 260) % (w + 260) - 130;
+      ctx.fillStyle = '#141a22';
+      ctx.fillRect(bx, L.groundY - bh - 30 * s, bw, bh);
+      // 被吵醒的窗
+      for (var lw = 0; lw < litWindows.length; lw++) {
+        var wn = litWindows[lw];
+        if (wn.x > bx && wn.x < bx + bw && wn.y > L.groundY - bh - 30 * s) {
+          ctx.fillStyle = 'rgba(235,215,150,0.85)';
+          ctx.fillRect(wn.x, wn.y, 7, 9);
+        }
+      }
+    }
+
+    // 街灯（中视差，等距流动）
+    var p2 = scroll * 0.85;
+    var lampGap = 240;
+    for (var lp = 0; lp < 5; lp++) {
+      var lx = ((lp * lampGap - p2) % (w + 240) + w + 240) % (w + 240) - 120;
+      // 杆
+      ctx.strokeStyle = '#2c333b';
+      ctx.lineWidth = 4 * s;
+      ctx.beginPath();
+      ctx.moveTo(lx, L.groundY - 8 * s);
+      ctx.lineTo(lx, L.groundY - 150 * s);
+      ctx.quadraticCurveTo(lx + 4 * s, L.groundY - 168 * s, lx + 26 * s, L.groundY - 166 * s);
+      ctx.stroke();
+      // 灯头光晕
+      var lampG = ctx.createRadialGradient(lx + 28 * s, L.groundY - 160 * s, 2, lx + 28 * s, L.groundY - 160 * s, 46 * s);
+      lampG.addColorStop(0, 'rgba(220,210,160,0.30)');
+      lampG.addColorStop(1, 'rgba(220,210,160,0)');
+      ctx.fillStyle = lampG;
+      ctx.beginPath(); ctx.arc(lx + 28 * s, L.groundY - 160 * s, 46 * s, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 路面
+    var road = ctx.createLinearGradient(0, L.groundY, 0, h);
+    road.addColorStop(0, '#1b2126');
+    road.addColorStop(1, '#12161a');
+    ctx.fillStyle = road;
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    // 路面标线（快视差流动）
+    var p3 = scroll * 1.15;
+    ctx.fillStyle = 'rgba(190,195,185,' + 0.14 + speed * 0.1 + ')';
+    for (var dash = 0; dash < 8; dash++) {
+      var dx2 = ((dash * 150 - p3) % (w + 150) + w + 150) % (w + 150) - 75;
+      ctx.fillRect(dx2, L.groundY + (h - L.groundY) * 0.45, 46, 3);
+    }
+
+    // 风线（速度快时）
+    if (speed > 0.3) {
+      for (var wl = 0; wl < 3; wl++) {
+        ctx.strokeStyle = 'rgba(180,205,215,' + 0.10 * speed + ')';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        var wly = L.h * 0.3 + wl * 40 * s;
+        ctx.moveTo(w - 20 - (nowT / 3 + wl * 90) % (w * 0.5), wly);
+        ctx.lineTo(w - 120 - (nowT / 3 + wl * 90) % (w * 0.5), wly);
+        ctx.stroke();
+      }
+    }
+
+    // ── 自行车+人 ──
+    drawBike(now);
+
+    // 铃声圈
+    if (bellA > 0) {
+      ctx.strokeStyle = 'rgba(210,225,235,' + bellA * 0.5 + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(L.bikeX + 30 * s, L.groundY - 120 * s, bellR, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(210,225,235,' + bellA * 0.3 + ')';
+      ctx.beginPath(); ctx.arc(L.bikeX + 30 * s, L.groundY - 120 * s, bellR * 0.6, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // 铃铛按钮
+    var bb = bellBtn;
+    ctx.fillStyle = 'rgba(50,60,66,0.9)';
+    ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(180,200,210,0.4)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(220,230,238,0.85)';
+    ctx.font = Math.round(15 * s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🔔', bb.x, bb.y + 5);
+
+    // 引导
+    if (speed < 0.05 && !pedaling) {
+      ctx.fillStyle = 'rgba(150,165,178,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，蹬起来', w / 2, L.groundY + 50 * s);
+    }
+    if (speed > 0.5 && !saidWind) { saidWind = true; say('风比昨天暖了一点。'); }
+  }
+
+  function earT() { return false; }
+
+  function drawBike(now) {
+    var s = L.s;
+    var gy = L.groundY;
+    var x = L.bikeX;
+    var R = L.wheelR;
+    var rearX = x - R * 1.15, frontX = x + R * 1.15;
+    var wheelY = gy - R;
+
+    // 车架
+    ctx.strokeStyle = '#4a5560';
+    ctx.lineWidth = 4.5 * s;
+    ctx.beginPath();
+    ctx.moveTo(rearX, wheelY);
+    ctx.lineTo(x, wheelY);                        // 后轮轴-中轴
+    ctx.lineTo(frontX, wheelY);                   // 中轴-前轮轴
+    ctx.moveTo(x, wheelY);
+    ctx.lineTo(x - 14 * s, gy - R * 1.9);         // 中轴-座管顶
+    ctx.lineTo(rearX, wheelY);                    // 座管顶-后轮轴
+    ctx.moveTo(x - 14 * s, gy - R * 1.9);
+    ctx.lineTo(x + 26 * s, gy - R * 2.05);        // 座管顶-车把
+    ctx.lineTo(frontX, wheelY);                   // 车把-前轮轴
+    ctx.stroke();
+
+    // 车轮
+    for (var wh = 0; wh < 2; wh++) {
+      var wxx = wh === 0 ? rearX : frontX;
+      ctx.strokeStyle = '#2f3841';
+      ctx.lineWidth = 4 * s;
+      ctx.beginPath(); ctx.arc(wxx, wheelY, R, 0, Math.PI * 2); ctx.stroke();
+      // 辐条
+      ctx.strokeStyle = 'rgba(120,135,150,0.6)';
+      ctx.lineWidth = 1.2;
+      for (var sp = 0; sp < 6; sp++) {
+        var sa = wheelA * (wh === 0 ? 1 : 1.06) + sp * Math.PI / 3;
+        ctx.beginPath();
+        ctx.moveTo(wxx, wheelY);
+        ctx.lineTo(wxx + Math.cos(sa) * (R - 4 * s), wheelY + Math.sin(sa) * (R - 4 * s));
+        ctx.stroke();
+      }
+    }
+
+    // 踏板曲柄（旋转）
+    var crankA = wheelA * 0.9;
+    var crankX = x + Math.cos(crankA) * 14 * s;
+    var crankY = wheelY + Math.sin(crankA) * 14 * s;
+    ctx.strokeStyle = '#3c464f';
+    ctx.lineWidth = 3 * s;
+    ctx.beginPath(); ctx.moveTo(x, wheelY); ctx.lineTo(crankX, crankY); ctx.stroke();
+    ctx.fillStyle = '#525c66';
+    ctx.fillRect(crankX - 8 * s, crankY - 2.5 * s, 16 * s, 5 * s);
+
+    // 骑车人剪影（低头弓背）
+    ctx.strokeStyle = '#20272e';
+    ctx.lineWidth = 7 * s;
+    ctx.lineCap = 'round';
+    // 腿：髋→膝→踏板
+    var hipX = x - 14 * s, hipY = gy - R * 1.9 - 6 * s;
+    ctx.beginPath();
+    ctx.moveTo(hipX, hipY);
+    var kneeX = (hipX + crankX) / 2 + 12 * s;
+    var kneeY = (hipY + crankY) / 2;
+    ctx.quadraticCurveTo(kneeX, kneeY, crankX, crankY);
+    ctx.stroke();
+    // 躯干
+    ctx.beginPath();
+    ctx.moveTo(hipX, hipY);
+    ctx.lineTo(hipX + 30 * s, hipY - 42 * s);
+    ctx.stroke();
+    // 手臂（到车把）
+    ctx.beginPath();
+    ctx.moveTo(hipX + 30 * s, hipY - 42 * s);
+    ctx.lineTo(x + 26 * s, gy - R * 2.02);
+    ctx.stroke();
+    // 头
+    ctx.fillStyle = '#20272e';
+    ctx.beginPath(); ctx.arc(hipX + 38 * s, hipY - 52 * s, 11 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.lineCap = 'butt';
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__ride = {
+    speed: function () { return +speed.toFixed(2); },
+    bellR: function () { return +bellR.toFixed(1); },
+    windowsLit: function () { return litWindows.length; },
+    press: function () { pedaling = true; },
+    release: function () { pedaling = false; },
+    ring: function () {
+      bellR = 1; bellA = 1;
+      litWindows.push({ x: rnd((now() | 0) + litWindows.length * 7) * L.w, y: L.h * (0.18 + rnd(litWindows.length) * 0.2) });
+    }
+  };
+})();
+</script>
+</body>
+</html>

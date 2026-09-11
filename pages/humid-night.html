@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜加湿器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0f11;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #828a8a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7f9a96; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5f6a68; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #7f8d8a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #525656;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #646a69;
+    text-decoration: none;
+    border-bottom: 1px dotted #646a69;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7f9a96; border-color: #7f9a96; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜加湿器</h1>
+  <p>空调吹了一晚上，嗓子有点干。<br>点一下开关，让它安安静静地吐雾。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var on = false;           // 机器运行中
+  var humidity = 35;        // 湿度 %
+  var mist = [];            // 雾气粒子 {x,y,r,vy,vx,a,life}
+  var bubbles = [];         // 机身小水泡圈
+  var saidMoist = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.unitX = w * 0.46;
+    L.unitY = h * 0.62;      // 机身底部
+    L.unitW = 110 * s;
+    L.unitH = 150 * s;
+    L.btnX = L.unitX;
+    L.btnY = L.unitY - L.unitH * 0.62;
+    L.meterX = w * 0.74;
+    L.meterY = h * 0.5;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function inBtn(x, y) {
+    var dx = x - L.btnX, dy = y - L.btnY;
+    return dx * dx + dy * dy < (30 * L.s) * (30 * L.s);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!inBtn(ev.clientX, ev.clientY)) return;
+    on = !on;
+    if (on) say('白雾一根一根地长。嗓子先谢谢你。');
+    else say('干燥的时候，再叫我。');
+  });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 771.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 湿度：开机升、关机缓降
+    if (on) humidity = Math.min(62, humidity + dt * 1.6);
+    else humidity = Math.max(35, humidity - dt * 0.7);
+    if (!saidMoist && humidity >= 60) {
+      saidMoist = true;
+      say('湿度够了。今晚的空气刚刚好。', true);
+    }
+    if (humidity < 45 && saidMoist) saidMoist = false;
+
+    // 雾气生成
+    if (on && Math.random() < dt * 26) {
+      mist.push({
+        x: L.unitX + (Math.random() - 0.5) * 26 * s,
+        y: L.unitY - L.unitH - 8 * s,
+        r: (4 + Math.random() * 5) * s,
+        vy: -(34 + Math.random() * 26) * s,
+        vx: (Math.random() - 0.5) * 8,
+        a: 0.42 + Math.random() * 0.2,
+        drift: Math.sin(now / 900) * 14 + (Math.random() - 0.5) * 16,
+        age: 0
+      });
+    }
+    for (var i = mist.length - 1; i >= 0; i--) {
+      var m = mist[i];
+      m.age += dt;
+      m.y += m.vy * dt;
+      m.x += (m.vx + Math.sin((now + m.age * 800) / 700) * 10) * dt + m.drift * dt * 0.4;
+      m.vy *= (1 - dt * 0.5);
+      m.r += dt * 9;
+      m.a -= dt * 0.16;
+      if (m.a <= 0) mist.splice(i, 1);
+    }
+    // 机身小水泡（运行时偶尔）
+    if (on && Math.random() < dt * 1.2) {
+      bubbles.push({ x: L.unitX + (Math.random() - 0.5) * L.unitW * 0.6, y: L.unitY - 10 * s, r: 2, a: 0.5 });
+    }
+    for (var b3 = bubbles.length - 1; b3 >= 0; b3--) {
+      var bb = bubbles[b3];
+      bb.r += dt * 10; bb.a -= dt * 1.4;
+      if (bb.a <= 0) bubbles.splice(b3, 1);
+    }
+
+    // ── 背景：床头一角 ──
+    var bg = ctx.createRadialGradient(L.unitX, L.unitY - 80 * s, 30, w * 0.5, h * 0.55, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#151a1a');
+    bg.addColorStop(1, '#0b0e0e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床头柜台面
+    var counter = ctx.createLinearGradient(0, L.unitY + 4 * s, 0, h);
+    counter.addColorStop(0, '#231f1a');
+    counter.addColorStop(1, '#151210');
+    ctx.fillStyle = counter;
+    ctx.fillRect(0, L.unitY + 4 * s, w, h - L.unitY - 4 * s);
+    ctx.fillStyle = 'rgba(190,210,205,' + 0.10 * (0.8 + 0.2 * Math.sin(now / 800)) + ')';
+    ctx.fillRect(0, L.unitY + 4 * s, w, 2);
+
+    // ── 湿度计（右侧小圆牌）──
+    ctx.fillStyle = '#20262a';
+    ctx.beginPath(); ctx.arc(L.meterX, L.meterY, 40 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(150,180,175,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(L.meterX, L.meterY, 40 * s, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(150,185,180,0.55)';
+    ctx.font = Math.round(10 * s) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('湿度', L.meterX, L.meterY - 12 * s);
+    ctx.fillStyle = humidity >= 55 ? 'rgba(160,220,200,0.95)' : 'rgba(200,200,190,0.8)';
+    ctx.font = 'bold ' + Math.round(22 * s) + 'px ui-monospace, Menlo, monospace';
+    ctx.fillText(Math.round(humidity) + '%', L.meterX, L.meterY + 14 * s);
+
+    // ── 加湿器 ──
+    drawUnit(now);
+
+    // 雾（最上层）
+    for (var p2 = 0; p2 < mist.length; p2++) {
+      var mp = mist[p2];
+      var mg = ctx.createRadialGradient(mp.x, mp.y, 1, mp.x, mp.y, mp.r);
+      mg.addColorStop(0, 'rgba(235,242,245,' + mp.a + ')');
+      mg.addColorStop(1, 'rgba(235,242,245,0)');
+      ctx.fillStyle = mg;
+      ctx.beginPath(); ctx.arc(mp.x, mp.y, mp.r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 引导
+    if (!on) {
+      ctx.fillStyle = 'rgba(150,175,170,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点开关', L.btnX, L.unitY + 46 * s);
+    }
+  }
+
+  function drawUnit(now) {
+    var s = L.s;
+    var x = L.unitX, bottom = L.unitY;
+    var uw = L.unitW, uh = L.unitH;
+
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(x + 6 * s, bottom + 5 * s, uw * 0.62, 9 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 机身（磨砂圆柱）
+    var body = ctx.createLinearGradient(x - uw / 2, 0, x + uw / 2, 0);
+    body.addColorStop(0, '#39443f');
+    body.addColorStop(0.5, '#4d5a55');
+    body.addColorStop(1, '#2e3833');
+    ctx.fillStyle = body;
+    roundRect(x - uw / 2, bottom - uh, uw, uh, 16 * s);
+    ctx.fill();
+    // 水位线（内部水光）
+    var water = ctx.createLinearGradient(0, bottom - uh * 0.5, 0, bottom);
+    water.addColorStop(0, 'rgba(140,200,190,0)');
+    water.addColorStop(1, 'rgba(140,200,190,0.22)');
+    ctx.fillStyle = water;
+    roundRect(x - uw / 2 + 6 * s, bottom - uh * 0.5, uw - 12 * s, uh * 0.48, 10 * s);
+    ctx.fill();
+
+    // 顶喷嘴
+    ctx.fillStyle = '#2c3531';
+    roundRect(x - 20 * s, bottom - uh - 12 * s, 40 * s, 14 * s, 5 * s);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(20,26,24,0.9)';
+    ctx.beginPath();
+    ctx.ellipse(x, bottom - uh - 11 * s, 13 * s, 4 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 开关（机身圆钮+指示灯）
+    var btn = ctx.createRadialGradient(L.btnX - 4 * s, L.btnY - 4 * s, 2, L.btnX, L.btnY, 22 * s);
+    if (on) {
+      btn.addColorStop(0, '#b5d9cf');
+      btn.addColorStop(1, '#6e8f86');
+    } else {
+      btn.addColorStop(0, '#5a6662');
+      btn.addColorStop(1, '#3c4542');
+    }
+    ctx.fillStyle = btn;
+    ctx.beginPath(); ctx.arc(L.btnX, L.btnY, 22 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,26,24,0.5)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(L.btnX, L.btnY, 22 * s, 0, Math.PI * 2); ctx.stroke();
+    // 运行呼吸灯
+    if (on) {
+      var breath = 0.45 + 0.3 * Math.sin(now / 620);
+      ctx.fillStyle = 'rgba(160,230,205,' + breath + ')';
+      ctx.beginPath(); ctx.arc(L.btnX, L.btnY - 30 * s, 3.6 * s, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 机身小水泡圈
+    for (var b4 = 0; b4 < bubbles.length; b4++) {
+      var pb = bubbles[b4];
+      ctx.strokeStyle = 'rgba(180,225,215,' + pb.a + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(pb.x, pb.y, pb.r, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__hum = {
+    on: function () { return on; },
+    humidity: function () { return +humidity.toFixed(1); },
+    mist: function () { return mist.length; },
+    toggle: function () {
+      on = !on;
+      if (on) say('白雾一根一根地长。嗓子先谢谢你。');
+      else say('干燥的时候，再叫我。');
+    },
+    fastForward: function () { humidity = 59.5; }
+  };
+})();
+</script>
+</body>
+</html>

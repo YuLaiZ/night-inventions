@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/favicon.ico">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜合上电脑</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0d0f;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #85828a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8d93a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #666a75; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #878ca0;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55575e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #696c76;
+    text-decoration: none;
+    border-bottom: 1px dotted #696c76;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8d93a8; border-color: #8d93a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜合上电脑</h1>
+  <p>文档保存了，邮件回完了。<br>点一下屏幕上缘——今天的工作，到这里。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var open = true;          // 盖子开着
+  var closeT = 0;           // 合盖动画 0（开）→ 1（合）
+  var animating = false;
+  var reopened = 0;         // 重新开盖次数
+  var seamA = 0;            // 合盖后的缝光
+  var ledOn = true;
+  var saidFirst = false, saidReopen = false, saidFinal = false;
+  var cursorOn = true;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 860)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.deskY = h * 0.64;              // 桌面线（铰链处）
+    L.lidW = 320 * s;                // 屏幕宽
+    L.lidH = 210 * s;                // 屏幕高（开盖时）
+    L.baseH = 16 * s;                // 底座厚
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function hitLid(x, y) {
+    if (!open && closeT >= 1) {
+      // 合盖后：点盖缝重新打开
+      var s = L.s;
+      return Math.abs(x - L.cx) < L.lidW / 2 && Math.abs(y - (L.deskY - 20 * s)) < 40 * s;
+    }
+    var s = L.s;
+    var topY = L.deskY - L.lidH - L.baseH;
+    return x > L.cx - L.lidW / 2 - 10 * s && x < L.cx + L.lidW / 2 + 10 * s &&
+           y > topY - 24 * s && y < topY + 50 * s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (animating) return;
+    if (!hitLid(ev.clientX, ev.clientY)) return;
+    if (open) {
+      open = false;
+      animating = true;
+    } else {
+      // 重新开盖
+      open = true;
+      animating = true;
+      reopened++;
+      if (reopened === 1) say('又打开了？好吧，就五分钟。');
+      else say('……这次是真的，看完这行就合。');
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    cursorOn = Math.sin(now / 530) > -0.2;
+    ledOn = open && (0.5 + 0.5 * Math.sin(now / 900)) > 0.25;
+
+    // 合/开动画
+    if (animating) {
+      var sp = dt / 1.1;
+      if (open) closeT = Math.max(0, closeT - sp);
+      else closeT = Math.min(1, closeT + sp);
+      if ((open && closeT <= 0) || (!open && closeT >= 1)) {
+        animating = false;
+        if (!open && closeT >= 1) {
+          seamA = 1;
+          if (reopened === 0 && !saidFirst) { saidFirst = true; say('咔哒。今天的工作，到这里。', true); }
+          else if (reopened >= 1 && !saidFinal) { saidFinal = true; say('这回是真的。晚安。', true); }
+        }
+        if (open && closeT <= 0 && reopened >= 1 && !saidReopen) { saidReopen = true; }
+      }
+    }
+    if (seamA > 0) seamA = Math.max(0, seamA - dt * 0.45);
+
+    // ── 背景：暗房间 ──
+    var bg = ctx.createRadialGradient(L.cx, L.deskY - 60 * s, 30, L.cx, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#16161a');
+    bg.addColorStop(1, '#0b0b0d');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 桌面
+    var desk = ctx.createLinearGradient(0, L.deskY, 0, h);
+    desk.addColorStop(0, '#241f18');
+    desk.addColorStop(1, '#15120e');
+    ctx.fillStyle = desk;
+    ctx.fillRect(0, L.deskY, w, h - L.deskY);
+
+    // ── 屏幕光洒在桌面（开盖/合盖中）──
+    var lightW = L.lidW * (1 - closeT * 0.92) * (open || closeT < 1 ? 1 : 0);
+    if (lightW > 4) {
+      var lg = ctx.createLinearGradient(0, L.deskY, 0, h);
+      var lum = (1 - closeT * 0.75) * 0.22;
+      lg.addColorStop(0, 'rgba(190,205,235,' + lum + ')');
+      lg.addColorStop(1, 'rgba(190,205,235,0)');
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.moveTo(L.cx - lightW / 2, L.deskY);
+      ctx.lineTo(L.cx + lightW / 2, L.deskY);
+      ctx.lineTo(L.cx + lightW * 0.85, h);
+      ctx.lineTo(L.cx - lightW * 0.85, h);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── 笔记本 ──
+    drawLaptop(now);
+
+    // 引导
+    if (open && closeT < 0.05 && !animating) {
+      ctx.fillStyle = 'rgba(175,180,200,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下屏幕上缘，合上它', L.cx, L.deskY + 48 * s);
+    }
+    if (!open && closeT >= 1 && seamA <= 0 && reopened === 0) {
+      // 合盖后黑暗里的一点提示
+      ctx.fillStyle = 'rgba(175,180,200,' + (0.22 + 0.14 * Math.sin(now / 700)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('（要是反悔了，点它还能开）', L.cx, L.deskY + 48 * s);
+    }
+  }
+
+  function drawLaptop(now) {
+    var s = L.s;
+    var t = easeInOut(closeT);
+    var cx = L.cx;
+    var lidW = L.lidW, lidH = L.lidH;
+
+    // ── 底座（键盘面，梯形透视）──
+    var baseTopY = L.deskY - L.baseH;
+    ctx.fillStyle = '#2e3038';
+    ctx.beginPath();
+    ctx.moveTo(cx - lidW * 0.52, L.deskY);
+    ctx.lineTo(cx + lidW * 0.52, L.deskY);
+    ctx.lineTo(cx + lidW * 0.44, L.deskY + 26 * s);
+    ctx.lineTo(cx - lidW * 0.44, L.deskY + 26 * s);
+    ctx.closePath();
+    ctx.fill();
+    // 键盘粒
+    ctx.fillStyle = 'rgba(15,16,20,0.9)';
+    for (var kr = 0; kr < 3; kr++) {
+      for (var kc = 0; kc < 9; kc++) {
+        var kx = cx - lidW * 0.36 + kc * (lidW * 0.72 / 9) + (kr % 2) * 4 * s;
+        var ky = L.deskY + 4 * s + kr * 6 * s;
+        ctx.fillRect(kx, ky, lidW * 0.06, 4 * s);
+      }
+    }
+    // 触控板
+    ctx.strokeStyle = 'rgba(120,125,140,0.25)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - 30 * s, L.deskY + 20 * s, 60 * s, 5 * s);
+
+    // 电源 LED（底座前缘）
+    ctx.fillStyle = ledOn && closeT < 0.6 ? 'rgba(140,220,170,' + 0.5 + 0.3 * Math.sin(now / 700) + ')' : 'rgba(90,95,100,0.4)';
+    ctx.beginPath(); ctx.arc(cx + lidW * 0.40, L.deskY + 6 * s, 2.4 * s, 0, Math.PI * 2); ctx.fill();
+
+    // ── 屏幕（绕铰链合盖：高度压缩 + 亮度衰减）──
+    var lift = Math.sin((1 - t) * Math.PI / 2);        // 1=全开 → 0=合
+    var screenH = lidH * lift;
+    var topY = L.deskY - L.baseH - screenH;
+    // 合上后的盖体（薄）
+    var closedH = L.baseH * 0.75;
+
+    // 屏幕面板
+    if (lift > 0.02) {
+      var sx = cx - lidW / 2, sy = topY;
+      // 面板背光渐弱
+      var dim = lift * (1 - t * 0.15);
+      // 屏内容
+      ctx.fillStyle = '#101318';
+      roundRect(sx + 5 * s, sy, lidW - 10 * s, screenH, 6 * s);
+      ctx.fill();
+      ctx.save();
+      roundRect(sx + 5 * s, sy, lidW - 10 * s, screenH, 6 * s);
+      ctx.clip();
+      var gl = ctx.createLinearGradient(0, sy, 0, sy + screenH);
+      gl.addColorStop(0, 'rgba(140,155,190,' + 0.16 * dim + ')');
+      gl.addColorStop(1, 'rgba(140,155,190,' + 0.07 * dim + ')');
+      ctx.fillStyle = gl;
+      ctx.fillRect(sx, sy, lidW, screenH);
+      // 文档行 + 光标
+      ctx.fillStyle = 'rgba(200,210,230,' + 0.35 * dim + ')';
+      for (var li = 0; li < 5; li++) {
+        var lw2 = (60 + rnd(li * 7) * 120) * s;
+        ctx.fillRect(sx + 24 * s, sy + 22 * s + li * 20 * s, lw2, 5 * s);
+      }
+      if (cursorOn) {
+        ctx.fillStyle = 'rgba(230,238,252,' + 0.75 * dim + ')';
+        ctx.fillRect(sx + 24 * s + (60 + rnd(28) * 120) * s + 8 * s, sy + 22 * s + 4 * 20 * s, 3 * s, 12 * s);
+      }
+      ctx.restore();
+
+      // 屏框
+      ctx.strokeStyle = '#3a3d46';
+      ctx.lineWidth = 5 * s;
+      roundRect(sx, sy, lidW, screenH, 6 * s);
+      ctx.stroke();
+      // 上缘提示（可点合盖的高亮）
+      if (open && !animating) {
+        ctx.strokeStyle = 'rgba(190,205,235,' + (0.25 + 0.18 * Math.sin(now / 500)) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sx + 10 * s, sy + 3 * s);
+        ctx.lineTo(sx + lidW - 10 * s, sy + 3 * s);
+        ctx.stroke();
+      }
+    } else {
+      // 合上的盖（薄板）
+      var seam = ctx.createLinearGradient(0, L.deskY - closedH, 0, L.deskY);
+      seam.addColorStop(0, '#33363f');
+      seam.addColorStop(1, '#22242b');
+      ctx.fillStyle = seam;
+      roundRect(cx - lidW / 2, L.deskY - closedH, lidW, closedH, 4 * s);
+      ctx.fill();
+      // 缝光
+      if (seamA > 0) {
+        ctx.fillStyle = 'rgba(200,215,245,' + 0.5 * seamA + ')';
+        ctx.fillRect(cx - lidW / 2 + 6 * s, L.deskY - closedH - 1.2 * s, lidW - 12 * s, 1.6 * s);
+      }
+    }
+  }
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 217.3) * 43758.5453) % 1; }
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__lap = {
+    state: function () { return open ? (closeT < 0.05 ? 'open' : 'closing') : (closeT >= 1 ? 'closed' : 'opening'); },
+    t: function () { return +closeT.toFixed(2); },
+    reopened: function () { return reopened; },
+    tap: function () {
+      var s = L.s;
+      var y = open ? L.deskY - L.lidH - L.baseH + 10 * s : L.deskY - 20 * s;
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: L.cx, clientY: y, bubbles: true }));
+    }
+  };
+})();
+</script>
+</body>
+</html>

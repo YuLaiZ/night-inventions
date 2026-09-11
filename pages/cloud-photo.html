@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给云拍张照</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c0e12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7f848e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a92a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #61666f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #82899c;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #54575e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #676b76;
+    text-decoration: none;
+    border-bottom: 1px dotted #676b76;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a92a8; border-color: #8a92a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给云拍张照</h1>
+  <p>天上有一朵云，正在慢慢变样子。<br>按快门，把它现在的样子留下来。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 云形态：12 顶点半径系数，缓慢在形态间漂移
+  var SHIFTS = [radii(3), radii(9), radii(17), radii(25), radii(33)];
+  var shiftF = 0;           // 形态漂移进度（连续）
+  var drift = 0;            // 云水平漂移
+
+  var flash = 0;            // 快门白闪
+  var shots = 0;            // 已拍张数
+  var photo = null;         // 当前相纸 {t:动画进度, shape, text, drift}
+  var PHOTO_TEXTS = [
+    '像一头没睡醒的鲸。',
+    '像打翻的棉花糖。',
+    '像一座会飘的雪山。',
+    '像谁家的绵羊跑丢了。',
+    '像一张揉皱又展平的床单。',
+    '像大海做梦时冒出的泡。',
+    '像一艘不着急的船。',
+    '像什么都可以。反正它不介意。'
+  ];
+  var textIdx = 0;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 860)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2; L.cy = h * 0.44;
+    L.viewW = 220 * s; L.viewH = 170 * s;   // 取景框
+    L.cloudR = 80 * s;
+    L.shutter = { x: w / 2, y: h * 0.76, r: 30 * s };
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function radii(seed) {
+    var arr = [];
+    for (var i = 0; i < 12; i++) arr.push(0.6 + rnd(seed * 17 + i * 7.3) * 0.5);
+    return arr;
+  }
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 271.7) * 43758.5453) % 1; }
+
+  function shapeAt() {
+    var seg = Math.floor(shiftF) % SHIFTS.length;
+    var nxt = (seg + 1) % SHIFTS.length;
+    var f = shiftF - Math.floor(shiftF);
+    var e = f * f * (3 - 2 * f);
+    var out = [];
+    for (var i = 0; i < 12; i++) out.push(SHIFTS[seg][i] + (SHIFTS[nxt][i] - SHIFTS[seg][i]) * e);
+    return out;
+  }
+
+  var inShutter = false;
+  function hitShutter(x, y) {
+    var dx = x - L.shutter.x, dy = y - L.shutter.y;
+    return dx * dx + dy * dy < (L.shutter.r + 8) * (L.shutter.r + 8);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (hitShutter(ev.clientX, ev.clientY) && flash <= 0 && !(photo && photo.t < 1)) {
+      inShutter = true;
+    }
+  });
+  canvas.addEventListener('pointerup', function () {
+    if (inShutter) {
+      inShutter = false;
+      shoot();
+    }
+  });
+  window.addEventListener('pointercancel', function () { inShutter = false; });
+
+  function shoot() {
+    flash = 1;
+    shots++;
+    photo = {
+      t: 0.0001,
+      shape: shapeAt(),
+      drift: drift,
+      text: PHOTO_TEXTS[textIdx % PHOTO_TEXTS.length]
+    };
+    textIdx++;
+    if (shots === 1) say('留在相纸上了。它不会变，除非你再看。');
+    else if (shots === 3) say('云有的是时间。你也是。');
+  }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    shiftF += dt * 0.05;
+    drift = Math.sin(shiftF * 2.2) * 46 * s;
+    if (flash > 0) flash = Math.max(0, flash - dt * 2.2);
+    if (photo && photo.t < 1) photo.t = Math.min(1, photo.t + dt * 1.1);
+
+    // ── 夜空背景 ──
+    var sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, '#0e141d');
+    sky.addColorStop(0.65, '#141c26');
+    sky.addColorStop(1, '#0d1117');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+    // 星
+    for (var st = 0; st < 16; st++) {
+      ctx.fillStyle = 'rgba(200,215,235,' + 0.2 + rnd(st) * 0.35 + ')';
+      ctx.fillRect(rnd(st * 3) * w, rnd(st * 7) * h * 0.6, 1.6, 1.6);
+    }
+    // 城市灯带（底部）
+    ctx.fillStyle = '#10151c';
+    ctx.fillRect(0, h * 0.8, w, h * 0.2);
+    ctx.fillStyle = 'rgba(215,195,135,' + 0.18 + rnd(Math.floor(nowT / 900)) * 0.1 + ')';
+    for (var lt = 0; lt < 5; lt++) {
+      ctx.fillRect(rnd(lt * 11) * w, h * 0.8 + 14 * s, 5, 6);
+    }
+
+    // ── 云（取景框内）──
+    var cloudX = L.cx + drift;
+    var cloudY = L.cy;
+    drawCloud(cloudX, cloudY, L.cloudR, shapeAt(), nowT, 1);
+
+    // ── 取景框 ──
+    ctx.strokeStyle = 'rgba(200,210,230,0.5)';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([7, 6]);
+    ctx.strokeRect(L.cx - L.viewW / 2, L.cy - L.viewH / 2, L.viewW, L.viewH);
+    ctx.setLineDash([]);
+    // 四角
+    ctx.strokeStyle = 'rgba(220,228,245,0.8)';
+    ctx.lineWidth = 2.4;
+    var cw = 16 * s;
+    var fx = L.cx - L.viewW / 2, fy = L.cy - L.viewH / 2;
+    for (var cn = 0; cn < 4; cn++) {
+      var cxx = fx + (cn % 2) * L.viewW;
+      var cyy = fy + Math.floor(cn / 2) * L.viewH;
+      var dirX = cn % 2 === 0 ? 1 : -1;
+      var dirY = cn < 2 ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(cxx + dirX * cw, cyy);
+      ctx.lineTo(cxx, cyy);
+      ctx.lineTo(cxx, cyy + dirY * cw);
+      ctx.stroke();
+    }
+
+    // ── 快门钮 ──
+    ctx.strokeStyle = 'rgba(200,210,230,0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(L.shutter.x, L.shutter.y, L.shutter.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = inShutter ? '#9fb4c8' : '#c6d2e0';
+    ctx.beginPath(); ctx.arc(L.shutter.x, L.shutter.y, L.shutter.r - 7 * s, 0, Math.PI * 2); ctx.fill();
+
+    // ── 相纸（吐出）──
+    if (photo) drawPhoto(nowT);
+
+    // 白闪
+    if (flash > 0) {
+      ctx.fillStyle = 'rgba(240,245,255,' + flash * 0.75 + ')';
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  function drawCloud(x, y, R, shape, now, alpha) {
+    ctx.save();
+    ctx.translate(x, y);
+    // 多层蓬松
+    var layers = [[1.12, 0.25], [1, 0.55], [0.8, 0.85]];
+    for (var l = 0; l < layers.length; l++) {
+      var lf = layers[l];
+      ctx.fillStyle = 'rgba(228,234,246,' + lf[1] * alpha + ')';
+      ctx.beginPath();
+      for (var i = 0; i <= 12; i++) {
+        var a = i / 12 * Math.PI * 2;
+        var rr = R * lf[0] * shape[i % 12];
+        var px = Math.cos(a) * rr;
+        var py = Math.sin(a) * rr * 0.62;
+        if (i === 0) ctx.moveTo(px, py);
+        else {
+          var pa = (i - 0.5) / 12 * Math.PI * 2;
+          var pr = R * lf[0] * ((shape[(i - 1) % 12] + shape[i % 12]) / 2);
+          ctx.quadraticCurveTo(Math.cos(pa) * pr, Math.sin(pa) * pr * 0.62, px, py);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawPhoto(now) {
+    var s = L.s;
+    var pw = 150 * s, ph = 186 * s;
+    var t = easeOut(photo.t);
+    // 从屏幕底部滑上
+    var px = L.w - pw / 2 - 46 * s;
+    var py = L.h * 0.52 + (1 - t) * (L.h * 0.6);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(0.06);
+    // 相纸白框
+    ctx.fillStyle = '#e9e6dd';
+    ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(-pw / 2 + 4 * s, -ph / 2 + 5 * s, pw, ph);
+    ctx.fillStyle = '#e9e6dd';
+    ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+    // 相片区（夜空底+定格云）
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-pw / 2 + 10 * s, -ph / 2 + 10 * s, pw - 20 * s, ph * 0.62);
+    ctx.clip();
+    var pg = ctx.createLinearGradient(0, -ph / 2, 0, -ph / 2 + ph * 0.62);
+    pg.addColorStop(0, '#182430');
+    pg.addColorStop(1, '#22323e');
+    ctx.fillStyle = pg;
+    ctx.fillRect(-pw / 2 + 10 * s, -ph / 2 + 10 * s, pw - 20 * s, ph * 0.62);
+    drawCloud(photo.drift * 0.4, -ph * 0.16, 40 * s, photo.shape, now, 1);
+    ctx.restore();
+    // 配文
+    ctx.fillStyle = '#3a3a44';
+    ctx.font = 'italic ' + Math.round(11 * s) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(photo.text, 0, ph / 2 - 14 * s);
+    // 日期戳
+    ctx.fillStyle = 'rgba(58,58,68,0.5)';
+    ctx.font = Math.round(8 * s) + 'px ui-monospace, Menlo, monospace';
+    ctx.fillText('NO.' + String(shots).padStart(3, '0'), 0, ph / 2 - 2 * s);
+    ctx.restore();
+  }
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 2.2); }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__cloud = {
+    shots: function () { return shots; },
+    photoT: function () { return photo ? +photo.t.toFixed(2) : -1; },
+    text: function () { return photo ? photo.text : ''; },
+    shoot: shoot
+  };
+})();
+</script>
+</body>
+</html>

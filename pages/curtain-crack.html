@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>窗帘留条缝</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0b0c10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #82868f;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8b93a6; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #646873; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #878da0;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #54575f;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #696c76;
+    text-decoration: none;
+    border-bottom: 1px dotted #696c76;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8b93a6; border-color: #8b93a6; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>窗帘留条缝</h1>
+  <p>睡前拉上窗帘，别拉严实。<br>按住往左拖——留一条缝，给明早的光。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // gap: 窗帘间缝宽（0=全合 1=全开），目标值与当前值（缓动）
+  var gap = 1, gapT = 1;
+  var dragging = false;
+  var lastX = 0;
+  var saidCrack = false, saidSealed = false, saidOpen = false;
+  var settledGap = -1;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.winX = w * 0.14; L.winY = h * 0.24;
+    L.winW = w * 0.72; L.winH = h * 0.5;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    dragging = true;
+    lastX = ev.clientX;
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+    var d = ev.clientX - lastX;
+    lastX = ev.clientX;
+    gapT = Math.max(0, Math.min(1, gapT - d / (L.winW * 0.55)));
+  });
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    var g = gapT;
+    if (g <= 0.04 && settledGap !== 0) {
+      settledGap = 0;
+      if (!saidSealed) { saidSealed = true; say('拉严实也好。有的觉，需要全黑。'); }
+      else say('全黑。睡得更沉。');
+    } else if (g >= 0.85) {
+      settledGap = -2;
+      if (!saidOpen) { saidOpen = true; say('全开着也行。夜还长。'); }
+    } else {
+      if (settledGap !== 1) {
+        settledGap = 1;
+        if (!saidCrack) { saidCrack = true; say('就这条缝。明早的光知道从哪儿进来。', true); }
+        else say('这条缝，刚刚好。');
+      }
+    }
+  }
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 671.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    gap += (gapT - gap) * Math.min(1, dt * 8);
+
+    // ── 墙面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#131217');
+    bg.addColorStop(1, '#0c0b0f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 窗框 ──
+    var wx = L.winX, wy = L.winY, ww = L.winW, wh = L.winH;
+    ctx.fillStyle = '#1c1e26';
+    roundRect(wx - 14 * s, wy - 14 * s, ww + 28 * s, wh + 28 * s, 8 * s);
+    ctx.fill();
+
+    ctx.save();
+    roundRect(wx, wy, ww, wh, 4 * s);
+    ctx.clip();
+
+    // ── 窗外：深夜城市 ──
+    var sky = ctx.createLinearGradient(0, wy, 0, wy + wh);
+    sky.addColorStop(0, '#0e1420');
+    sky.addColorStop(0.7, '#131b26');
+    sky.addColorStop(1, '#1a2230');
+    ctx.fillStyle = sky;
+    ctx.fillRect(wx, wy, ww, wh);
+    // 星星几颗
+    for (var st = 0; st < 10; st++) {
+      var sx2 = wx + rnd(st) * ww;
+      var sy2 = wy + rnd(st + 40) * wh * 0.4;
+      var tw2 = 0.4 + 0.6 * Math.abs(Math.sin(now / 800 + st * 2));
+      ctx.fillStyle = 'rgba(210,220,240,' + 0.5 * tw2 + ')';
+      ctx.fillRect(sx2, sy2, 1.6, 1.6);
+    }
+    // 楼影
+    for (var b2 = 0; b2 < 7; b2++) {
+      var bw2 = ww * (0.10 + rnd(b2 + 3) * 0.12);
+      var bh2 = wh * (0.22 + rnd(b2 + 9) * 0.30);
+      var bx2 = wx + rnd(b2 + 15) * (ww - bw2);
+      var by2 = wy + wh - bh2;
+      ctx.fillStyle = '#171c27';
+      ctx.fillRect(bx2, by2, bw2, bh2);
+      // 亮窗
+      for (var wn = 0; wn < 4; wn++) {
+        if (rnd(b2 * 10 + wn) > 0.55) {
+          ctx.fillStyle = 'rgba(215,195,130,' + 0.25 + rnd(b2 + wn) * 0.25 + ')';
+          ctx.fillRect(bx2 + bw2 * (0.15 + rnd(b2 + wn + 5) * 0.6), by2 + bh2 * (0.12 + wn * 0.22), 4, 5);
+          ctx.fillStyle = '#171c27';
+        }
+      }
+    }
+    // 月（一角）
+    ctx.fillStyle = 'rgba(235,235,215,0.85)';
+    ctx.beginPath();
+    ctx.arc(wx + ww * 0.78, wy + wh * 0.16, 14 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0e1420';
+    ctx.beginPath();
+    ctx.arc(wx + ww * 0.78 - 9 * s, wy + wh * 0.16 - 5 * s, 12 * s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 缝里的光洒进房间（落在地板的光斑，随缝宽变化）──
+    var gapPx = gap * ww;
+    var crackW = Math.max(0, ww - gapPx * ww / ww - gapPx); // 占位
+    crackW = (1 - gap) * ww;                                // 被帘遮住的宽度决定…这里用缝宽
+    var seam = ww - (ww * (1 - 0) ) - gapPx;                // 简化：缝即 gapPx
+    // 两侧窗帘各遮 (ww - gapPx)/2
+    // 光从缝进来：只要 gap>0 且 gap<0.9
+    if (gap > 0.02 && gap < 0.92) {
+      var seamX = wx + ww / 2;              // 缝中心
+      var seamW2 = gapPx * 0.9;
+      var beam = ctx.createLinearGradient(0, wy, 0, wy + wh);
+      beam.addColorStop(0, 'rgba(210,220,245,' + 0.16 * (1 - gap) + ')');
+      beam.addColorStop(1, 'rgba(210,220,245,0)');
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(seamX - seamW2 / 2, wy);
+      ctx.lineTo(seamX + seamW2 / 2, wy);
+      ctx.lineTo(seamX + seamW2 / 2 + 30 * s, wy + wh);
+      ctx.lineTo(seamX - seamW2 / 2 - 30 * s, wy + wh);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 窗棂
+    ctx.fillStyle = '#1c1e26';
+    ctx.fillRect(wx + ww / 2 - 3 * s, wy, 6 * s, wh);
+    ctx.fillRect(wx, wy + wh / 2 - 3 * s, ww, 6 * s);
+
+    ctx.restore(); // 出窗 clip
+
+    // 缝光洒到地板（窗台下）
+    if (gap > 0.02 && gap < 0.92) {
+      var seamX2 = wx + ww / 2;
+      var fg2 = ctx.createLinearGradient(0, wy + wh, 0, h);
+      fg2.addColorStop(0, 'rgba(205,215,240,' + 0.10 * (1 - gap) + ')');
+      fg2.addColorStop(1, 'rgba(205,215,240,0)');
+      ctx.fillStyle = fg2;
+      ctx.beginPath();
+      ctx.moveTo(seamX2 - gapPx * 0.4, wy + wh);
+      ctx.lineTo(seamX2 + gapPx * 0.4, wy + wh);
+      ctx.lineTo(seamX2 + gapPx * 0.9 + 40 * s, h);
+      ctx.lineTo(seamX2 - gapPx * 0.9 - 40 * s, h);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── 窗帘（两片，从两侧向中间遮；全开时也堆在两侧可见）──
+    var cover = Math.max(64 * s, (1 - gap) * ww / 2);   // 每侧遮宽
+    drawCurtain(wx, wy, wh, cover, 1, now);    // 左帘（向右伸 cover）
+    drawCurtain(wx + ww - cover, wy, wh, cover, -1, now); // 右帘（向左伸 cover）
+
+    // 引导
+    if (gap > 0.95 && !dragging) {
+      ctx.fillStyle = 'rgba(160,168,185,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住窗帘，往中间拉', w / 2, wy + wh + 46 * s);
+    }
+  }
+
+  function drawCurtain(x, y, h, w, dir, now) {
+    if (w <= 0.5) return;
+    var s = L.s;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dir > 0 ? x : x, y - 10 * s, w, h + 20 * s);
+    ctx.clip();
+    // 帘布底色
+    var cg = ctx.createLinearGradient(x + (dir > 0 ? 0 : w), 0, x + (dir > 0 ? w : 0), 0);
+    cg.addColorStop(0, '#3a3244');
+    cg.addColorStop(1, '#241f30');
+    ctx.fillStyle = cg;
+    ctx.fillRect(x, y - 10 * s, w, h + 20 * s);
+    // 竖褶（波浪明暗）
+    for (var f = 0; f < w; f += 14 * s) {
+      var fa = 0.10 + rnd((x + f) | 0) * 0.08;
+      ctx.fillStyle = 'rgba(0,0,0,' + fa + ')';
+      ctx.fillRect(x + f, y - 10 * s, 7 * s, h + 20 * s);
+      ctx.fillStyle = 'rgba(190,180,210,' + fa * 0.4 + ')';
+      ctx.fillRect(x + f + 7 * s, y - 10 * s, 3 * s, h + 20 * s);
+    }
+    // 内缘（光边：缝侧微微透光）
+    var edgeX = dir > 0 ? x + w : x;
+    var eg = ctx.createLinearGradient(edgeX - dir * 16 * s, 0, edgeX, 0);
+    eg.addColorStop(0, 'rgba(220,225,245,0)');
+    eg.addColorStop(1, 'rgba(220,225,245,' + 0.22 * (0.6 + 0.4 * Math.sin(now / 600)) + ')');
+    ctx.fillStyle = eg;
+    ctx.fillRect(dir > 0 ? x + w - 16 * s : x, y - 10 * s, 16 * s, h + 20 * s);
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__curtain = {
+    gap: function () { return +gap.toFixed(2); },
+    gapT: function () { return +gapT.toFixed(2); },
+    dragging: function () { return dragging; },
+    dragTo: function (g) { gapT = Math.max(0, Math.min(1, g)); },
+    release: function () { dragging = true; endDrag(); }
+  };
+})();
+</script>
+</body>
+</html>

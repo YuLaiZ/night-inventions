@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜擦皮鞋</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e0d0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a08d62; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6b665c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #56524a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c675b;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c675b;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a08d62; border-color: #a08d62; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜擦皮鞋</h1>
+  <p>明天要走有光的路。<br>按住鞋面，画着圈擦——不急，一圈是一圈。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var rubbing = false;      // 按住鞋面擦
+  var angle = 0;            // 擦圈累计角度
+  var turns = 0;            // 圈数
+  var shine = 0;            // 光泽 0-1
+  var buf = [];             // 抛光浮尘
+  var shoeIdx = 0;          // 第几只（换色）
+  var fade = 0;             // 换鞋淡出/淡入
+  var swapping = false;
+  var saidHalf = false, saidDone = false;
+
+  var TONES = [
+    { base: '#6b4a2e', dark: '#452e1c', hi: '#c99b5f' },
+    { base: '#3a2f2c', dark: '#241c1a', hi: '#b09a88' },
+    { base: '#5c2f33', dark: '#3a1d20', hi: '#c7868c' }
+  ];
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 800, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w * 0.46;
+    L.cy = h * 0.56;
+    L.shoeL = 240 * s;   // 鞋长
+    L.shoeH = 78 * s;    // 鞋帮高
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function inShoe(x, y) {
+    var s = L.s;
+    var dx = (x - L.cx) / (L.shoeL * 0.62);
+    var dy = (y - L.cy + 16 * s) / (L.shoeH * 0.72);
+    return dx * dx + dy * dy <= 1.2;
+  }
+
+  var lastA = null;
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!inShoe(ev.clientX, ev.clientY) || swapping) return;
+    rubbing = true;
+    lastA = Math.atan2(ev.clientY - L.cy, ev.clientX - L.cx);
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!rubbing) return;
+    if (!inShoe(ev.clientX, ev.clientY)) return;
+    var a = Math.atan2(ev.clientY - L.cy, ev.clientX - L.cx);
+    var d = a - lastA;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    angle += d;
+    lastA = a;
+    feed(Math.abs(d));
+  });
+  window.addEventListener('pointerup', endRub);
+  window.addEventListener('pointercancel', endRub);
+  function endRub() {
+    rubbing = false;
+    lastA = null;
+    if (shine >= 1 && !saidDone) { saidDone = true; say('擦好了。明天走有光的路。', true); }
+    else if (shine > 0.35 && shine < 1 && !saidHalf && !saidDone) { saidHalf = true; say('有点意思了。再来两圈。'); }
+  }
+
+  function feed(d) {
+    turns += d / (Math.PI * 2);
+    if (rubbing) shine = Math.min(1, turns / 9);
+    if (Math.random() < d * 2) {
+      buf.push({
+        x: L.cx + (Math.random() - 0.3) * L.shoeL * 0.5,
+        y: L.cy - L.shoeH * 0.3 - Math.random() * 10,
+        vx: 20 + Math.random() * 30, vy: -30 - Math.random() * 40,
+        r: 0.8 + Math.random() * 1.6, a: 0.7
+      });
+    }
+  }
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 817.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 换鞋
+    if (shine >= 1 && !swapping) {
+      swapping = true;
+      setTimeout(function () {
+        fade = 0.0001;
+      }, 1600);
+    }
+    if (fade > 0) {
+      fade = Math.min(2, fade + dt * 1.4);
+      if (fade >= 2) {
+        shoeIdx++;
+        shine = 0; turns = 0; angle = 0;
+        saidHalf = false; saidDone = false;
+        swapping = false; fade = 0;
+      }
+    }
+
+    // 浮尘
+    for (var i = buf.length - 1; i >= 0; i--) {
+      var p = buf[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 26 * dt; p.a -= dt * 1.1;
+      if (p.a <= 0) buf.splice(i, 1);
+    }
+
+    // ── 背景 ──
+    var bg = ctx.createRadialGradient(L.cx, L.cy - 40 * s, 30, L.cx, L.cy, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#161310');
+    bg.addColorStop(1, '#0b0a08');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 报纸（垫鞋）
+    ctx.save();
+    ctx.translate(L.cx, L.cy + L.shoeH * 0.52);
+    ctx.rotate(-0.02);
+    ctx.fillStyle = '#b5ad98';
+    ctx.fillRect(-L.shoeL * 0.62, -8 * s, L.shoeL * 1.24, L.shoeH * 0.42);
+    ctx.fillStyle = 'rgba(90,84,70,0.35)';
+    for (var ln = 0; ln < 4; ln++) {
+      ctx.fillRect(-L.shoeL * 0.56, -2 * s + ln * 7 * s, L.shoeL * (0.7 + rnd(ln) * 0.4), 1.6);
+    }
+    ctx.restore();
+
+    // 鞋油罐（立在报纸上）
+    var tinX = L.cx + L.shoeL * 0.52, tinY = L.cy + L.shoeH * 0.52 - 4 * s;
+    ctx.fillStyle = '#2c3038';
+    roundRect(tinX, tinY - 30 * s, 46 * s, 30 * s, 5 * s);
+    ctx.fill();
+    ctx.fillStyle = '#c8b47e';
+    ctx.font = Math.round(9 * s) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('SHINE', tinX + 23 * s, tinY - 12 * s);
+
+    // ── 鞋 ──
+    var alpha = swapping && fade > 0 ? (fade < 1 ? 1 - fade : fade - 1) : 1;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    drawShoe(now);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    // 浮尘
+    for (var p2 = 0; p2 < buf.length; p2++) {
+      var pp = buf[p2];
+      ctx.fillStyle = 'rgba(200,190,160,' + pp.a + ')';
+      ctx.beginPath(); ctx.arc(pp.x, pp.y, pp.r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 引导
+    if (shine < 0.02 && !rubbing && !swapping) {
+      ctx.fillStyle = 'rgba(180,165,125,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住鞋面，画着圈擦', L.cx, L.cy + L.shoeH + 44 * s);
+    }
+  }
+
+  function drawShoe(now) {
+    var s = L.s;
+    var tone = TONES[shoeIdx % TONES.length];
+    var l = L.shoeL, hgt = L.shoeH;
+    var x0 = L.cx - l * 0.52, y0 = L.cy;
+    var kx = L.cx + l * 0.30, ky = L.cy - hgt * 0.55;  // 鞋帮顶（脚踝处）
+
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(L.cx, y0 + hgt * 0.42, l * 0.52, 9 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 鞋底
+    ctx.fillStyle = '#1a1512';
+    roundRect(x0 - 4 * s, y0 + hgt * 0.30, l + 8 * s, 16 * s, 7 * s);
+    ctx.fill();
+
+    // 鞋身（牛津鞋侧影：跟→踝口→鞋面斜坡→圆鞋头，鞋头朝右）
+    var shineF = shine;
+    var body = ctx.createLinearGradient(x0, y0 - hgt, x0 + l, y0 + hgt * 0.4);
+    body.addColorStop(0, mix(tone.dark, tone.hi, shineF * 0.28));
+    body.addColorStop(0.42, mix(tone.base, tone.hi, shineF * 0.35));
+    body.addColorStop(0.7, mix(tone.base, tone.dark, 0.25 + shineF * 0.1));
+    body.addColorStop(1, mix(tone.dark, '#000', 0.1));
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    var gy = y0 + hgt * 0.30;
+    ctx.moveTo(x0 + l * 0.03, gy);                                          // 跟底
+    ctx.quadraticCurveTo(x0 - 4 * s, y0 + hgt * 0.02, x0 + l * 0.05, y0 - hgt * 0.30); // 跟背急升
+    ctx.quadraticCurveTo(x0 + l * 0.11, y0 - hgt * 0.66, x0 + l * 0.24, y0 - hgt * 0.68); // 跟顶到踝后
+    ctx.quadraticCurveTo(x0 + l * 0.30, y0 - hgt * 0.52, x0 + l * 0.37, y0 - hgt * 0.60); // 踝口凹
+    ctx.quadraticCurveTo(x0 + l * 0.46, y0 - hgt * 0.50, x0 + l * 0.58, y0 - hgt * 0.34); // 鞋面斜坡
+    ctx.quadraticCurveTo(x0 + l * 0.80, y0 - hgt * 0.10, x0 + l * 0.94, y0 + hgt * 0.04); // 滑向鞋头
+    ctx.quadraticCurveTo(x0 + l * 1.03, y0 + hgt * 0.12, x0 + l * 0.99, y0 + hgt * 0.24); // 鞋头圆包
+    ctx.quadraticCurveTo(x0 + l * 0.97, gy, x0 + l * 0.90, gy);
+    ctx.lineTo(x0 + l * 0.03, gy);
+    ctx.closePath();
+    ctx.fill();
+
+    // 鞋面高光带（光泽核心：越擦越亮的斜贯高光）
+    if (shine > 0.03) {
+      var hi = ctx.createLinearGradient(x0 + l * 0.1, y0 - hgt * 0.5, x0 + l, y0);
+      hi.addColorStop(0, 'rgba(255,240,210,0)');
+      hi.addColorStop(0.4, 'rgba(255,240,210,' + 0.15 * shine + ')');
+      hi.addColorStop(0.6, 'rgba(255,240,210,' + 0.28 * shine + ')');
+      hi.addColorStop(1, 'rgba(255,240,210,0)');
+      ctx.fillStyle = hi;
+      ctx.beginPath();
+      ctx.moveTo(x0 + l * 0.30, y0 - hgt * 0.42);
+      ctx.quadraticCurveTo(x0 + l * 0.52, y0 - hgt * 0.34, x0 + l * 0.88, y0 - hgt * 0.02);
+      ctx.quadraticCurveTo(x0 + l * 0.55, y0 - hgt * 0.06, x0 + l * 0.30, y0 - hgt * 0.42);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // 镜面反光点（擦亮后随时间微闪）
+    if (shine > 0.5) {
+      var tw = 0.5 + 0.5 * Math.sin(now / 420);
+      ctx.fillStyle = 'rgba(255,248,225,' + 0.35 * shine * tw + ')';
+      ctx.beginPath();
+      ctx.ellipse(x0 + l * 0.62, y0 - hgt * 0.16, 16 * s * shine, 5 * s * shine, -0.24, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 鞋带（沿踝口前斜坡三道交叉）
+    ctx.strokeStyle = 'rgba(25,18,13,0.85)';
+    ctx.lineWidth = 2.4 * s;
+    for (var lc = 0; lc < 3; lc++) {
+      var lx = x0 + l * 0.375 + lc * l * 0.045;
+      var ly = y0 - hgt * 0.56 + lc * hgt * 0.10;
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(lx + l * 0.062, ly + hgt * 0.075);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(lx + l * 0.062, ly);
+      ctx.lineTo(lx, ly + hgt * 0.075);
+      ctx.stroke();
+    }
+    // 擦圈亮斑（跟随最近擦点方向）
+    if (rubbing) {
+      var spotA = angle * 3;
+      var sx = L.cx + Math.cos(spotA) * L.shoeL * 0.22;
+      var sy = L.cy - hgt * 0.1 + Math.sin(spotA) * hgt * 0.12;
+      var spot = ctx.createRadialGradient(sx, sy, 2, sx, sy, 34 * s);
+      spot.addColorStop(0, 'rgba(255,235,190,' + 0.20 + 0.10 * Math.sin(now / 90) + ')');
+      spot.addColorStop(1, 'rgba(255,235,190,0)');
+      ctx.fillStyle = spot;
+      ctx.beginPath(); ctx.arc(sx, sy, 34 * s, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function mix(c1, c2, t) {
+    var a = parseInt(c1.slice(1), 16), b = parseInt(c2.slice(1), 16);
+    var r = Math.round((a >> 16) + ((b >> 16) - (a >> 16)) * t);
+    var g = Math.round(((a >> 8) & 255) + (((b >> 8) & 255) - ((a >> 8) & 255)) * t);
+    var bl = Math.round((a & 255) + ((b & 255) - (a & 255)) * t);
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+  function easeOut(t) { return 1 - Math.pow(1 - t, 2.2); }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__shoe = {
+    shine: function () { return +shine.toFixed(2); },
+    turns: function () { return +turns.toFixed(1); },
+    rubbing: function () { return rubbing; },
+    shoe: function () { return shoeIdx; },
+    press: function () { rubbing = true; },
+    spin: function (d) { angle += d; feed(Math.abs(d)); },
+    release: endRub
+  };
+})();
+</script>
+</body>
+</html>

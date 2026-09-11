@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜晾伞</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0f1210;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #868b80;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8f9c7a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #676e60; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8b917c;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565b50;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6b705f;
+    text-decoration: none;
+    border-bottom: 1px dotted #6b705f;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8f9c7a; border-color: #8f9c7a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜晾伞</h1>
+  <p>淋了一路雨回来的那把伞。<br>点一下，把它撑开在玄关晾着。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var opened = false;      // 伞已撑开
+  var openT = 0;           // 开伞动画 0-1
+  var opening = false;
+  var drops = [];          // 水珠 {x,y,vy,state:hang|fall,r,stretch}
+  var ripples = [];        // 水渍涟漪 {x,y,r,a}
+  var puddle = 0;          // 地面水渍 0-1
+  var dripT = 0;           // 滴水生成计时
+  var saidDrip = false, saidDry = false;
+  var wet = 1;             // 伞面存水 0-1（随滴落减少）
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.floorY = h * 0.78;            // 地面线
+    L.umbX = w / 2; L.umbTipY = h * 0.30;  // 伞顶
+    L.umbLen = 150 * s;             // 伞骨长
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function hitUmbrella(x, y) {
+    var s = L.s;
+    var dx = x - L.umbX, dy = y - (L.umbTipY);
+    if (opened) {
+      // 撑开：命中伞面半圆区
+      return dy > -20 && dy < L.umbLen * 1.05 && Math.abs(dx) < L.umbLen * 1.1;
+    }
+    // 合拢：细长条（斜靠，伞尖在地面）
+    return Math.abs(dx) < 40 * s && dy < 14 * s && dy > -(L.umbLen * 2.1);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (hitUmbrella(ev.clientX, ev.clientY) && !opening) {
+      if (!opened) {
+        opened = true;
+        opening = true;
+        openT = 0.0001;
+        wet = 1;
+        puddle = 0.12;
+        say('滴滴答答。今天淋的雨，就留在这里吧。');
+      }
+    }
+  });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 913.7) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 开伞动画
+    if (opening) {
+      openT = Math.min(1, openT + dt / 0.9);
+      if (openT >= 1) opening = false;
+    }
+
+    // 滴水生成（撑开后，伞面存水越多滴得越密）
+    if (opened && openT >= 1 && wet > 0.01) {
+      dripT -= dt * (0.5 + wet * 1.6);
+      if (dripT <= 0) {
+        dripT = 1;
+        var side = Math.random() < 0.5 ? -1 : 1;
+        drops.push({
+          x: L.umbX + side * (0.55 + Math.random() * 0.42) * L.umbLen,
+          y: L.umbTipY + (0.55 + Math.random() * 0.4) * L.umbLen * 0.8,
+          vy: 6, state: 'fall', r: (1.4 + Math.random() * 1.8) * s, stretch: 0
+        });
+        wet = Math.max(0, wet - 0.012);
+      }
+    }
+    // 水珠下落
+    for (var i = drops.length - 1; i >= 0; i--) {
+      var d = drops[i];
+      d.vy += 560 * dt;
+      d.y += d.vy * dt;
+      if (d.y >= L.floorY) {
+        ripples.push({ x: d.x, y: L.floorY + rnd(i + (now | 0)) * 8 * s, r: 2, a: 0.55 });
+        puddle = Math.min(1, puddle + 0.018);
+        drops.splice(i, 1);
+      }
+    }
+    // 涟漪
+    for (var r = ripples.length - 1; r >= 0; r--) {
+      var rp = ripples[r];
+      rp.r += dt * 34;
+      rp.a -= dt * 0.6;
+      if (rp.a <= 0) ripples.splice(r, 1);
+    }
+    // 水渍蒸发
+    if (wet <= 0.01 && puddle > 0) puddle = Math.max(0, puddle - dt * 0.05);
+    if (opened && openT >= 1 && wet <= 0.01 && !saidDry && puddle < 0.15) {
+      saidDry = true;
+      say('晾干了。湿掉的心情也一起晾干了。', true);
+    }
+
+    // ── 背景：玄关 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#141913');
+    bg.addColorStop(1, '#0c0f0b');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙面微光（灯从上方来）
+    var glow = ctx.createRadialGradient(L.cx, L.umbTipY - 40 * s, 10, L.cx, h * 0.45, Math.max(w, h) * 0.7);
+    glow.addColorStop(0, 'rgba(220,230,180,0.09)');
+    glow.addColorStop(1, 'rgba(220,230,180,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+
+    // 地板（暖木色横带）
+    var floor = ctx.createLinearGradient(0, L.floorY, 0, h);
+    floor.addColorStop(0, '#241f16');
+    floor.addColorStop(1, '#181410');
+    ctx.fillStyle = floor;
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(200,210,160,' + 0.10 * (0.8 + 0.2 * Math.sin(now / 800)) + ')';
+    ctx.fillRect(0, L.floorY, w, 1.6);
+
+    // 地面水渍（伞下椭圆）
+    if (puddle > 0.01) {
+      var pw = L.umbLen * (0.5 + puddle * 0.75);
+      var ph = pw * 0.22;
+      var pg = ctx.createRadialGradient(L.umbX, L.floorY + 8 * s, 2, L.umbX, L.floorY + 8 * s, pw);
+      pg.addColorStop(0, 'rgba(150,190,205,' + 0.30 * puddle + ')');
+      pg.addColorStop(1, 'rgba(150,190,205,0)');
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.ellipse(L.umbX, L.floorY + 8 * s, pw, ph, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 水渍边缘微光
+      ctx.strokeStyle = 'rgba(190,225,235,' + 0.18 * puddle + ')';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(L.umbX, L.floorY + 8 * s, pw * 0.92, ph * 0.92, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 涟漪
+    for (var rp2 = 0; rp2 < ripples.length; rp2++) {
+      var rr = ripples[rp2];
+      ctx.strokeStyle = 'rgba(190,225,238,' + rr.a * 0.6 + ')';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.ellipse(rr.x, rr.y, rr.r, rr.r * 0.26, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ── 伞 ──
+    drawUmbrella(now);
+
+    // 水珠
+    for (var p = 0; p < drops.length; p++) {
+      var dp = drops[p];
+      ctx.fillStyle = 'rgba(185,220,235,0.85)';
+      ctx.beginPath();
+      ctx.ellipse(dp.x, dp.y, dp.r * 0.72, dp.r * (1 + Math.min(0.8, dp.vy / 400)), 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(235,250,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(dp.x - dp.r * 0.2, dp.y - dp.r * 0.3, dp.r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (!opened) {
+      ctx.fillStyle = 'rgba(160,175,140,' + (0.32 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下，把伞撑开', L.cx, L.floorY + 44 * s);
+    }
+  }
+
+  function drawUmbrella(now) {
+    var s = L.s, t = opened ? easeInOut(openT) : 0;
+    var tipX = L.umbX, tipY = L.umbTipY, len = L.umbLen;
+
+    // ── 合拢态：斜靠玄关，伞尖触地 ──
+    if (!opened) {
+      var lean = 0.3;
+      ctx.save();
+      ctx.translate(L.cx, L.floorY + 2 * s);   // 原点=伞尖（触地）
+      ctx.rotate(-lean);                        // 顶端向右上方斜靠
+      // 伞面（细长梭形，向上画）
+      var cg = ctx.createLinearGradient(-13 * s, 0, 13 * s, 0);
+      cg.addColorStop(0, '#3c4a40');
+      cg.addColorStop(0.5, '#54655a');
+      cg.addColorStop(1, '#313c34');
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(17 * s, -len * 1.25, 0, -len * 1.92);
+      ctx.quadraticCurveTo(-17 * s, -len * 1.25, 0, 0);
+      ctx.fill();
+      // 中缝缝线
+      ctx.strokeStyle = 'rgba(20,26,22,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -len * 0.2); ctx.lineTo(0, -len * 1.8); ctx.stroke();
+      // 束带
+      ctx.strokeStyle = '#242d27';
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath(); ctx.moveTo(-6 * s, -len * 0.9); ctx.lineTo(6 * s, -len * 0.94); ctx.stroke();
+      // 弯钩柄（顶部）
+      ctx.strokeStyle = '#4a3d2c';
+      ctx.lineWidth = 3.4 * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -2 * s);
+      ctx.lineTo(0, -len * 1.92 - 24 * s);
+      ctx.quadraticCurveTo(0, -len * 1.92 - 38 * s, 13 * s, -len * 1.92 - 38 * s);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.restore();
+      return;
+    }
+
+    // ── 撑开态（骨架插值）──
+    var RIBS = 7;
+    var tips = [];
+    for (var b = 0; b < RIBS; b++) {
+      var th = Math.PI * (0.14 + 0.72 * b / (RIBS - 1));  // 0..π 扇形（两端收拢防垂翼）
+      var tx = Math.cos(th) * len * t;
+      var ty = Math.sin(th) * len * 0.62 * t;             // 仰视压扁
+      tips.push({ x: tipX + tx, y: tipY + ty + (1 - t) * len * 0.9 });
+    }
+    // 伞布（骨尖连线+下垂弧）
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    var um = ctx.createLinearGradient(tipX, tipY, tipX, tipY + len * 0.75);
+    var damp = 0.25 + wet * 0.4;   // 湿伞颜色深
+    um.addColorStop(0, 'rgba(' + Math.round(96 * (1 - damp * 0.4)) + ',' + Math.round(116 * (1 - damp * 0.3)) + ',' + Math.round(98 * (1 - damp * 0.3)) + ',0.96)');
+    um.addColorStop(1, 'rgba(' + Math.round(64 * (1 - damp * 0.3)) + ',' + Math.round(80 * (1 - damp * 0.3)) + ',' + Math.round(66 * (1 - damp * 0.3)) + ',0.96)');
+    for (var k = 0; k < tips.length - 1; k++) {
+      var mx = (tips[k].x + tips[k + 1].x) / 2;
+      var my = (tips[k].y + tips[k + 1].y) / 2 + len * 0.16 * t;
+      ctx.quadraticCurveTo(mx, my, tips[k + 1].x, tips[k + 1].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = um;
+    ctx.fill();
+    // 伞面高光边
+    ctx.strokeStyle = 'rgba(210,230,200,' + 0.14 * (0.5 + t * 0.5) + ')';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(tips[0].x, tips[0].y);
+    for (var k2 = 0; k2 < tips.length - 1; k2++) {
+      var mx2 = (tips[k2].x + tips[k2 + 1].x) / 2;
+      var my2 = (tips[k2].y + tips[k2 + 1].y) / 2 + len * 0.16 * t;
+      ctx.quadraticCurveTo(mx2, my2, tips[k2 + 1].x, tips[k2 + 1].y);
+    }
+    ctx.stroke();
+    // 伞骨
+    ctx.strokeStyle = 'rgba(40,48,42,0.75)';
+    ctx.lineWidth = 1.5;
+    for (var b2 = 0; b2 < tips.length; b2++) {
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.quadraticCurveTo((tipX + tips[b2].x) / 2, (tipY + tips[b2].y) / 2 + 6 * s * t, tips[b2].x, tips[b2].y);
+      ctx.stroke();
+    }
+    // 伞顶
+    ctx.fillStyle = '#3a4438';
+    ctx.beginPath(); ctx.arc(tipX, tipY, 4.4 * s, 0, Math.PI * 2); ctx.fill();
+    // 伞杆+弯钩（杆底落在地面）
+    var poleEnd = L.floorY - 10 * s;
+    ctx.strokeStyle = '#4a3d2c';
+    ctx.lineWidth = 3.4 * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX, poleEnd);
+    ctx.quadraticCurveTo(tipX, L.floorY + 9 * s, tipX + 17 * s, L.floorY - 3 * s);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    // 开伞「嘭」的弹性圈
+    if (openT > 0.55 && openT < 1) {
+      var ringA = Math.sin((openT - 0.55) / 0.45 * Math.PI) * 0.3;
+      ctx.strokeStyle = 'rgba(220,235,210,' + ringA + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(tipX, tipY + len * 0.32, len * (0.6 + (openT - 0.55) * 1.4), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 湿伞面反光（存水时）
+    if (wet > 0.05 && openT >= 1) {
+      ctx.fillStyle = 'rgba(185,220,235,' + 0.10 * wet + ')';
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.quadraticCurveTo(tipX - len * 0.4, tipY + len * 0.42, tips[0].x + 6, tips[0].y);
+      ctx.quadraticCurveTo(tipX - len * 0.25, tipY + len * 0.3, tipX, tipY);
+      ctx.fill();
+    }
+  }
+
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__umb = {
+    open: function () {
+      if (!opened) {
+        opened = true; opening = true; openT = 0.0001; wet = 1; puddle = 0.12;
+        say('滴滴答答。今天淋的雨，就留在这里吧。');
+      }
+    },
+    isOpen: function () { return opened && openT >= 1; },
+    openT: function () { return +openT.toFixed(2); },
+    drops: function () { return drops.length; },
+    wet: function () { return +wet.toFixed(2); },
+    puddle: function () { return +puddle.toFixed(2); },
+    fastForward: function () { wet = 0.01; } // QA：跳过滴水等待
+  };
+})();
+</script>
+</body>
+</html>

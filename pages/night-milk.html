@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜热牛奶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #100e0c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89468; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89468; border-color: #a89468; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜热牛奶</h1>
+  <p>睡前一杯，温度刚刚好。<br>开门、放杯、等它转——叮。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 状态：door(门关着) → open1(已开门) → in炉(杯已放入) → running(加热中) → ding(叮) → done(杯在台面冒热气)
+  var phase = 'door';
+  var doorAnim = 0;        // 门开合动画 0=关 1=开
+  var doorTarget = 0;
+  var spin = 0;            // 转盘角度
+  var tLeft = 20;          // 倒计时（秒，演示时钟）
+  var heatT = 0;           // 加热进度真实计时
+  var dingT = 0;           // 叮的闪光
+  var steam = [];          // 热气 {x,y,r,vy,a,drift}
+  var mug = { x: 0, y: 0, tx: 0, ty: 0 };  // 杯子当前位置与目标（动画）
+  var saidDing = false;
+  var heated = false;      // 本轮已加热完成（ding 后杯可端出）
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 760, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.counterY = h * 0.66;                       // 台面线
+    // 微波炉位置（居中立于台面上）
+    L.mw = { x: L.cx - 190 * s, y: L.counterY - 240 * s, w: 380 * s, h: 240 * s };
+    L.mugX = L.cx + 260 * s;                     // 台面上杯子的家
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function mugHomeY() { return L.counterY - 44 * L.s; }
+  function mugInY() { return L.mw.y + L.mw.h - 66 * L.s; }
+  function mugInX() { return L.mw.x + L.mw.w * 0.42; }
+
+  // 命中检测（杯优先于门，否则炉内的杯永远点不到）
+  function hit(x, y) {
+    var s = L.s, m = L.mw;
+    if ((phase === 'open1' || phase === 'ding' || phase === 'done') &&
+        Math.abs(x - mug.x) < 40 * s && Math.abs(y - mug.y) < 50 * s) return 'mug';
+    // 门（炉窗区域）
+    if (x > m.x + 14 * s && x < m.x + m.w * 0.62 && y > m.y + 12 * s && y < m.y + m.h - 12 * s) return 'door';
+    // 启动钮
+    if (x > m.x + m.w * 0.68 && x < m.x + m.w - 16 * s && y > m.y + m.h * 0.42 && y < m.y + m.h * 0.62) return 'start';
+    return null;
+  }
+
+  function mugInOven() { return Math.abs(mug.x - mugInX()) < 2; }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var part = hit(ev.clientX, ev.clientY);
+    if (!part) return;
+    if (part === 'door') {
+      if (phase === 'door') { phase = 'open1'; doorTarget = 1; say('把牛奶放进转盘上。'); }
+      else if (phase === 'open1') {
+        if (mugInOven()) { doorTarget = 0; phase = 'ready'; say('关好了。按右边的启动。'); }
+        else say('先把牛奶放进去。');
+      }
+      else if (phase === 'ready') { phase = 'open1'; doorTarget = 1; say('门开着，按启动它不转。'); }
+      else if (phase === 'ding') { phase = 'open1'; doorTarget = 1; say('小心烫，端出来吧。'); }
+    } else if (part === 'start') {
+      if (phase === 'ready' && doorTarget === 0) {
+        phase = 'running';
+        heatT = 0; tLeft = 20;
+        say('转一圈，暖一寸。');
+      } else if (phase === 'open1' || (phase === 'ready' && doorTarget === 1)) {
+        say('门没关，转不动。');
+      }
+    } else if (part === 'mug') {
+      if (phase === 'open1' && !heated && Math.abs(mug.x - L.mugX) < 2) {
+        mug.tx = mugInX(); mug.ty = mugInY();
+        setTimeout(function () { if (phase === 'open1') say('点一下门，关上。'); }, 600);
+      } else if (heated && mugInOven() && (phase === 'ding' || phase === 'open1')) {
+        mug.tx = L.mugX; mug.ty = mugHomeY();
+        setTimeout(function () {
+          if (phase === 'open1' && !saidDing) {
+            saidDing = true;
+            phase = 'done';
+            say('双手捧着，慢慢喝。今晚很好睡。', true);
+          }
+        }, 700);
+      } else if (phase === 'open1' && mugInOven()) {
+        say('点一下门，关上。');
+      }
+    }
+  });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 711.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 门动画
+    doorAnim += (doorTarget - doorAnim) * Math.min(1, dt * 7);
+
+    // 加热
+    if (phase === 'running') {
+      heatT += dt;
+      spin += dt * 2.4;
+      tLeft = Math.max(0, 20 - heatT * 3.2);   // 20 秒读数约 6 秒转完
+      if (heatT >= 6.25) {
+        phase = 'ding';
+        heated = true;
+        dingT = 1;
+        tLeft = 0;
+        say('叮——好了。');
+      }
+    }
+    if (dingT > 0) dingT = Math.max(0, dingT - dt * 0.8);
+
+    // 杯子移动
+    mug.x += (mug.tx - mug.x) * Math.min(1, dt * 6);
+    mug.y += (mug.ty - mug.y) * Math.min(1, dt * 6);
+
+    // 热气（done 且杯在台面）
+    if (phase === 'done' && Math.abs(mug.x - L.mugX) < 30 && Math.random() < dt * 5) {
+      steam.push({ x: mug.x + (Math.random() - 0.5) * 14 * s, y: mug.y - 42 * s, r: 4 + Math.random() * 5, vy: 26 + Math.random() * 18, a: 0.5, drift: (Math.random() - 0.5) * 12 });
+    }
+    for (var i = steam.length - 1; i >= 0; i--) {
+      var st = steam[i];
+      st.y -= st.vy * dt; st.x += st.drift * dt; st.r += dt * 5; st.a -= dt * 0.22;
+      if (st.a <= 0) steam.splice(i, 1);
+    }
+
+    // ── 背景：深夜厨房 ──
+    var bg = ctx.createRadialGradient(L.cx, h * 0.4, 40, L.cx, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#17140f');
+    bg.addColorStop(1, '#0d0b09');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 台面
+    var counter = ctx.createLinearGradient(0, L.counterY, 0, h);
+    counter.addColorStop(0, '#28221a');
+    counter.addColorStop(1, '#1a1611');
+    ctx.fillStyle = counter;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(220,190,130,' + 0.10 * (0.85 + 0.15 * Math.sin(now / 810)) + ')';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 微波炉 ──
+    drawMicrowave(now);
+
+    // ── 台面上的杯（不在炉内时）──
+    if (!(Math.abs(mug.x - mugInX()) < 2 && doorAnim < 0.9)) {
+      drawMug(mug.x, mug.y, phase === 'done' || phase === 'ding' ? 1 : 0, now);
+    }
+
+    // 热气
+    for (var p = 0; p < steam.length; p++) {
+      var sp = steam[p];
+      ctx.fillStyle = 'rgba(235,240,245,' + sp.a * 0.4 + ')';
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导：flash 一下当前可点物（运行中除外）
+    if (phase === 'door') pulseText('点一下炉门', L.mw.x + L.mw.w * 0.38, L.mw.y + L.mw.h + 30 * s, now);
+    if (phase === 'open1' && Math.abs(mug.x - L.mugX) < 2) pulseText('点杯子，放进炉里', mug.x, mug.y + 56 * s, now);
+    if (phase === 'ready') pulseText('按启动', L.mw.x + L.mw.w * 0.84, L.mw.y + L.mw.h + 30 * s, now);
+    if (phase === 'ding') pulseText('点门开炉，把杯端出来', L.cx, L.mw.y + L.mw.h + 30 * s, now);
+  }
+
+  function pulseText(txt, x, y, now) {
+    ctx.fillStyle = 'rgba(200,180,130,' + (0.32 + 0.2 * Math.sin(now / 480)) + ')';
+    ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, x, y);
+  }
+
+  function drawMicrowave(now) {
+    var m = L.mw, s = L.s;
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(m.x + 6 * s, m.y + 8 * s, m.w, m.h);
+    // 机身
+    var body = ctx.createLinearGradient(0, m.y, 0, m.y + m.h);
+    body.addColorStop(0, '#3a3d42');
+    body.addColorStop(1, '#26282c');
+    ctx.fillStyle = body;
+    roundRect(m.x, m.y, m.w, m.h, 12 * s);
+    ctx.fill();
+    // 顶部高光
+    ctx.fillStyle = 'rgba(230,225,210,0.08)';
+    roundRect(m.x + 4 * s, m.y + 3 * s, m.w - 8 * s, 8 * s, 5 * s);
+    ctx.fill();
+
+    // ── 炉窗（左 62%）──
+    var winX = m.x + 14 * s, winY = m.y + 12 * s;
+    var winW = m.w * 0.62 - 20 * s, winH = m.h - 24 * s;
+    ctx.save();
+    roundRect(winX, winY, winW, winH, 8 * s);
+    ctx.clip();
+    // 门开着：门体旋到左侧（画一扇薄门板在窗左外侧）
+    if (doorAnim > 0.05) {
+      var doorW = winW * (1 - doorAnim * 0.92);
+      // 内腔
+      var cav = ctx.createLinearGradient(0, winY, 0, winY + winH);
+      var lit = phase === 'running' ? 1 : 0;
+      cav.addColorStop(0, lit ? '#4a3d22' : '#202226');
+      cav.addColorStop(1, lit ? '#332a18' : '#17191d');
+      ctx.fillStyle = cav;
+      ctx.fillRect(winX, winY, winW, winH);
+      // 加热暖光
+      if (lit) {
+        var glow = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 4, winX + winW / 2, winY + winH / 2, winW * 0.7);
+        glow.addColorStop(0, 'rgba(255,210,120,' + 0.28 + 0.05 * Math.sin(now / 130) + ')');
+        glow.addColorStop(1, 'rgba(255,210,120,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(winX, winY, winW, winH);
+      }
+      // 转盘
+      var plateY = winY + winH - 26 * s;
+      ctx.strokeStyle = 'rgba(180,190,200,0.35)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.ellipse(winX + winW / 2, plateY, winW * 0.34, 13 * s, 0, 0, Math.PI * 2); ctx.stroke();
+      // 转盘上的杯（炉内）
+      if (Math.abs(mug.x - mugInX()) < 40 * s) {
+        var ang = spin;
+        var cupX = winX + winW / 2 + Math.cos(ang) * winW * 0.16;
+        var cupOff = Math.sin(ang) * 6 * s;
+        drawMug(cupX, plateY - 24 * s + cupOff, phase === 'running' || phase === 'ding' ? (phase === 'ding' ? 0.7 : 0.25) : 0, now, true);
+      }
+      // 门板（开时滑向左侧变薄）
+      if (doorAnim < 0.98) {
+        ctx.fillStyle = '#33363b';
+        ctx.fillRect(winX - 2 * s, winY, Math.max(6 * s, doorW), winH);
+        ctx.fillStyle = 'rgba(190,215,230,0.06)';
+        ctx.fillRect(winX - 2 * s, winY, Math.max(6 * s, doorW), winH);
+      }
+    } else {
+      // 门关着：深色反光玻璃
+      var gdoor = ctx.createLinearGradient(winX, winY, winX + winW, winY + winH);
+      gdoor.addColorStop(0, '#2c3238');
+      gdoor.addColorStop(0.5, '#252a30');
+      gdoor.addColorStop(1, '#1e2228');
+      ctx.fillStyle = gdoor;
+      ctx.fillRect(winX, winY, winW, winH);
+      // 玻璃斜反光
+      ctx.fillStyle = 'rgba(190,220,235,0.05)';
+      ctx.beginPath();
+      ctx.moveTo(winX, winY + winH * 0.7);
+      ctx.lineTo(winX + winW * 0.55, winY);
+      ctx.lineTo(winX + winW * 0.8, winY);
+      ctx.lineTo(winX + winW * 0.25, winY + winH);
+      ctx.lineTo(winX, winY + winH);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+    // 窗框
+    ctx.strokeStyle = 'rgba(200,205,215,0.18)';
+    ctx.lineWidth = 1.4;
+    roundRect(winX, winY, winW, winH, 8 * s);
+    ctx.stroke();
+
+    // ── 控制板（右侧）──
+    var panX = m.x + m.w * 0.66;
+    // 数字屏
+    var dispY = m.y + 22 * s;
+    ctx.fillStyle = '#14171a';
+    roundRect(panX, dispY, m.x + m.w - 16 * s - panX, 44 * s, 6 * s);
+    ctx.fill();
+    ctx.fillStyle = phase === 'running' ? 'rgba(255,196,120,0.95)' : 'rgba(255,196,120,0.35)';
+    ctx.font = Math.round(24 * s) + 'px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    var shown = phase === 'running' ? ('0:' + (tLeft < 10 ? '0' : '') + Math.ceil(tLeft)) : '0:20';
+    if (phase === 'ding' || phase === 'done' || phase === 'open1') shown = '0:00';
+    ctx.fillText(shown, panX + (m.x + m.w - 16 * s - panX) / 2, dispY + 22 * s);
+    ctx.textBaseline = 'alphabetic';
+    // 启动钮
+    var btnY = m.y + m.h * 0.42;
+    var btnH = m.h * 0.2;
+    var pressed = phase === 'running';
+    var bgrad = ctx.createLinearGradient(0, btnY, 0, btnY + btnH);
+    bgrad.addColorStop(0, pressed ? '#8a6f35' : '#a89468');
+    bgrad.addColorStop(1, pressed ? '#6e5728' : '#877548');
+    ctx.fillStyle = bgrad;
+    roundRect(panX, btnY, m.x + m.w - 16 * s - panX, btnH, 7 * s);
+    ctx.fill();
+    ctx.fillStyle = '#191510';
+    ctx.font = Math.round(12 * s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(pressed ? '转动中' : '启动', panX + (m.x + m.w - 16 * s - panX) / 2, btnY + btnH / 2 + 4 * s);
+    // 散热格栅
+    ctx.strokeStyle = 'rgba(200,205,215,0.10)';
+    ctx.lineWidth = 1.2;
+    for (var g = 0; g < 4; g++) {
+      var gy2 = m.y + m.h * 0.72 + g * 8 * s;
+      ctx.beginPath();
+      ctx.moveTo(panX + 4 * s, gy2);
+      ctx.lineTo(m.x + m.w - 20 * s, gy2);
+      ctx.stroke();
+    }
+
+    // 叮闪光
+    if (dingT > 0) {
+      ctx.fillStyle = 'rgba(255,225,160,' + dingT * 0.14 + ')';
+      ctx.fillRect(0, 0, L.w, L.h);
+      ctx.fillStyle = 'rgba(255,225,160,' + Math.min(1, dingT * 1.6) + ')';
+      ctx.font = 'bold ' + Math.round(30 * s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('叮！', L.mw.x + L.mw.w / 2, L.mw.y - 18 * s);
+    }
+  }
+
+  function drawMug(x, y, hot, now, inOven) {
+    var s = L.s;
+    var mw = 34 * s, mh = 42 * s;
+    // 影
+    if (!inOven) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(x, y + mh / 2 + 3 * s, mw * 0.8, 5 * s, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // 杯身
+    var mug = ctx.createLinearGradient(x - mw / 2, 0, x + mw / 2, 0);
+    mug.addColorStop(0, '#c9c2b4');
+    mug.addColorStop(0.5, '#e8e2d4');
+    mug.addColorStop(1, '#b0a898');
+    ctx.fillStyle = mug;
+    roundRect(x - mw / 2, y - mh / 2, mw, mh, 7 * s);
+    ctx.fill();
+    // 杯口牛奶面
+    ctx.fillStyle = hot > 0.3 ? '#f2e8cf' : '#f4efe2';
+    ctx.beginPath();
+    ctx.ellipse(x, y - mh / 2 + 4 * s, mw / 2 - 4 * s, 5 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 把手
+    ctx.strokeStyle = '#c9c2b4';
+    ctx.lineWidth = 5 * s;
+    ctx.beginPath();
+    ctx.arc(x + mw / 2 + 6 * s, y, 11 * s, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    // 热标（炉内加热时杯身微暖光）
+    if (hot > 0) {
+      ctx.fillStyle = 'rgba(255,205,130,' + 0.12 * hot + ')';
+      roundRect(x - mw / 2, y - mh / 2, mw, mh, 7 * s);
+      ctx.fill();
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 初始化杯位
+  mug.x = mug.tx = L.mugX;
+  mug.y = mug.ty = mugHomeY();
+
+  // QA 钩子（无私人信息）
+  window.__milk = {
+    phase: function () { return phase; },
+    door: function () { return +doorAnim.toFixed(2); },
+    t: function () { return +tLeft.toFixed(1); },
+    mugAt: function () { return Math.abs(mug.x - L.mugX) < 2 ? 'counter' : (Math.abs(mug.x - mugInX()) < 2 ? 'oven' : 'moving'); },
+    tap: function (part) {
+      var x, y;
+      if (part === 'door') { x = L.mw.x + L.mw.w * 0.3; y = L.mw.y + L.mw.h * 0.5; }
+      else if (part === 'start') { x = L.mw.x + L.mw.w * 0.84; y = L.mw.y + L.mw.h * 0.5; }
+      else { x = mug.x; y = mug.y; }
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, bubbles: true }));
+    }
+  };
+})();
+</script>
+</body>
+</html>

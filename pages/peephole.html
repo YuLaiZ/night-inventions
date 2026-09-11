@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/favicon.ico">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜猫眼</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e0c0a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a847a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #9a8a68; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e685e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #918873;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57524a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d6759;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d6759;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9a8a68; border-color: #9a8a68; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜猫眼</h1>
+  <p>楼道里好像有点动静。<br>按住猫眼看一眼——不放心的话，多看几次也行。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var looking = false;      // 按住猫眼中
+  var looks = 0;            // 已看的次数
+  var zoom = 0;             // 凑近动画 0-1
+  var saidOnce = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    L.w = w; L.h = h;
+    L.cx = w / 2;
+    L.cy = h * 0.52;
+    L.eyeR = Math.min(w, h) * 0.085;
+    L.viewR = Math.min(w, h) * 0.34;   // 凑近后视野圆
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function inEye(x, y) {
+    var dx = x - L.cx, dy = y - L.cy;
+    var r = L.eyeR * (1 + zoom * (L.viewR / L.eyeR - 1));
+    return dx * dx + dy * dy < r * r * 1.44;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!inEye(ev.clientX, ev.clientY)) return;
+    looking = true;
+  });
+  window.addEventListener('pointerup', endLook);
+  window.addEventListener('pointercancel', endLook);
+  function endLook() {
+    if (looking && zoom > 0.6) {
+      looks++;
+      if (looks === 1) say('没人。是夜风在吹楼道的窗。');
+      else if (looks === 3) say('走廊尽头的安全出口牌，绿得很安心。');
+      else if (looks === 5) say('深夜的门后什么都没有。可以放心睡了。', true);
+    }
+    looking = false;
+  }
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 313.7) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    var target = looking ? 1 : 0;
+    zoom += (target - zoom) * Math.min(1, dt * 5);
+
+    // ── 门外视图（凑近后）：先画到当前画布中央圆内 ──
+    var bg = ctx.createRadialGradient(L.cx, L.cy, 20, L.cx, L.cy, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#171310');
+    bg.addColorStop(1, '#0b0908');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    if (zoom > 0.01) drawCorridor(now);
+
+    // ── 门（退远时的本体）──
+    if (zoom < 0.99) drawDoor(now);
+
+    // 引导
+    if (zoom < 0.1) {
+      ctx.fillStyle = 'rgba(180,165,130,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住猫眼，凑近看一眼', L.cx, L.cy + L.eyeR + 44);
+    }
+  }
+
+  // ── 门本体 ──
+  function drawDoor(now) {
+    var w = L.w, h = L.h, s = Math.min(w, h) / 900;
+    var alpha = 1 - zoom;
+    var dw = 300 * s * (1 + 0.06 * alpha), dh = 460 * s * (1 + 0.06 * alpha);
+    var dx = L.cx - dw / 2, dy = L.cy + L.eyeR * 1.2 - dh * 0.42;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 门板
+    var door = ctx.createLinearGradient(dx, dy, dx + dw, dy + dh);
+    door.addColorStop(0, '#4a3a2c');
+    door.addColorStop(0.5, '#3c2f24');
+    door.addColorStop(1, '#2e241b');
+    ctx.fillStyle = door;
+    roundRect(dx, dy, dw, dh, 8 * s);
+    ctx.fill();
+    // 门板凹槽造型
+    ctx.strokeStyle = 'rgba(20,14,10,0.5)';
+    ctx.lineWidth = 2 * s;
+    roundRect(dx + 22 * s, dy + 22 * s, dw - 44 * s, dh * 0.36, 4 * s);
+    ctx.stroke();
+    roundRect(dx + 22 * s, dy + dh * 0.44, dw - 44 * s, dh * 0.5, 4 * s);
+    ctx.stroke();
+    // 门把（右侧边缘）
+    ctx.fillStyle = '#8a7550';
+    roundRect(dx + dw - 20 * s, dy + dh * 0.5, 22 * s, 9 * s, 4 * s);
+    ctx.fill();
+    // 猫眼（铜圈+玻璃）
+    var ex = L.cx, ey = dy + dh * 0.34;
+    var ring = ctx.createRadialGradient(ex - 3 * s, ey - 3 * s, 2, ex, ey, L.eyeR);
+    ring.addColorStop(0, '#d9b878');
+    ring.addColorStop(0.6, '#9a7c46');
+    ring.addColorStop(1, '#5f4a28');
+    ctx.fillStyle = ring;
+    ctx.beginPath(); ctx.arc(ex, ey, L.eyeR, 0, Math.PI * 2); ctx.fill();
+    // 猫眼玻璃（深，透一点门外的光）
+    ctx.fillStyle = 'rgba(30,38,42,0.9)';
+    ctx.beginPath(); ctx.arc(ex, ey, L.eyeR * 0.62, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(160,190,200,' + (0.10 + 0.06 * Math.sin(now / 640)) + ')';
+    ctx.beginPath(); ctx.arc(ex - L.eyeR * 0.15, ey - L.eyeR * 0.15, L.eyeR * 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ── 鱼眼走廊（猫眼内）──
+  function drawCorridor(now) {
+    var w = L.w, h = L.h;
+    var R = L.eyeR + (L.viewR - L.eyeR) * easeInOut(zoom);
+    var sway = Math.sin(now / 900) * 5 * zoom;      // 凑近的轻微晃动
+    var breathe = Math.sin(now / 1100) * 0.012 * zoom; // 呼吸缩放
+    var cx = L.cx + sway, cy = L.cy + Math.sin(now / 700) * 3 * zoom;
+    var r = R * (1 + breathe);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+
+    // 走廊底色（一点透视：天花板/对面墙/地面/侧墙分面）
+    var vpX = cx + sway * 0.4, vpY = cy + r * 0.02;   // 消失点
+    var wall = ctx.createLinearGradient(0, cy - r, 0, cy + r);
+    wall.addColorStop(0, '#262a24');
+    wall.addColorStop(0.5, '#3b4036');
+    wall.addColorStop(1, '#1f231d');
+    ctx.fillStyle = wall;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+    var halfW = 0.13 * r;          // 对面墙半宽
+    var topY = vpY - 0.06 * r;     // 对面墙上缘
+    var botY = vpY + 0.10 * r;     // 对面墙下缘（地面线）
+    // 天花板
+    ctx.fillStyle = '#22261f';
+    ctx.beginPath();
+    ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy - r);
+    ctx.lineTo(vpX + halfW, topY); ctx.lineTo(vpX - halfW, topY);
+    ctx.closePath(); ctx.fill();
+    // 地面（略反光）
+    ctx.fillStyle = '#2c3029';
+    ctx.beginPath();
+    ctx.moveTo(cx - r, cy + r); ctx.lineTo(cx + r, cy + r);
+    ctx.lineTo(vpX + halfW, botY); ctx.lineTo(vpX - halfW, botY);
+    ctx.closePath(); ctx.fill();
+    // 地面中央反光带
+    var floorRef = ctx.createLinearGradient(0, botY, 0, cy + r);
+    floorRef.addColorStop(0, 'rgba(215,225,200,' + 0.10 * zoom + ')');
+    floorRef.addColorStop(1, 'rgba(215,225,200,0)');
+    ctx.fillStyle = floorRef;
+    ctx.beginPath();
+    ctx.moveTo(vpX - halfW * 0.5, botY); ctx.lineTo(vpX + halfW * 0.5, botY);
+    ctx.lineTo(cx + r * 0.35, cy + r); ctx.lineTo(cx - r * 0.35, cy + r);
+    ctx.closePath(); ctx.fill();
+    // 对面墙（稍亮）
+    ctx.fillStyle = '#434840';
+    ctx.fillRect(vpX - halfW, topY, halfW * 2, botY - topY);
+    // 对面墙上的住户门（暗框）
+    var dW2 = halfW * 1.0, dH2 = (botY - topY) * 0.78;
+    ctx.fillStyle = 'rgba(24,28,24,0.75)';
+    ctx.fillRect(vpX - dW2 / 2 + halfW * 0.45, botY - dH2, dW2 * 0.55, dH2);
+    // 侧墙缝（左右各两条，从画幅边到对面墙角）
+    ctx.strokeStyle = 'rgba(14,17,13,' + 0.45 * zoom + ')';
+    ctx.lineWidth = 1.6;
+    for (var ln = 0; ln < 2; ln++) {
+      var lt2 = 0.35 + ln * 0.32;   // 沿深度 0=近 1=远
+      var seamY = cy + r * (0.16 - lt2 * 0.14);
+      var edgeX = cx + r * (1.05 - lt2 * 0.9);
+      ctx.beginPath();
+      ctx.moveTo(cx - edgeX, seamY + r * 0.1);
+      ctx.lineTo(vpX - halfW, botY - (botY - topY) * lt2 * 0.2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx + edgeX, seamY + r * 0.1);
+      ctx.lineTo(vpX + halfW, botY - (botY - topY) * lt2 * 0.2);
+      ctx.stroke();
+    }
+
+    // 灯管（两盏，近亮远暗，老灯管偶尔闪）
+    var flick = 1;
+    if (rnd(Math.floor(now / 120)) > 0.96) flick = 0.35 + rnd(Math.floor(now / 37)) * 0.4;
+    for (var li = 0; li < 2; li++) {
+      var lt = 0.22 + li * 0.36;
+      var lx = vpX + (cx - vpX) * (1 - lt) * 0.86;
+      var ly = vpY - (vpY - (cy - r * 0.62)) * (1 - lt) + 4;
+      var lw = r * 0.46 * (1 - lt * 0.5);
+      var lampG = ctx.createRadialGradient(lx, ly, 2, lx, ly, lw * 1.5);
+      lampG.addColorStop(0, 'rgba(235,240,215,' + (0.42 - li * 0.15) * flick * zoom + ')');
+      lampG.addColorStop(1, 'rgba(235,240,215,0)');
+      ctx.fillStyle = lampG;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.fillStyle = 'rgba(240,245,225,' + 0.85 * flick + ')';
+      roundRect(lx - lw * 0.3, ly - 3, lw * 0.6, 5 * zoom + 1, 3);
+      ctx.fill();
+    }
+
+    // 尽头：安全出口牌（绿色微光）
+    var exX = vpX, exY = topY - 2;
+    var exW = halfW * 0.9, exH = (botY - topY) * 0.34;
+    var exitGlow = ctx.createRadialGradient(exX, exY, 1, exX, exY, r * 0.5);
+    exitGlow.addColorStop(0, 'rgba(90,220,150,' + 0.30 * zoom * flick + ')');
+    exitGlow.addColorStop(1, 'rgba(90,220,150,0)');
+    ctx.fillStyle = exitGlow;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.fillStyle = 'rgba(30,90,55,' + 0.85 * zoom + ')';
+    roundRect(exX - exW / 2, exY - exH / 2, exW, exH, 3);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(160,255,200,' + 0.8 * zoom * flick + ')';
+    ctx.font = Math.round(exH * 0.52) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('EXIT', exX, exY + exH * 0.18);
+
+    // 地面反光（湿感长廊）
+    var fl = ctx.createLinearGradient(0, cy, 0, cy + r);
+    fl.addColorStop(0, 'rgba(200,210,190,' + 0.06 * zoom + ')');
+    fl.addColorStop(1, 'rgba(200,210,190,0)');
+    ctx.fillStyle = fl;
+    ctx.fillRect(cx - r, cy, r * 2, r);
+
+    // 鱼眼暗角（环形渐晕，越靠边越暗）
+    var vig = ctx.createRadialGradient(cx, cy, r * 0.55, cx, cy, r);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,' + 0.75 * zoom + ')');
+    ctx.fillStyle = vig;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+    ctx.restore();
+
+    // 猫眼金属环（覆盖在视野圆上）
+    var ringW = (L.eyeR - L.eyeR * 0.55) * (1 - zoom * 0.4) + 2;
+    var ring = ctx.createRadialGradient(cx - ringW * 0.2, cy - ringW * 0.2, 2, cx, cy, r);
+    ring.addColorStop(0, 'rgba(215,185,120,0.9)');
+    ring.addColorStop(0.7, 'rgba(150,120,70,0.9)');
+    ring.addColorStop(1, 'rgba(90,70,40,0.9)');
+    ctx.strokeStyle = ring;
+    ctx.lineWidth = ringW;
+    ctx.beginPath(); ctx.arc(cx, cy, r - ringW / 2, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__eye = {
+    view: function () { return zoom > 0.5 ? 'peephole' : 'door'; },
+    zoom: function () { return +zoom.toFixed(2); },
+    looks: function () { return looks; },
+    press: function () { looking = true; },
+    release: endLook
+  };
+})();
+</script>
+</body>
+</html>

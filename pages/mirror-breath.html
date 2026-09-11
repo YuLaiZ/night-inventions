@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜的镜子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c1014;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7f8a92;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7c96a4; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #626e78; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #7d8b93;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #525c64;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #66707a;
+    text-decoration: none;
+    border-bottom: 1px dotted #66707a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7c96a4; border-color: #7c96a4; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜的镜子</h1>
+  <p>刷完牙，困得睁不开眼。<br>对着镜子呵口气，画个笑脸，给明早的自己。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var fog = 0;              // 镜面雾量 0-1
+  var breathing = false;    // 按住呵气中
+  var breathPt = { x: 0, y: 0 };
+  var strokes = [];         // 画痕 {pts:[{x,y}], done}
+  var curStroke = null;
+  var drawLen = 0;          // 本轮画痕累计长度（归一化）
+  var drewFinal = false;    // 已画完一轮
+  var clearedOnce = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.6, Math.min(1, Math.min(w / 780, h / 860)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2; L.cy = h * 0.52;
+    L.R = 168 * s;                       // 镜面半径
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function inMirror(x, y) {
+    var dx = x - L.cx, dy = y - L.cy;
+    return dx * dx + dy * dy < (L.R + 8 * L.s) * (L.R + 8 * L.s);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!inMirror(ev.clientX, ev.clientY)) return;
+    breathing = true;
+    breathPt = { x: ev.clientX, y: ev.clientY };
+    curStroke = null;
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!breathing || fog < 0.45) return;
+    if (!inMirror(ev.clientX, ev.clientY)) return;
+    if (!curStroke) {
+      // 呵气够量后开始画
+      curStroke = { pts: [{ x: ev.clientX, y: ev.clientY }] };
+      strokes.push(curStroke);
+    } else {
+      var lastPt = curStroke.pts[curStroke.pts.length - 1];
+      var dx = ev.clientX - lastPt.x, dy = ev.clientY - lastPt.y;
+      if (dx * dx + dy * dy > 16) {
+        curStroke.pts.push({ x: ev.clientX, y: ev.clientY });
+        drawLen += Math.sqrt(dx * dx + dy * dy) / (L.R * 2);
+      }
+    }
+  });
+  window.addEventListener('pointerup', endTouch);
+  window.addEventListener('pointercancel', endTouch);
+  function endTouch() {
+    breathing = false;
+    if (curStroke && !drewFinal) {
+      drewFinal = true;
+      say('雾会散，笑会留。晚安。');
+    }
+    curStroke = null;
+  }
+
+  // 伪随机（固定序）颗粒
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 雾量：呵气涨、静置缓退
+    if (breathing) fog = Math.min(1, fog + dt * 0.4);
+    else fog = Math.max(0, fog - dt * (drewFinal ? 0.07 : 0.012));
+    if (fog <= 0.02 && !breathing) {
+      // 全散：新的一轮
+      if (strokes.length > 0) {
+        strokes = [];
+        drawLen = 0;
+        drewFinal = false;
+        if (!clearedOnce) { clearedOnce = true; say('镜面记性不好。没关系，你记住了。', true); }
+      }
+    }
+
+    // ── 背景：暗浴室 ──
+    var bg = ctx.createRadialGradient(w / 2, h * 0.4, 40, w / 2, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#131a20');
+    bg.addColorStop(1, '#0a0e12');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 洗手台边沿（底部）──
+    var counterY = h * 0.86;
+    ctx.fillStyle = '#1a2228';
+    ctx.fillRect(0, counterY, w, h - counterY);
+    ctx.fillStyle = 'rgba(160,200,220,0.10)';
+    ctx.fillRect(0, counterY, w, 2);
+    // 水龙头剪影
+    ctx.strokeStyle = '#2b363f';
+    ctx.lineWidth = 7 * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    var fx = L.cx + L.R * 0.72;
+    ctx.moveTo(fx, counterY + 2);
+    ctx.lineTo(fx, counterY - 34 * s);
+    ctx.quadraticCurveTo(fx + 4 * s, counterY - 52 * s, fx - 26 * s, counterY - 50 * s);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+
+    // ── 镜面 ──
+    var cx = L.cx, cy = L.cy, R = L.R;
+    // 镜框（金属双环）
+    ctx.strokeStyle = '#3a4750';
+    ctx.lineWidth = 10 * s;
+    ctx.beginPath(); ctx.arc(cx, cy, R + 7 * s, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(190,220,235,' + 0.16 * (0.7 + 0.3 * Math.sin(now / 900)) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, R + 13 * s, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+
+    // 镜面本底（暗蓝灰，反着房间）
+    var glass = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+    glass.addColorStop(0, '#2c3a44');
+    glass.addColorStop(0.5, '#243138');
+    glass.addColorStop(1, '#1c262e');
+    ctx.fillStyle = glass;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+    // 镜中映出的门框暗区与灯（模糊渐隐，边缘不发硬）
+    var doorG = ctx.createRadialGradient(cx - R * 0.24, cy + R * 0.42, R * 0.08, cx - R * 0.24, cy + R * 0.42, R * 0.85);
+    doorG.addColorStop(0, 'rgba(12,16,20,0.5)');
+    doorG.addColorStop(0.55, 'rgba(12,16,20,0.28)');
+    doorG.addColorStop(1, 'rgba(12,16,20,0)');
+    ctx.fillStyle = doorG;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    var lampGlow = ctx.createRadialGradient(cx + R * 0.52, cy - R * 0.5, 2, cx + R * 0.52, cy - R * 0.5, R * 0.5);
+    lampGlow.addColorStop(0, 'rgba(255,225,170,0.5)');
+    lampGlow.addColorStop(1, 'rgba(255,225,170,0)');
+    ctx.fillStyle = lampGlow;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    // 斜向反光带
+    var refl = ctx.createLinearGradient(cx - R, cy + R * 0.6, cx + R * 0.2, cy - R);
+    refl.addColorStop(0, 'rgba(200,230,245,0)');
+    refl.addColorStop(0.5, 'rgba(200,230,245,0.055)');
+    refl.addColorStop(1, 'rgba(200,230,245,0)');
+    ctx.fillStyle = refl;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+    // ── 雾层 ──
+    if (fog > 0.01) {
+      var fogBase = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R);
+      fogBase.addColorStop(0, 'rgba(205,222,232,' + 0.5 * fog + ')');
+      fogBase.addColorStop(1, 'rgba(180,200,212,' + 0.68 * fog + ')');
+      ctx.fillStyle = fogBase;
+      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+      // 雾的颗粒（固定伪随机斑点，呼吸时颗粒随缘增多）
+      var nDots = Math.floor(90 * fog);
+      for (var i = 0; i < nDots; i++) {
+        var a1 = rnd(i) * Math.PI * 2;
+        var r1 = Math.sqrt(rnd(i + 999)) * R * 0.97;
+        var px = cx + Math.cos(a1) * r1;
+        var py = cy + Math.sin(a1) * r1;
+        ctx.fillStyle = 'rgba(228,240,246,' + (0.05 + rnd(i + 555) * 0.08) * fog + ')';
+        ctx.beginPath();
+        ctx.arc(px, py, 1.5 + rnd(i + 777) * 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 呼吸点周围的新鲜雾（更白）
+      if (breathing) {
+        var fresh = ctx.createRadialGradient(breathPt.x, breathPt.y, 4, breathPt.x, breathPt.y, R * 0.75);
+        fresh.addColorStop(0, 'rgba(235,245,250,0.34)');
+        fresh.addColorStop(1, 'rgba(235,245,250,0)');
+        ctx.fillStyle = fresh;
+        ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+      }
+    }
+
+    // ── 画痕（擦开雾+水线）──
+    for (var st = 0; st < strokes.length; st++) {
+      var line = strokes[st];
+      if (line.pts.length < 2) continue;
+      // 擦开的沟（露出镜面）
+      ctx.strokeStyle = 'rgba(30,42,50,0.5)';
+      ctx.lineWidth = 15 * s;
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      tracePath(line.pts);
+      ctx.stroke();
+      // 水线（微亮）
+      ctx.strokeStyle = 'rgba(190,225,240,' + 0.55 * Math.max(fog, 0.35) + ')';
+      ctx.lineWidth = 3.2 * s;
+      tracePath(line.pts);
+      ctx.stroke();
+      // 水线内高光
+      ctx.strokeStyle = 'rgba(230,245,252,' + 0.3 * Math.max(fog, 0.3) + ')';
+      ctx.lineWidth = 1.2 * s;
+      tracePath(line.pts);
+      ctx.stroke();
+    }
+    ctx.lineJoin = 'butt'; ctx.lineCap = 'butt';
+
+    ctx.restore(); // 出镜面 clip
+
+    // 呵气引导
+    if (fog < 0.05 && !breathing && strokes.length === 0) {
+      ctx.fillStyle = 'rgba(140,175,192,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住镜面，呵口气', cx, cy + R + 40 * s);
+    } else if (fog >= 0.45 && !breathing && !drewFinal) {
+      ctx.fillStyle = 'rgba(140,175,192,' + (0.3 + 0.2 * Math.sin(now / 560)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('画个笑脸吧', cx, cy + R + 40 * s);
+    }
+  }
+
+  function tracePath(pts) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__mirror = {
+    fog: function () { return +fog.toFixed(2); },
+    strokes: function () { return strokes.length; },
+    points: function () { return strokes.reduce(function (n, s) { return n + s.pts.length; }, 0); },
+    breathing: function () { return breathing; },
+    drewFinal: function () { return drewFinal; },
+    press: function (x, y) { breathing = true; breathPt = { x: x || L.cx, y: y || L.cy }; },
+    moveTo: function (x, y) {
+      if (!breathing || fog < 0.45) return;
+      if (!curStroke) { curStroke = { pts: [{ x: x, y: y }] }; strokes.push(curStroke); return; }
+      var lp = curStroke.pts[curStroke.pts.length - 1];
+      curStroke.pts.push({ x: x, y: y });
+      drawLen += Math.sqrt((x - lp.x) * (x - lp.x) + (y - lp.y) * (y - lp.y)) / (L.R * 2);
+    },
+    release: function () { endTouch(); }
+  };
+})();
+</script>
+</body>
+</html>

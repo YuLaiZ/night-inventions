@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜叠衬衫</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12100d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a48d64; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a48d64; border-color: #a48d64; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜叠衬衫</h1>
+  <p>明天要穿的那件还摊在桌上。<br>按顺序点：袖子、衣身，慢慢叠。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 折叠状态机：0=未折 1=折到位；动画进度 anim[p] 0-1
+  // 顺序强制：袖→袖→左身→右身（左右身可互换，袖先折完）
+  var STEP_ORDER = ['lsleeve', 'rsleeve', 'lbody', 'rbody'];
+  var foldedMap = { lsleeve: 0, rsleeve: 0, lbody: 0, rbody: 0 };
+  var animMap = { lsleeve: 0, rsleeve: 0, lbody: 0, rbody: 0 };
+  var animating = null;          // 正在折的部位
+  var foldedCount = 0;           // 完整叠好的件数
+  var carry = 0;                 // 取走动画进度 0-1
+  var spawning = 0;              // 新衬衫展开进度 0-1
+  var saidOnce = false, saidThree = false;
+  var hovered = null;            // 当前可点的部位（提示）
+
+  var PALETTE = [
+    { body: '#8fa8b8', dark: '#6f8898', trim: '#5f7482' },
+    { body: '#cfc4ac', dark: '#b0a58e', trim: '#948a72' },
+    { body: '#9aa88f', dark: '#7c8a72', trim: '#687560' },
+    { body: '#b89a8a', dark: '#9a7d6e', trim: '#816758' }
+  ];
+  var paletteIdx = 0;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.6, Math.min(1, Math.min(w / 760, h / 900)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2; L.cy = h * 0.56;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  // ── 部位几何（相对衬衫中心，未缩放基准值）──
+  function bodyRect() { return { w: 170, h: 230 }; }
+  // 袖子：从肩点出发的斜矩形（角度、长宽、肩点位置）
+  function sleeveDef(side) {
+    return { ax: side * 85, ay: -78, len: 128, wid: 62, ang: side * 0.62 };
+  }
+
+  function hitTest(x, y) {
+    var s = L.s, dx = x - L.cx, dy = y - L.cy;
+    if (foldedMap.lbody && foldedMap.rbody) return null;
+    if (!foldedMap.lsleeve) {
+      var d = sleeveHit(sleeveDef(-1), dx, dy);
+      if (d) return 'lsleeve';
+    }
+    if (!foldedMap.rsleeve) {
+      var d2 = sleeveHit(sleeveDef(1), dx, dy);
+      if (d2) return 'rsleeve';
+    }
+    if (Math.abs(dx) < 95 * s && Math.abs(dy) < 125 * s) {
+      if (!foldedMap.lbody && dx < 0) return 'lbody';
+      if (!foldedMap.rbody && dx >= 0) return 'rbody';
+    }
+    return null;
+  }
+  function sleeveHit(def, dx, dy) {
+    var s = L.s;
+    var c = Math.cos(-def.ang), sn = Math.sin(-def.ang);
+    var lx = dx / s - def.ax, ly = dy / s - def.ay;
+    var rx = lx * c - ly * sn, ry = lx * sn + ly * c;
+    var cxl = def.len / 2;
+    return Math.abs(rx - cxl) < def.len / 2 + 10 && Math.abs(ry) < def.wid / 2 + 10;
+  }
+
+  function doFold(part) {
+    if (foldedMap[part] || animating || carry > 0) return;
+    // 顺序：两个袖子没折完前不能折衣身
+    if ((part === 'lbody' || part === 'rbody') && (!foldedMap.lsleeve || !foldedMap.rsleeve)) return;
+    animating = part;
+    animMap[part] = 0.0001;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (carry > 0 || animating) return;
+    var part = hitTest(ev.clientX, ev.clientY);
+    if (part) doFold(part);
+  });
+
+  // ── 绘制 ──
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+    var P = PALETTE[paletteIdx % PALETTE.length];
+
+    // 折叠动画推进
+    if (animating) {
+      animMap[animating] = Math.min(1, animMap[animating] + dt / 0.75);
+      if (animMap[animating] >= 1) {
+        foldedMap[animating] = 1;
+        var done = animating;
+        animating = null;
+        onStepDone(done);
+      }
+    }
+    if (carry > 0) {
+      carry += dt / 1.1;
+      if (carry >= 1) {
+        carry = 0;
+        foldedCount++;
+        if (foldedCount === 1 && !saidOnce) { saidOnce = true; say('叠好了。它自己会记得今晚。'); }
+        else if (foldedCount === 3 && !saidThree) { saidThree = true; say('三件，够了。别熬着，去睡。', true); }
+        paletteIdx++;
+        spawning = 0.0001;
+      }
+    }
+    if (spawning > 0) {
+      spawning = Math.min(1, spawning + dt / 0.9);
+      if (spawning >= 1) { spawning = 0; resetShirt(); }
+    }
+
+    // ── 背景：暗房间 ──
+    var bg = ctx.createRadialGradient(w / 2, h * 0.5, 60, w / 2, h * 0.55, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#191612');
+    bg.addColorStop(1, '#0d0b09');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 桌面：木色 + 木纹（随机颗粒感）──
+    var wood = ctx.createLinearGradient(0, 0, 0, h);
+    wood.addColorStop(0, '#2a2118');
+    wood.addColorStop(0.55, '#241c14');
+    wood.addColorStop(1, '#1a140e');
+    ctx.fillStyle = wood;
+    ctx.fillRect(0, 0, w, h);
+    // 木纹：横向缓波线，伪随机相位
+    ctx.lineWidth = 1;
+    for (var g = 0; g < 14; g++) {
+      var gy = (Math.abs(Math.sin(g * 97.13) * 43758.5) % 1) * h;
+      var ga = 0.035 + (Math.abs(Math.sin(g * 31.7) * 12345.6) % 1) * 0.03;
+      ctx.strokeStyle = 'rgba(180,140,90,' + ga + ')';
+      ctx.beginPath();
+      for (var gx = 0; gx <= w; gx += 26) {
+        var yy = gy + Math.sin(gx / 150 + g * 2.3) * 7 + Math.sin(gx / 47 + g) * 2;
+        if (gx === 0) ctx.moveTo(gx, yy); else ctx.lineTo(gx, yy);
+      }
+      ctx.stroke();
+    }
+    // 灯光暖圈
+    var lamp = ctx.createRadialGradient(L.cx, L.cy, 20, L.cx, L.cy, Math.min(w, h) * 0.55);
+    lamp.addColorStop(0, 'rgba(255,215,150,0.13)');
+    lamp.addColorStop(1, 'rgba(255,215,150,0)');
+    ctx.fillStyle = lamp;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 衬衫（受取走/展开进度影响）──
+    ctx.save();
+    var lift = carry > 0 ? easeInOut(Math.min(1, carry)) : 0;
+    var grow = spawning > 0 ? easeOut(spawning) : 1;
+    ctx.translate(L.cx, L.cy - lift * 60 * s);
+    var shScale = (1 - lift * 0.25) * (0.6 + 0.4 * grow);
+    ctx.scale(shScale, shScale);
+    ctx.globalAlpha = 1 - lift * lift;
+
+    drawShirt(P, s, now);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    // 引导：当前该折哪块
+    if (!animating && carry === 0 && spawning === 0) {
+      var next = nextPart();
+      if (next) {
+        var pt = partHintPos(next);
+        ctx.fillStyle = 'rgba(220,205,170,' + (0.35 + 0.2 * Math.sin(now / 480)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('点这里', L.cx + pt.x * s, L.cy + pt.y * s);
+      }
+    }
+    // 已叠件数（右上角小字）
+    if (foldedCount > 0) {
+      ctx.fillStyle = 'rgba(164,141,100,0.55)';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('已叠 ' + foldedCount + ' 件', w - 20, 34);
+    }
+  }
+
+  function nextPart() {
+    if (!foldedMap.lsleeve) return 'lsleeve';
+    if (!foldedMap.rsleeve) return 'rsleeve';
+    if (!foldedMap.lbody) return 'lbody';
+    if (!foldedMap.rbody) return 'rbody';
+    return null;
+  }
+  function partHintPos(part) {
+    if (part === 'lsleeve') return { x: -190, y: 48 };
+    if (part === 'rsleeve') return { x: 190, y: 48 };
+    if (part === 'lbody') return { x: -160, y: 92 };
+    return { x: 160, y: 92 };
+  }
+
+  function onStepDone(part) {
+    if (part === 'rbody' && foldedMap.lbody) {
+      // 全部折完 → 停一拍再取走
+      setTimeout(function () { if (!carry) carry = 0.0001; }, 450);
+    }
+  }
+
+  function resetShirt() {
+    foldedMap.lsleeve = foldedMap.rsleeve = foldedMap.lbody = foldedMap.rbody = 0;
+    animMap.lsleeve = animMap.rsleeve = animMap.lbody = animMap.rbody = 0;
+  }
+
+  function drawShirt(P, s, now) {
+    var B = bodyRect();
+
+    // 阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    roundedRect(-B.w / 2 + 8, -B.h / 2 + 10, B.w, B.h, 14);
+    ctx.fill();
+    if (!foldedMap.lsleeve) sleeveShadow(sleeveDef(-1), s);
+    if (!foldedMap.rsleeve) sleeveShadow(sleeveDef(1), s);
+
+    // ── 衣身 ──
+    // 侧片折进来后中间的层次：先画底色身，再画折盖
+    ctx.fillStyle = P.body;
+    roundedRect(-B.w / 2, -B.h / 2, B.w, B.h, 14);
+    ctx.fill();
+    // 布纹（细横线）
+    ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+    ctx.lineWidth = 1;
+    for (var ly = -B.h / 2 + 16; ly < B.h / 2; ly += 14) {
+      ctx.beginPath(); ctx.moveTo(-B.w / 2 + 6, ly); ctx.lineTo(B.w / 2 - 6, ly); ctx.stroke();
+    }
+    // 门襟与纽扣
+    ctx.strokeStyle = P.trim;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(0, -B.h / 2 + 16); ctx.lineTo(0, B.h / 2 - 12); ctx.stroke();
+    for (var bt = -3; bt <= 3; bt += 2) {
+      ctx.fillStyle = P.dark;
+      ctx.beginPath(); ctx.arc(0, bt * 26, 3.4, 0, Math.PI * 2); ctx.fill();
+    }
+    // 领口
+    ctx.fillStyle = P.dark;
+    ctx.beginPath();
+    ctx.moveTo(-26, -B.h / 2);
+    ctx.lineTo(0, -B.h / 2 + 26);
+    ctx.lineTo(26, -B.h / 2);
+    ctx.lineTo(14, -B.h / 2 + 2);
+    ctx.lineTo(0, -B.h / 2 + 14);
+    ctx.lineTo(-14, -B.h / 2 + 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── 折好的袖子（先折的，会被侧片压住）──
+    if (foldedMap.lsleeve) drawFoldedSleeve(-1, P, s);
+    if (foldedMap.rsleeve) drawFoldedSleeve(1, P, s);
+    // ── 折盖：侧片（折完或折到一半盖在身上，压住袖子）──
+    drawSideFold(-1, P, s);
+    drawSideFold(1, P, s);
+    // ── 未折/正在折的袖子（动画在最上层）──
+    if (!foldedMap.lsleeve) drawSleeve(sleeveDef(-1), -1, P, s, animMap.lsleeve);
+    if (!foldedMap.rsleeve) drawSleeve(sleeveDef(1), 1, P, s, animMap.rsleeve);
+  }
+
+  function drawSleeve(def, side, P, s, animProg) {
+    // animProg>0：正在折，从原位向身上的折位转
+    var t = easeInOut(animProg);
+    var targetAng = 0, targetAx = side * 40, targetAy = -34;
+    var ax = def.ax + (targetAx - def.ax) * t;
+    var ay = def.ay + (targetAy - def.ay) * t;
+    var ang = def.ang + (targetAng - def.ang) * t;
+    var len = def.len * (1 - t * 0.3);
+    var wid = def.wid * (1 - t * 0.08);
+    // 落下弹跳
+    var bounce = t > 0.85 ? Math.sin((t - 0.85) / 0.15 * Math.PI) * 3 : 0;
+
+    ctx.save();
+    ctx.translate(ax, ay - bounce * 2);
+    ctx.rotate(ang);
+    var g = ctx.createLinearGradient(0, -wid / 2, 0, wid / 2);
+    g.addColorStop(0, shade(P.body, 14));
+    g.addColorStop(0.5, P.body);
+    g.addColorStop(1, P.dark);
+    ctx.fillStyle = g;
+    roundedRect(-len / 2, -wid / 2, len, wid, 12);
+    ctx.fill();
+    // 袖口
+    ctx.fillStyle = P.trim;
+    roundedRect(len / 2 - 16, -wid / 2 + 4, 12, wid - 8, 5);
+    ctx.fill();
+    ctx.restore();
+
+    // 折动时的高光边（抬起感）
+    if (t > 0 && t < 1) {
+      ctx.strokeStyle = 'rgba(255,245,220,' + 0.25 * Math.sin(t * Math.PI) + ')';
+      ctx.lineWidth = 2;
+      ctx.save();
+      ctx.translate(ax, ay - 6);
+      ctx.rotate(ang);
+      roundedRect(-len / 2, -wid / 2, len, wid, 12);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawFoldedSleeve(side, P, s) {
+    // 折好的袖子横在胸口
+    ctx.save();
+    ctx.translate(side * 40, -34);
+    ctx.fillStyle = P.dark;
+    roundedRect(-52, -24, 104, 48, 12);
+    ctx.fill();
+    ctx.fillStyle = P.trim;
+    roundedRect(side > 0 ? 36 : -48, -19, 12, 38, 5);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawSideFold(side, P, s) {
+    var pr = animMap[side < 0 ? 'lbody' : 'rbody'];
+    var folded = foldedMap[side < 0 ? 'lbody' : 'rbody'];
+    if (!pr && !folded) return;
+    var t = easeInOut(Math.max(pr, folded ? 1 : 0));
+    if (t <= 0) return;
+    var B = bodyRect();
+    var wFull = B.w / 2 - 4;
+    // 折缝固定在侧边缘，盖子向中线生长
+    var cw = Math.max(6, wFull * t);
+    var x0 = side < 0 ? -B.w / 2 : B.w / 2 - cw;
+    var flipY = t > 0 && t < 1 ? -Math.sin(t * Math.PI) * 14 : 0;
+    ctx.save();
+    ctx.translate(0, flipY);
+    var g = ctx.createLinearGradient(side * B.w / 2, 0, side * (B.w / 2 - cw), 0);
+    g.addColorStop(0, shade(P.body, -10));
+    g.addColorStop(1, shade(P.body, 8));
+    ctx.fillStyle = g;
+    roundedRect(x0, -B.h / 2 + 3, cw, B.h - 6, 10);
+    ctx.fill();
+    // 活动边缘线（折过来的那片的自由边）
+    var edgeX = side < 0 ? x0 + cw : x0;
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(edgeX + (side < 0 ? -0.7 : 0.7), -B.h / 2 + 8);
+    ctx.lineTo(edgeX + (side < 0 ? -0.7 : 0.7), B.h / 2 - 8);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function sleeveShadow(def, s) {
+    ctx.save();
+    ctx.translate(def.ax + 8, def.ay + 12);
+    ctx.rotate(def.ang);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    roundedRect(-def.len / 2, -def.wid / 2, def.len, def.wid, 12);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function roundedRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function shade(hex, amt) {
+    var n = parseInt(hex.slice(1), 16);
+    var r = Math.max(0, Math.min(255, (n >> 16) + amt));
+    var g = Math.max(0, Math.min(255, ((n >> 8) & 255) + amt));
+    var b = Math.max(0, Math.min(255, (n & 255) + amt));
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+  function easeOut(t) { return 1 - Math.pow(1 - t, 2.2); }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__fold = {
+    step: function () { return nextPart() || (carry > 0 ? 'carry' : 'done-pending'); },
+    foldedCount: function () { return foldedCount; },
+    animating: function () { return animating || ''; },
+    carry: function () { return +carry.toFixed(2); },
+    click: function (part) { doFold(part); },
+    reset: function () { resetShirt(); foldedCount = 0; saidOnce = false; saidThree = false; carry = 0; spawning = 0; }
+  };
+})();
+</script>
+</body>
+</html>

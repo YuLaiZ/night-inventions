@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天花板上的岛</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #101216;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7d828c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a8fa0; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #62666f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #83889a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #54565e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #676a74;
+    text-decoration: none;
+    border-bottom: 1px dotted #676a74;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a8fa0; border-color: #8a8fa0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>天花板上的岛</h1>
+  <p>睡不着的时候，你盯过天花板上的水渍吗。<br>按住，盯住它——看它像什么。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var staring = false;       // 按住凝视
+  var stareT = 0;            // 本轮凝视累计秒
+  var totalT = 0;            // 总凝视秒
+  var phase = -1;            // 联想句序号（-1=尚未开口）
+  var morphA = 0;            // 形状插值进度（向下一形态）
+  var formSet = 0;           // 当前形态对索引
+  var saidLast = false;
+
+  var FORMS = [
+    '像一座岛，浮在夜里的海上。',
+    '像一头鲸，正要浮出水面换气。',
+    '像谁没洗干净的一只碗底。',
+    '像小时候趴过的课桌印子。',
+    '像一张摊开的、没寄出的地图。',
+    '像一片快要化完的云的影子。',
+    '越看，越像什么都像。',
+    '其实它哪儿也不像，它就是块水渍。'
+  ];
+
+  // 形状：12 顶点半径系数序列（伪随机固定），morph 在两组间插值
+  function radii(seed) {
+    var arr = [];
+    for (var i = 0; i < 12; i++) {
+      arr.push(0.55 + rnd(seed * 31 + i * 7.7) * 0.6);
+    }
+    return arr;
+  }
+  var SHAPES = [radii(1), radii(2), radii(3), radii(4), radii(5), radii(6)];
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    L.w = w; L.h = h;
+    L.cx = w / 2;
+    L.cy = h * 0.5;
+    L.stainR = Math.min(w, h) * 0.24;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () { staring = true; });
+  window.addEventListener('pointerup', function () { staring = false; });
+  window.addEventListener('pointercancel', function () { staring = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 917.3) * 43758.5453) % 1; }
+
+  function shapeAt(tt) {
+    // 在 SHAPES 序列上平滑取形：tt 连续增长，每 6 秒换向下一形
+    var seg = Math.floor(tt / 6) % SHAPES.length;
+    var nxt = (seg + 1) % SHAPES.length;
+    var f = Math.min(1, (tt % 6) / 6);
+    var e = f * f * (3 - 2 * f); // smoothstep
+    var out = [];
+    for (var i = 0; i < 12; i++) {
+      out.push(SHAPES[seg][i] + (SHAPES[nxt][i] - SHAPES[seg][i]) * e);
+    }
+    return out;
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    if (staring) {
+      stareT += dt;
+      totalT += dt;
+      morphA = Math.min(1, morphA + dt * 0.18);
+      var idx = Math.min(FORMS.length - 1, Math.floor(stareT / 5));
+      if (idx !== phase) {
+        phase = idx;
+        say(FORMS[phase]);
+      }
+    }
+
+    // ── 天花板（仰视）──
+    var ceil = ctx.createRadialGradient(w / 2, h * 0.42, 40, w / 2, h * 0.5, Math.max(w, h) * 0.75);
+    ceil.addColorStop(0, '#232830');
+    ceil.addColorStop(1, '#14171c');
+    ctx.fillStyle = ceil;
+    ctx.fillRect(0, 0, w, h);
+    // 微弱窗光斜痕
+    var streak = ctx.createLinearGradient(0, 0, w * 0.6, h);
+    streak.addColorStop(0, 'rgba(150,170,200,0.05)');
+    streak.addColorStop(0.5, 'rgba(150,170,200,0.02)');
+    streak.addColorStop(1, 'rgba(150,170,200,0)');
+    ctx.fillStyle = streak;
+    ctx.fillRect(0, 0, w, h);
+    // 细裂纹（两条随机固定）
+    ctx.strokeStyle = 'rgba(10,12,15,0.5)';
+    ctx.lineWidth = 1;
+    for (var cr = 0; cr < 2; cr++) {
+      var cx0 = w * (0.12 + rnd(cr) * 0.76), cy0 = h * (0.08 + rnd(cr + 5) * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(cx0, cy0);
+      var px = cx0, py = cy0;
+      for (var seg = 0; seg < 4; seg++) {
+        px += (rnd(cr * 9 + seg) - 0.5) * 90 * s0();
+        py += (10 + rnd(cr * 7 + seg) * 40) * s0();
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    function s0() { return Math.min(1, w / 800); }
+
+    // ── 水渍（中央 blob）──
+    var R = L.stainR;
+    var shape = shapeAt(stareT * (staring ? 1 : 0.12) + morphA * 2); // 凝视时形变更快
+    ctx.save();
+    ctx.translate(L.cx, L.cy);
+    // 外晕
+    var halo = ctx.createRadialGradient(0, 0, R * 0.4, 0, 0, R * 1.5);
+    halo.addColorStop(0, 'rgba(30,26,20,' + 0.5 + ')');
+    halo.addColorStop(1, 'rgba(30,26,20,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(0, 0, R * 1.5, 0, Math.PI * 2); ctx.fill();
+    // 渍体（不规则 blob）
+    var st = ctx.createRadialGradient(-R * 0.2, -R * 0.25, R * 0.1, 0, 0, R * 1.15);
+    st.addColorStop(0, 'rgba(52,44,34,0.92)');
+    st.addColorStop(0.75, 'rgba(38,32,25,0.88)');
+    st.addColorStop(1, 'rgba(30,26,20,0.55)');
+    ctx.fillStyle = st;
+    ctx.beginPath();
+    for (var i2 = 0; i2 <= 12; i2++) {
+      var a2 = i2 / 12 * Math.PI * 2;
+      var rr2 = R * shape[i2 % 12];
+      var px2 = Math.cos(a2) * rr2;
+      var py2 = Math.sin(a2) * rr2 * 0.86;
+      if (i2 === 0) ctx.moveTo(px2, py2);
+      else {
+        var pa = (i2 - 0.5) / 12 * Math.PI * 2;
+        var pr = R * ((shape[(i2 - 1) % 12] + shape[i2 % 12]) / 2);
+        ctx.quadraticCurveTo(Math.cos(pa) * pr, Math.sin(pa) * pr * 0.86, px2, py2);
+      }
+    }
+    ctx.closePath();
+    ctx.fill();
+    // 渍内深斑
+    ctx.fillStyle = 'rgba(24,20,15,0.5)';
+    ctx.beginPath(); ctx.ellipse(R * 0.1, R * 0.08, R * 0.3, R * 0.22, 0.4, 0, Math.PI * 2); ctx.fill();
+    // 凝视时渍缘微光（看得越久越「活」）
+    if (staring && stareT > 2) {
+      var tw = 0.5 + 0.5 * Math.sin(now / 500);
+      ctx.strokeStyle = 'rgba(190,200,225,' + 0.10 * tw + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (var i3 = 0; i3 <= 12; i3++) {
+        var a3 = i3 / 12 * Math.PI * 2;
+        var rr3 = R * shape[i3 % 12] * 1.03;
+        var px3 = Math.cos(a3) * rr3, py3 = Math.sin(a3) * rr3 * 0.86;
+        if (i3 === 0) ctx.moveTo(px3, py3); else ctx.lineTo(px3, py3);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 引导
+    if (totalT < 0.5 && !staring) {
+      ctx.fillStyle = 'rgba(150,156,172,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，盯住那团水渍', w / 2, h * 0.86);
+    }
+    // 最后一句之后
+    if (phase >= FORMS.length - 1 && stareT > FORMS.length * 5 + 2 && staring && !saidLast) {
+      saidLast = true;
+      say('眼皮沉了。它爱像什么都行。', true);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__ceil = {
+    phase: function () { return phase; },
+    staring: function () { return staring; },
+    stareT: function () { return +stareT.toFixed(1); },
+    morph: function () { return +morphA.toFixed(2); },
+    press: function () { staring = true; },
+    release: function () { staring = false; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把梦讲给猫听</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #100e0c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89268; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89268; border-color: #a89268; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>把梦讲给猫听</h1>
+  <p>床尾的猫睡着了，你却刚做完一个梦。<br>按住屏幕，低声讲给它——它最会保守秘密。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var talking = false;      // 按住讲述中
+  var talks = 0;            // 讲完的次数
+  var earTwitch = 0;        // 耳朵抽动动画 0-1
+  var tailSwing = 0;        // 尾巴摇
+  var catLift = 0;          // 猫抬头（彩蛋）
+  var hugDone = false;      // 彩蛋已放
+  var bubbleP = 0;          // 梦话气泡进度
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.catX = w / 2; L.catY = h * 0.56;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () {
+    talking = true;
+    bubbleP = 0.0001;
+  });
+  window.addEventListener('pointerup', endTalk);
+  window.addEventListener('pointercancel', endTalk);
+  function endTalk() {
+    if (!talking) return;
+    talking = false;
+    talks++;
+    earTwitch = 1;
+    if (talks === 1) say('尾巴摇了一下。它在听。');
+    else if (talks === 2) say('耳朵动了动。讲梦话它最拿手。');
+    else if (talks >= 3 && !hugDone) {
+      hugDone = true;
+      catLift = 0.0001;
+      setTimeout(function () {
+        say('它起身蹭了蹭你的手。听懂没有，不重要。', true);
+      }, 1400);
+    } else {
+      say('讲吧。它都记着呢。');
+    }
+  }
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 271.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 动画推进
+    if (talking) bubbleP = Math.min(1, bubbleP + dt * 1.5);
+    else bubbleP = Math.max(0, bubbleP - dt * 2);
+    if (earTwitch > 0) earTwitch = Math.max(0, earTwitch - dt * 1.2);
+    tailSwing += dt * (talking ? 6 : 1.4);
+    if (catLift > 0 && catLift < 1) catLift = Math.min(1, catLift + dt * 0.5);
+
+    // ── 背景：暗卧室+夜灯暖光 ──
+    var bg = ctx.createRadialGradient(w * 0.5, h * 0.5, 30, w * 0.5, h * 0.52, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#1a1610');
+    bg.addColorStop(1, '#0e0c09');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床尾毯子
+    var blanket = ctx.createLinearGradient(0, L.catY - 90 * s, 0, h);
+    blanket.addColorStop(0, '#2b2318');
+    blanket.addColorStop(1, '#1b1610');
+    ctx.fillStyle = blanket;
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(0, L.catY + 60 * s);
+    ctx.quadraticCurveTo(w * 0.5, L.catY - 40 * s, w, L.catY + 60 * s);
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fill();
+    // 毯子织纹
+    ctx.strokeStyle = 'rgba(190,160,110,0.05)';
+    ctx.lineWidth = 1;
+    for (var t2 = 0; t2 < 10; t2++) {
+      var ty2 = L.catY + 30 * s + t2 * 26 * s;
+      ctx.beginPath();
+      ctx.moveTo(0, ty2);
+      ctx.quadraticCurveTo(w / 2, ty2 - 12 * s, w, ty2);
+      ctx.stroke();
+    }
+
+    // ── 猫 ──
+    drawCat(now);
+
+    // ── 梦话气泡（讲述中浮在猫头上）──
+    if (bubbleP > 0.01) {
+      var bx = L.catX + 110 * s, by = L.catY - 130 * s;
+      var bp = Math.min(1, bubbleP * 1.2);
+      ctx.globalAlpha = bp * (talking ? 1 : bubbleP);
+      // 气泡
+      ctx.fillStyle = 'rgba(225,220,205,0.14)';
+      roundRect(bx - 66 * s, by - 30 * s, 132 * s, 60 * s, 12 * s);
+      ctx.fill();
+      // 波浪呓语（三行〰，随时间起伏）
+      ctx.strokeStyle = 'rgba(225,215,190,0.75)';
+      ctx.lineWidth = 2;
+      for (var wl = 0; wl < 3; wl++) {
+        ctx.beginPath();
+        for (var wx2 = 0; wx2 <= 90 * s; wx2 += 4) {
+          var wy2 = by - 16 * s + wl * 15 * s + Math.sin(wx2 / 9 + now / (120 + wl * 60)) * 3.4 * s;
+          if (wx2 === 0) ctx.moveTo(bx - 45 * s + wx2, wy2);
+          else ctx.lineTo(bx - 45 * s + wx2, wy2);
+        }
+        ctx.stroke();
+      }
+      // 气泡尾巴指向猫
+      ctx.strokeStyle = 'rgba(225,220,205,0.3)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(bx - 60 * s, by + 28 * s);
+      ctx.quadraticCurveTo(bx - 90 * s, by + 55 * s, L.catX + 55 * s, L.catY - 55 * s);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // 引导
+    if (talks === 0 && !talking) {
+      ctx.fillStyle = 'rgba(190,175,140,' + (0.32 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，讲吧', w / 2, L.catY + 120 * s);
+    }
+  }
+
+  function drawCat(now) {
+    var s = L.s;
+    var x = L.catX, y = L.catY;
+    var breath = Math.sin(now / 1100) * 2.4 * s;   // 呼吸起伏
+
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 44 * s, 92 * s, 16 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 尾巴（环在身前，讲时摇）
+    ctx.strokeStyle = '#c98d4e';
+    ctx.lineWidth = 11 * s;
+    ctx.lineCap = 'round';
+    var tailTip = Math.sin(tailSwing) * 16 * s;
+    ctx.beginPath();
+    ctx.moveTo(x - 66 * s, y + 26 * s);
+    ctx.quadraticCurveTo(x - 20 * s, y + 52 * s + breath, x + 44 * s, y + 40 * s + tailTip);
+    ctx.stroke();
+    // 尾尖白
+    ctx.strokeStyle = '#e8dcc2';
+    ctx.lineWidth = 11 * s;
+    ctx.beginPath();
+    ctx.moveTo(x + 36 * s, y + 41 * s + tailTip);
+    ctx.lineTo(x + 44 * s, y + 40 * s + tailTip);
+    ctx.stroke();
+
+    // 身体（蜷成豆形）
+    var body = ctx.createLinearGradient(x, y - 40 * s, x, y + 40 * s);
+    body.addColorStop(0, '#e0a75c');
+    body.addColorStop(0.6, '#c98d4e');
+    body.addColorStop(1, '#a76f38');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.ellipse(x, y + breath * 0.5, 88 * s, (52 + breath) * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 条纹
+    ctx.strokeStyle = 'rgba(140,90,40,0.55)';
+    ctx.lineWidth = 5 * s;
+    for (var st = 0; st < 3; st++) {
+      ctx.beginPath();
+      ctx.ellipse(x, y + breath * 0.5, (58 - st * 14) * s, (50 + breath) * s, 0, Math.PI * 1.18, Math.PI * 1.62);
+      ctx.stroke();
+    }
+
+    // 头（右上方，压在身上；彩蛋时抬头看向屏幕）
+    var headX = x + 52 * s, headY = y - 30 * s - catLift * 26 * s;
+    var headR = 30 * s;
+    ctx.fillStyle = '#e0a75c';
+    ctx.beginPath(); ctx.arc(headX, headY, headR, 0, Math.PI * 2); ctx.fill();
+    // 耳朵（讲时抽动）
+    var twitch = Math.sin(earTwitch * Math.PI * 3) * 0.16 * earTwitch;
+    for (var e = -1; e <= 1; e += 2) {
+      ctx.fillStyle = '#c98d4e';
+      ctx.beginPath();
+      ctx.moveTo(headX + e * headR * 0.55 - 7 * s, headY - headR * 0.72);
+      ctx.lineTo(headX + e * headR * 0.78 + e * twitch * 30, headY - headR * 1.45);
+      ctx.lineTo(headX + e * headR * 0.95, headY - headR * 0.55);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#e8b98a';
+      ctx.beginPath();
+      ctx.moveTo(headX + e * headR * 0.62, headY - headR * 0.82);
+      ctx.lineTo(headX + e * headR * 0.73 + e * twitch * 22, headY - headR * 1.22);
+      ctx.lineTo(headX + e * headR * 0.82, headY - headR * 0.66);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // 睡脸：闭眼弧线（彩蛋时睁眼一条缝）
+    ctx.strokeStyle = '#5c3f1e';
+    ctx.lineWidth = 2.2 * s;
+    var eyeOpen = catLift;
+    for (var ey = -1; ey <= 1; ey += 2) {
+      var ex2 = headX + ey * 12 * s;
+      if (eyeOpen < 0.4) {
+        ctx.beginPath();
+        ctx.arc(ex2, headY + 2 * s, 6.5 * s, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#5c8a4a';
+        ctx.beginPath();
+        ctx.ellipse(ex2, headY + 1 * s, 6 * s * eyeOpen, 7 * s * eyeOpen, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1c1a14';
+        ctx.beginPath();
+        ctx.ellipse(ex2, headY + 1 * s, 2.2 * s * eyeOpen, 6 * s * eyeOpen, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 鼻嘴
+    ctx.fillStyle = '#d98a7a';
+    ctx.beginPath(); ctx.arc(headX, headY + 9 * s, 2.6 * s, 0, Math.PI * 2); ctx.fill();
+    // 胡须
+    ctx.strokeStyle = 'rgba(240,230,210,0.6)';
+    ctx.lineWidth = 1;
+    for (var wg = 0; wg < 3; wg++) {
+      ctx.beginPath();
+      ctx.moveTo(headX - 6 * s, headY + 8 * s + wg * 5 * s);
+      ctx.lineTo(headX - 30 * s - wg * 3 * s, headY + 5 * s + wg * 8 * s);
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__cat = {
+    talking: function () { return talking; },
+    talks: function () { return talks; },
+    ear: function () { return +earTwitch.toFixed(2); },
+    lift: function () { return +catLift.toFixed(2); },
+    press: function () { talking = true; bubbleP = 0.0001; },
+    release: endTalk
+  };
+})();
+</script>
+</body>
+</html>

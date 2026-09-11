@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜电风扇</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c0f11;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #84898a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7f9a8e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #616a68; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #7e8d85;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #525658;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #656a6b;
+    text-decoration: none;
+    border-bottom: 1px dotted #656a6b;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7f9a8e; border-color: #7f9a8e; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜电风扇</h1>
+  <p>夏末最后一晚还开着风扇。<br>点一下旋钮拧个定时——风停的时候，正好睡着。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var LEVELS = [15, 30, 45];   // 定时档位（分钟标签）
+  var level = 0;               // 已拧的档位 0-3（0=未定时）
+  var running = false;
+  var bladeA = 0;              // 扇叶角度
+  var bladeV = 0;              // 扇叶转速
+  var tLeft = 0;               // 剩余（演示秒）
+  var tTotal = 20;             // 本档演示总时长
+  var headA = 0;               // 摇头角度
+  var ended = false;           // 本轮已停
+  var saidOn = false, saidStop = false;
+  var cloth = { a: 0, v: 0 };  // 布条摆角（受风）
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 760, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w * 0.42;
+    L.headY = h * 0.42;        // 风扇头中心
+    L.baseY = h * 0.72;        // 底座
+    L.knobX = L.cx - 78 * s;   // 旋钮
+    L.knobY = h * 0.66;
+    L.clothX = w * 0.84;       // 床单一角（搭在床沿）
+    L.clothY = h * 0.60;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function inKnob(x, y) {
+    var dx = x - L.knobX, dy = y - L.knobY;
+    return dx * dx + dy * dy < (34 * L.s) * (34 * L.s);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!inKnob(ev.clientX, ev.clientY)) return;
+    if (running) return;
+    if (ended) {
+      // 重新拧
+      level = 0; ended = false;
+    }
+    level++;
+    if (level >= 1 && level <= 3) {
+      running = true;
+      tLeft = tTotal;
+      if (!saidOn) { saidOn = true; say('风来了。它送你到睡着。'); }
+      else say('风又来了。这回真的睡。');
+    }
+    if (level > 3) level = 3;
+  });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 511.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 扇叶速度：启动加速、定时到减速
+    var targetV = running ? 14 : 0;
+    bladeV += (targetV - bladeV) * Math.min(1, dt * (running ? 1.1 : 0.8));
+    bladeA += bladeV * dt;
+    if (running && bladeV < 0.5 && tLeft < tTotal - 0.5) bladeV = 0.5; // 启动最低速
+
+    // 摇头
+    if (running && bladeV > 3) headA = Math.sin(now / 1600) * 0.22;
+
+    // 定时
+    if (running) {
+      tLeft -= dt;
+      if (tLeft <= 0) {
+        running = false;
+        ended = true;
+        if (!saidStop) { saidStop = true; say('嗒。风停了，正好睡熟。', true); }
+        else say('嗒。这回是风先走的。');
+      }
+    }
+
+    // 布条物理（受风力）
+    var wind = bladeV / 14;
+    var targetA = wind * 0.9 + Math.sin(now / 200) * wind * 0.12;
+    cloth.v += (targetA - cloth.a) * dt * 9;
+    cloth.a += cloth.v * dt * 3;
+
+    // ── 背景：深夜卧室 ──
+    var bg = ctx.createRadialGradient(w * 0.45, h * 0.4, 30, w * 0.5, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#141819');
+    bg.addColorStop(1, '#0a0d0e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床沿（右下角）
+    ctx.fillStyle = '#1b1f22';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.62, h);
+    ctx.lineTo(w * 0.78, h * 0.62);
+    ctx.lineTo(w, h * 0.55);
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fill();
+    // 床单一角（受风飘）
+    drawCloth(now);
+
+    // 风线（扇面吹向床）
+    if (bladeV > 2) {
+      for (var wi = 0; wi < 3; wi++) {
+        var wy = L.headY - 30 * s + wi * 26 * s;
+        var wa = (0.06 + wi * 0.02) * (bladeV / 14) * (0.7 + 0.3 * Math.sin(now / 240 + wi * 2));
+        ctx.strokeStyle = 'rgba(190,220,210,' + wa + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        var x0 = L.cx + 60 * s, x1 = L.clothX - 30 * s;
+        ctx.moveTo(x0, wy);
+        ctx.quadraticCurveTo((x0 + x1) / 2, wy + 14 * s + Math.sin(now / 300 + wi) * 8, x1, wy - 10 * s);
+        ctx.stroke();
+      }
+    }
+
+    // ── 风扇 ──
+    drawFan(now);
+
+    // 引导
+    if (level === 0 && !running) {
+      ctx.fillStyle = 'rgba(160,185,175,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点旋钮，拧定时', L.knobX, L.knobY + 56 * s);
+    }
+    if (running) {
+      // 剩余刻度（右上小字）
+      ctx.fillStyle = 'rgba(127,154,142,0.6)';
+      ctx.font = '12px ui-monospace, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(LEVELS[level - 1] + ' min · ' + Math.ceil(tLeft) + 's', w - 20, 34);
+    }
+  }
+
+  function drawCloth(now) {
+    var s = L.s;
+    var x = L.clothX, y = L.clothY;
+    // 挂点
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(cloth.a * 0.55);
+    // 一角床单（梯形布片）
+    var cl = ctx.createLinearGradient(0, 0, 60 * s, 90 * s);
+    cl.addColorStop(0, '#b8bdb2');
+    cl.addColorStop(1, '#8e948c');
+    ctx.fillStyle = cl;
+    ctx.beginPath();
+    ctx.moveTo(-6 * s, 0);
+    ctx.quadraticCurveTo(18 * s + cloth.a * 12 * s, 48 * s, 10 * s + cloth.a * 20 * s, 92 * s);
+    ctx.lineTo(34 * s + cloth.a * 14 * s, 86 * s);
+    ctx.quadraticCurveTo(40 * s, 42 * s, 30 * s, 0);
+    ctx.closePath();
+    ctx.fill();
+    // 布纹
+    ctx.strokeStyle = 'rgba(60,66,60,0.2)';
+    ctx.lineWidth = 1;
+    for (var l = 1; l <= 3; l++) {
+      ctx.beginPath();
+      ctx.moveTo(-2 * s, l * 24 * s);
+      ctx.lineTo(32 * s + cloth.a * 10 * s, l * 24 * s - 4 * s);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFan(now) {
+    var s = L.s;
+    var hx = L.cx, hy = L.headY;
+    var R = 92 * s;
+
+    // 底座+立柱
+    ctx.fillStyle = '#242a2c';
+    ctx.beginPath();
+    ctx.ellipse(L.cx, L.baseY, 62 * s, 14 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2e3538';
+    ctx.fillRect(L.cx - 9 * s, L.headY + R * 0.72, 18 * s, L.baseY - L.headY - R * 0.72 - 8 * s);
+    // 控制盒（旋钮所在）
+    ctx.fillStyle = '#333b3e';
+    roundRect(L.knobX - 46 * s, L.knobY - 26 * s, 128 * s, 52 * s, 8 * s);
+    ctx.fill();
+
+    // 风扇头（摇头旋转）
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(headA);
+
+    // 扇叶（后：护网内）
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.82, 0, Math.PI * 2); ctx.clip();
+    ctx.translate(0, 0);
+    ctx.rotate(bladeA);
+    for (var b = 0; b < 3; b++) {
+      ctx.rotate(Math.PI * 2 / 3);
+      var bg2 = ctx.createLinearGradient(0, 0, R * 0.8, 0);
+      bg2.addColorStop(0, 'rgba(150,165,168,0.95)');
+      bg2.addColorStop(1, 'rgba(190,205,208,0.75)');
+      ctx.fillStyle = bg2;
+      ctx.beginPath();
+      ctx.moveTo(6 * s, 0);
+      ctx.quadraticCurveTo(R * 0.36, -R * 0.30, R * 0.78, -R * 0.10);
+      ctx.quadraticCurveTo(R * 0.42, R * 0.16, 6 * s, 0);
+      ctx.fill();
+    }
+    // 叶心盖
+    ctx.fillStyle = '#3d4548';
+    ctx.beginPath(); ctx.arc(0, 0, 10 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // 护网（放射+同心圈）
+    ctx.strokeStyle = 'rgba(175,190,193,' + (0.4 + 0.12 * Math.sin(now / 700)) + ')';
+    ctx.lineWidth = 1.2;
+    for (var g = 0; g < 14; g++) {
+      var ga = g * Math.PI * 2 / 14;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ga) * 10 * s, Math.sin(ga) * 10 * s);
+      ctx.lineTo(Math.cos(ga) * R * 0.82, Math.sin(ga) * R * 0.82);
+      ctx.stroke();
+    }
+    for (var c2 = 1; c2 <= 3; c2++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 0.82 * c2 / 3.4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 外圈
+    ctx.strokeStyle = '#3a4245';
+    ctx.lineWidth = 7 * s;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.86, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+
+    // 旋钮（定时）
+    drawKnob(now);
+  }
+
+  function drawKnob(now) {
+    var s = L.s;
+    var x = L.knobX, y = L.knobY;
+    // 刻度
+    ctx.strokeStyle = 'rgba(200,215,210,0.5)';
+    ctx.lineWidth = 1.4;
+    ctx.font = Math.round(9 * s) + 'px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(200,215,210,0.55)';
+    for (var t = 0; t < 3; t++) {
+      var ta = -Math.PI / 2 + (t - 1) * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(ta) * 30 * s, y + Math.sin(ta) * 30 * s);
+      ctx.lineTo(x + Math.cos(ta) * 36 * s, y + Math.sin(ta) * 36 * s);
+      ctx.stroke();
+      ctx.fillText(String(LEVELS[t]), x + Math.cos(ta) * 47 * s, y + Math.sin(ta) * 47 * s + 3);
+    }
+    // 旋钮体
+    var kOn = running ? '#7f9a8e' : '#5a6a66';
+    var k = ctx.createRadialGradient(x - 4 * s, y - 4 * s, 2, x, y, 24 * s);
+    k.addColorStop(0, running ? '#9fbcae' : '#798c88');
+    k.addColorStop(1, kOn);
+    ctx.fillStyle = k;
+    ctx.beginPath(); ctx.arc(x, y, 22 * s, 0, Math.PI * 2); ctx.fill();
+    // 旋钮指示条（指向当前档位）
+    var ia = -Math.PI / 2 + (Math.max(0, level - 1) - 1) * 0.7 * (level > 0 ? 1 : -0.5);
+    if (level === 0) ia = -Math.PI / 2 - 1.1;
+    ctx.strokeStyle = '#e8ede8';
+    ctx.lineWidth = 3 * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(ia) * 6 * s, y + Math.sin(ia) * 6 * s);
+    ctx.lineTo(x + Math.cos(ia) * 17 * s, y + Math.sin(ia) * 17 * s);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    // 定时中的小亮灯
+    if (running) {
+      ctx.fillStyle = 'rgba(160,220,180,' + (0.5 + 0.3 * Math.sin(now / 300)) + ')';
+      ctx.beginPath(); ctx.arc(x + 38 * s, y, 3.4 * s, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__fan = {
+    level: function () { return level; },
+    running: function () { return running; },
+    bladeV: function () { return +bladeV.toFixed(1); },
+    t: function () { return +tLeft.toFixed(1); },
+    twist: function () {
+      if (running) return;
+      if (ended) { level = 0; ended = false; }
+      level++;
+      running = true;
+      tLeft = tTotal;
+    },
+    fastForward: function () { tLeft = 0.05; }
+  };
+})();
+</script>
+</body>
+</html>

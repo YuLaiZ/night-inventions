@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>海堤望远镜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0d10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7e868c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7b95a0; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5d686e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #7d8d94;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #52585c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #63696d;
+    text-decoration: none;
+    border-bottom: 1px dotted #63696d;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #7b95a0; border-color: #7b95a0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>海堤望远镜</h1>
+  <p>堤上有台旧望远镜，投一枚硬币就能看三十秒。<br>夜里没有船班，只有海。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var looking = false;      // 观景中
+  var lookT = 0;            // 剩余观看秒（演示 ~12s）
+  var zoom = 0;             // 进入镜筒动画 0-1
+  var coinDrop = 0;         // 硬币下落动画 0-1
+  var coinAnim = false;
+  var wavePhase = 0;
+  var shipX = -0.2;         // 货轮位置（相对，横穿）
+  var beamA = 0;            // 灯塔光束角
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.scopeY = h * 0.62;      // 望远镜头中心
+    L.viewR = Math.min(w, h) * 0.33;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 117.3) * 43758.5453) % 1; }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var s = L.s;
+    // 点投币口/镜身
+    var dx = ev.clientX - L.cx, dy = ev.clientY - L.scopeY;
+    if (dx * dx + dy * dy < (70 * s) * (70 * s) && !looking && !coinAnim) {
+      coinAnim = true;
+      coinDrop = 0;
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h, s = L.s;
+
+    wavePhase += dt;
+
+    if (coinAnim) {
+      coinDrop = Math.min(1, coinDrop + dt / 0.7);
+      if (coinDrop >= 1) {
+        coinAnim = false;
+        looking = true;
+        lookT = 12;
+        zoom = 0.0001;
+        say('三十秒的海，是买得到的。');
+      }
+    }
+    if (looking) {
+      zoom = Math.min(1, zoom + dt * 3);
+      lookT -= dt;
+      if (lookT <= 0) {
+        looking = false;
+        say('时间到。有些风景，记得就够了。');
+      }
+    } else {
+      zoom = Math.max(0, zoom - dt * 3);
+    }
+    // 海面动态（供镜内与镜外小窗共用）
+    shipX += dt * 0.012;
+    if (shipX > 1.2) shipX = -0.2;
+    beamA = (now / 2600) % (Math.PI * 2);
+
+    // ── 背景：堤岸夜 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0b1014');
+    bg.addColorStop(1, '#090c0e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 远处海平线微光
+    var horizon = ctx.createLinearGradient(0, h * 0.18, 0, h * 0.42);
+    horizon.addColorStop(0, 'rgba(90,120,130,0)');
+    horizon.addColorStop(1, 'rgba(90,120,130,0.14)');
+    ctx.fillStyle = horizon;
+    ctx.fillRect(0, h * 0.18, w, h * 0.24);
+    // 堤岸
+    ctx.fillStyle = '#171c20';
+    ctx.fillRect(0, h * 0.42, w, h);
+
+    // ── 望远镜本体 ──
+    drawScope(now);
+
+    // ── 镜筒圆窗（观景中）──
+    if (zoom > 0.01) drawView(now);
+  }
+
+  function drawScope(now) {
+    var s = L.s;
+    var x = L.cx, y = L.scopeY;
+    var alpha = 1 - easeInOut(zoom) * 0.85;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+
+    // 立柱
+    ctx.fillStyle = '#2a3138';
+    ctx.fillRect(x - 10 * s, y + 40 * s, 20 * s, L.h * 0.9 - y - 40 * s);
+    ctx.fillStyle = '#20262b';
+    ctx.beginPath();
+    ctx.ellipse(x, L.h * 0.9, 60 * s, 12 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 双筒镜身（两个圆筒并排，俯仰对着海；先移到镜心再旋转）
+    ctx.translate(x, y);
+    ctx.rotate(-0.18);
+    for (var t = -1; t <= 1; t += 2) {
+      var tx = t * 26 * s;
+      // 镜筒
+      var bodyG = ctx.createLinearGradient(tx - 24 * s, 0, tx + 24 * s, 0);
+      bodyG.addColorStop(0, '#39424b');
+      bodyG.addColorStop(0.5, '#4a545e');
+      bodyG.addColorStop(1, '#2e353c');
+      ctx.fillStyle = bodyG;
+      roundRect(tx - 24 * s, -46 * s, 48 * s, 108 * s, 14 * s);
+      ctx.fill();
+      // 物镜（朝下前方——面向用户这头画个深色镜面）
+      ctx.fillStyle = '#151a1e';
+      ctx.beginPath();
+      ctx.ellipse(tx, 56 * s, 17 * s, 8 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 中轴连接
+    ctx.fillStyle = '#242a30';
+    roundRect(-30 * s, -58 * s, 60 * s, 20 * s, 8 * s);
+    ctx.fill();
+    // 投币口（小竖缝在镜身中轴下）
+    ctx.fillStyle = '#12161a';
+    roundRect(-5 * s, 66 * s, 10 * s, 22 * s, 3 * s);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(180,195,205,0.4)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-5 * s, 66 * s, 10 * s, 22 * s);
+
+    // 硬币下落动画
+    if (coinAnim) {
+      var cy2 = 20 * s + coinDrop * 50 * s;
+      ctx.fillStyle = '#d4b268';
+      ctx.beginPath();
+      ctx.ellipse(22 * s, cy2, 7 * s, 7 * s * (0.3 + 0.7 * Math.abs(Math.sin(coinDrop * 18))), 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 引导
+    if (!looking && !coinAnim && zoom <= 0) {
+      ctx.fillStyle = 'rgba(150,170,178,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下投币', x, L.h * 0.9 + 30 * s);
+    }
+  }
+
+  // ── 镜中夜海 ──
+  function drawView(now) {
+    var w = L.w, h = L.h;
+    var R = L.viewR * (0.3 + 0.7 * easeInOut(zoom));
+    var cx = L.cx, cy = L.h * 0.46;
+    var sway = Math.sin(now / 1100) * 4;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx + sway, cy + Math.sin(now / 1300) * 3, R, 0, Math.PI * 2);
+    ctx.clip();
+
+    // 夜空
+    var sky = ctx.createLinearGradient(0, cy - R, 0, cy);
+    sky.addColorStop(0, '#0d1822');
+    sky.addColorStop(1, '#16242e');
+    ctx.fillStyle = sky;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    // 星
+    for (var st = 0; st < 14; st++) {
+      ctx.fillStyle = 'rgba(205,220,235,' + 0.35 + rnd(st) * 0.45 + ')';
+      ctx.fillRect(cx - R + rnd(st * 3) * R * 2, cy - R + rnd(st * 7) * R * 1.1, 1.8, 1.8);
+    }
+
+    // 灯塔（右远处小岛）+旋转光束
+    var lhX = cx + R * 0.62, lhY = cy - R * 0.12;
+    ctx.fillStyle = '#1f2c38';
+    ctx.beginPath();
+    ctx.moveTo(lhX - R * 0.07, lhY + R * 0.06);
+    ctx.lineTo(lhX - R * 0.035, lhY - R * 0.14);
+    ctx.lineTo(lhX + R * 0.035, lhY - R * 0.14);
+    ctx.lineTo(lhX + R * 0.07, lhY + R * 0.06);
+    ctx.closePath();
+    ctx.fill();
+    // 塔灯
+    var lampOn = Math.sin(beamA * 2) > -0.6;
+    if (lampOn) {
+      ctx.fillStyle = 'rgba(255,238,180,1)';
+      ctx.beginPath(); ctx.arc(lhX, lhY - R * 0.15, 4.2 * s0() + 1, 0, Math.PI * 2); ctx.fill();
+      // 光束（旋转扫过）
+      var beamLen = R * 1.5;
+      var beamDir = lhX > cx ? -1 : 1;
+      var bAngle = Math.sin(beamA) * 0.5;
+      var beam = ctx.createLinearGradient(lhX, lhY - R * 0.15, lhX + beamDir * beamLen, lhY - R * 0.15 - bAngle * beamLen);
+      beam.addColorStop(0, 'rgba(255,238,180,0.3)');
+      beam.addColorStop(1, 'rgba(255,238,180,0)');
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(lhX, lhY - R * 0.15);
+      ctx.lineTo(lhX + beamDir * beamLen, lhY - R * 0.15 - bAngle * beamLen - beamLen * 0.08);
+      ctx.lineTo(lhX + beamDir * beamLen, lhY - R * 0.15 - bAngle * beamLen + beamLen * 0.08);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 海（下半）
+    var sea = ctx.createLinearGradient(0, cy, 0, cy + R);
+    sea.addColorStop(0, '#142a34');
+    sea.addColorStop(1, '#0c1a21');
+    ctx.fillStyle = sea;
+    ctx.fillRect(cx - R, cy, R * 2, R);
+    // 月光带（竖向碎光）
+    var moonG = ctx.createLinearGradient(cx - R * 0.3, 0, cx + R * 0.3, 0);
+    moonG.addColorStop(0, 'rgba(200,225,230,0)');
+    moonG.addColorStop(0.5, 'rgba(200,225,230,0.20)');
+    moonG.addColorStop(1, 'rgba(200,225,230,0)');
+    ctx.fillStyle = moonG;
+    ctx.fillRect(cx - R, cy, R * 2, R);
+    // 海浪线
+    ctx.strokeStyle = 'rgba(160,205,210,' + 0.2 + 0.1 * Math.sin(now / 600) + ')';
+    ctx.lineWidth = 1.2;
+    for (var wv = 0; wv < 6; wv++) {
+      var wy = cy + R * (0.14 + wv * 0.15);
+      ctx.beginPath();
+      for (var wx = 0; wx <= R * 2; wx += 12) {
+        var yy = wy + Math.sin(wx / 40 + wavePhase * 2 + wv * 1.7) * (3 + wv);
+        if (wx === 0) ctx.moveTo(cx - R + wx, yy);
+        else ctx.lineTo(cx - R + wx, yy);
+      }
+      ctx.stroke();
+    }
+
+    // 货轮灯火（缓慢横移）
+    var shipPx = cx - R + shipX * R * 2;
+    var shipY = cy + R * 0.16;
+    ctx.fillStyle = 'rgba(20,30,36,0.9)';
+    ctx.fillRect(shipPx - R * 0.055, shipY - R * 0.02, R * 0.11, R * 0.035);
+    // 船灯
+    ctx.fillStyle = 'rgba(255,220,150,0.9)';
+    ctx.fillRect(shipPx - R * 0.04, shipY - R * 0.045, 3, 3);
+    ctx.fillRect(shipPx + R * 0.03, shipY - R * 0.05, 2.4, 2.4);
+    ctx.fillRect(shipPx + R * 0.005, shipY - R * 0.075, 2.4, 3.4);
+    // 船的倒影碎光
+    ctx.fillStyle = 'rgba(255,215,145,0.18)';
+    for (var rf = 0; rf < 4; rf++) {
+      ctx.fillRect(shipPx - R * 0.03 + rnd(rf) * R * 0.06, shipY + R * 0.03 + rf * R * 0.035, 2.2, 1.6);
+    }
+
+    // 鱼眼暗角
+    var vig = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R);
+    vig.addColorStop(0, 'rgba(0,0,0,0)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.72)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    ctx.restore();
+
+    // 剩余时间（镜下方小字）
+    if (looking) {
+      ctx.fillStyle = 'rgba(123,149,160,0.7)';
+      ctx.font = Math.round(12 * L.s) + 'px ui-monospace, Menlo, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(lookT) + ' s', cx, cy + R + 30 * L.s);
+    }
+  }
+
+  function s0() { return L.s; }
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__scope = {
+    state: function () { return looking ? 'looking' : (coinAnim ? 'coin' : 'idle'); },
+    t: function () { return +lookT.toFixed(1); },
+    zoom: function () { return +zoom.toFixed(2); },
+    coin: function () {
+      if (!looking && !coinAnim) { coinAnim = true; coinDrop = 0; }
+    },
+    fastForward: function () { if (looking) lookT = 0.05; }
+  };
+})();
+</script>
+</body>
+</html>
