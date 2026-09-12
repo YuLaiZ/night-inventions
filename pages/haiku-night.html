@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜俳句</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0e10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #84878e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #96918a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #66635c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8d8a82;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57544c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6b6860;
+    text-decoration: none;
+    border-bottom: 1px dotted #6b6860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #96918a; border-color: #96918a; }
+
+  /* 诗笺 */
+  .paper {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -54%);
+    width: 210px; min-height: 330px;
+    background: linear-gradient(175deg, #ece6d6 0%, #e2dbc8 100%);
+    border-radius: 4px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.5), inset 0 0 60px rgba(160,140,100,0.12);
+    padding: 26px 20px 56px;
+    z-index: 2;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+  }
+  .paper.fade { opacity: 0.1; transform: translate(-50%, -50%) scale(0.985); }
+  .lines {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    height: 268px;
+    margin: 0 auto;
+  }
+  .lines span {
+    display: block;
+    font-size: 19px;
+    letter-spacing: 0.24em;
+    line-height: 1.7;
+    color: #3c3a33;
+    font-weight: 400;
+  }
+  .lines span:nth-child(2) { padding-top: 24px; }
+  .lines span:nth-child(3) { padding-top: 48px; }
+  .seal {
+    position: absolute;
+    right: 18px; bottom: 44px;
+    width: 34px; height: 34px;
+    background: #b4472f;
+    color: #f2e8d8;
+    font-size: 15px;
+    line-height: 34px;
+    text-align: center;
+    border-radius: 4px;
+    transform: rotate(-6deg);
+    opacity: 0;
+    transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.2, 1.6, 0.4, 1);
+    box-shadow: 0 2px 6px rgba(120,40,20,0.3);
+    user-select: none;
+  }
+  .seal.on { opacity: 0.92; transform: rotate(-6deg) scale(1); }
+  .date-stamp {
+    position: absolute;
+    left: 20px; bottom: 46px;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: rgba(90,80,60,0.55);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+  }
+  .btns {
+    position: absolute;
+    left: 0; right: 0; bottom: 16vh;
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    z-index: 3;
+  }
+  .btns button {
+    background: none;
+    border: 1px solid rgba(190,180,160,0.45);
+    color: #a89e88;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    padding: 10px 22px 10px 24px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.25s, color 0.25s, background 0.25s;
+  }
+  .btns button:hover { border-color: #b4472f; color: #d8cbb2; }
+  .btns button.sealed { border-color: rgba(180,71,47,0.7); color: #c98d76; background: rgba(180,71,47,0.08); cursor: default; }
+  .count {
+    position: absolute; top: 120px; right: 22px;
+    font-size: 11px; letter-spacing: 0.15em;
+    color: rgba(160,150,130,0.5);
+    z-index: 3;
+  }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜俳句</h1>
+  <p>睡不着的时候，抽一首五七五。<br>遇到喜欢的那首，就盖上「收」。</p>
+</div>
+
+<div class="count" id="count">收下 0 首</div>
+
+<div class="paper" id="paper">
+  <div class="lines" id="lines"><span></span><span></span><span></span></div>
+  <div class="date-stamp" id="datestamp"></div>
+  <div class="seal" id="seal">收</div>
+</div>
+
+<div class="btns">
+  <button id="next">再抽一句</button>
+  <button id="keep">收下这首</button>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // ── 词池 ──
+  var POOL_A = ['台灯昏黄里', '冰凉的杯底', '空调的风声', '楼下无车声', '被窝的缺口', '屏幕熄灭后', '今夜第几滴', '路灯亮到头', '翻身的凉意', '凌晨的水声'];
+  var POOL_B = ['明天的事先放一放', '心事折成小纸船', '月亮替我值个班', '被自己呼出的雾', '数到第七次心跳', '窗帘缝里的城市', '把烦躁摆整齐了', '世界缩成一张床', '星星轮流值夜班', '呼吸落在枕头上'];
+  var POOL_C = ['睡意就追上来了', '今夜到此为止吧', '都是可以放下的', '明天再一一捡起', '陪我到天亮就好', '连梦都会变柔软', '夜班也要加油啊', '刚好够做一场梦', '替我说了晚安', '轻轻把我盖上'];
+
+  var lines = [0, 0, 0];
+  var keepCount = 0;
+  var sealed = false;
+
+  var paper = document.getElementById('paper');
+  var lineEls = document.getElementById('lines').children;
+  var sealEl = document.getElementById('seal');
+  var dateEl = document.getElementById('datestamp');
+  var countEl = document.getElementById('count');
+  var nextBtn = document.getElementById('next');
+  var keepBtn = document.getElementById('keep');
+
+  function render() {
+    lineEls[0].textContent = POOL_A[lines[0]];
+    lineEls[1].textContent = POOL_B[lines[1]];
+    lineEls[2].textContent = POOL_C[lines[2]];
+  }
+  function nextHaiku() {
+    sealed = false;
+    sealEl.classList.remove('on');
+    keepBtn.classList.remove('sealed');
+    keepBtn.textContent = '收下这首';
+    paper.classList.add('fade');
+    setTimeout(function () {
+      lines = [
+        Math.floor(Math.random() * POOL_A.length),
+        Math.floor(Math.random() * POOL_B.length),
+        Math.floor(Math.random() * POOL_C.length)
+      ];
+      render();
+      paper.classList.remove('fade');
+    }, 420);
+  }
+  function sealHaiku() {
+    if (sealed) return;
+    sealed = true;
+    keepCount++;
+    countEl.textContent = '收下 ' + keepCount + ' 首';
+    sealEl.classList.add('on');
+    keepBtn.classList.add('sealed');
+    keepBtn.textContent = '已收下';
+    if (keepCount === 1) capSay('收好了。它是你的今夜。');
+    else if (keepCount === 3) capSay('三首了。够带着入睡了。');
+    else capSay('又收一首。夜还长。');
+  }
+  function capSay(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  nextBtn.addEventListener('click', nextHaiku);
+  keepBtn.addEventListener('click', sealHaiku);
+  paper.addEventListener('click', nextHaiku);
+
+  // ── 背景氛围：夜窗微光 ──
+  function layout() {
+    canvas.width = innerWidth * DPR;
+    canvas.height = innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  var dust = [];
+  for (var i = 0; i < 26; i++) dust.push({ x: Math.random(), y: Math.random(), p: Math.random() * Math.PI * 2, v: 0.2 + Math.random() * 0.5 });
+
+  function tick() {
+    var nowT = Date.now();
+    var w = innerWidth, h = innerHeight;
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#101114');
+    bg.addColorStop(1, '#0b0c0e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 浮尘微光
+    for (var d = 0; d < dust.length; d++) {
+      var dd = dust[d];
+      dd.p += 0.008 * dd.v;
+      var dx = dd.x * w + Math.sin(dd.p) * 18;
+      var dy = dd.y * h + Math.cos(dd.p * 0.7) * 12;
+      ctx.fillStyle = 'rgba(210,200,170,' + 0.06 + 0.06 * Math.sin(dd.p * 2) + ')';
+      ctx.fillRect(dx, dy, 1.6, 1.6);
+    }
+    // 月一角
+    ctx.fillStyle = 'rgba(225,225,205,0.5)';
+    ctx.beginPath();
+    ctx.arc(w * 0.82, h * 0.14, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#101114';
+    ctx.beginPath();
+    ctx.arc(w * 0.82 - 10, h * 0.14 - 6, 14, 0, Math.PI * 2);
+    ctx.fill();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // 初始化
+  lines = [
+    Math.floor(Math.random() * POOL_A.length),
+    Math.floor(Math.random() * POOL_B.length),
+    Math.floor(Math.random() * POOL_C.length)
+  ];
+  render();
+  dateEl.textContent = '09 · 12';
+
+  // QA 钩子（无私人信息）
+  window.__haiku = {
+    lines: function () { return lines.slice(); },
+    sealed: function () { return sealed; },
+    keepCount: function () { return keepCount; },
+    next: nextHaiku,
+    seal: sealHaiku
+  };
+})();
+</script>
+</body>
+</html>

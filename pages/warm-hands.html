@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把双手焐热</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0e10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #82868a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a08d7a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #66625c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8d877c;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #56524a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6b675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6b675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a08d7a; border-color: #a08d7a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>把双手焐热</h1>
+  <p>手脚冰凉的人，睡前都要焐很久。<br>按住屏幕，把双手夹进被窝里。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var pressing = false;     // 按住夹紧焐
+  var heat = 0;             // 温度 0-1（满=焐热）
+  var gap = 1;              // 双手间距系数 1→0.25
+  var saidHalf = false, saidFull = false, saidRemember = false;
+  var glowP = 0;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2; L.cy = h * 0.52;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () { pressing = true; });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 311.3) * 43758.5453) % 1; }
+
+  // 色温插值：冷青 → 暖粉
+  function tempColor(t, a) {
+    var r = Math.round(120 + (240 - 120) * t);
+    var g = Math.round(165 + (170 - 165) * t);
+    var b = Math.round(185 + (150 - 185) * t);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 温度：按住升（4 秒满），松手缓降至 0.4（被窝余温）
+    if (pressing) {
+      heat = Math.min(1, heat + dt / 4);
+      gap = Math.max(0.25, gap - dt * 0.4);
+    } else {
+      heat = Math.max(0.4, heat - dt * 0.06);
+      gap = Math.min(1, gap + dt * 0.3);
+    }
+    glowP += dt * (0.6 + heat * 0.8);
+
+    if (heat > 0.5 && !saidHalf) { saidHalf = true; say('暖意从掌心爬上来。'); }
+    if (heat >= 1 && !saidFull) { saidFull = true; say('焐热了。连被窝都是你的温度。', true); }
+    if (saidFull && !pressing && !saidRemember) { saidRemember = true; say('被窝记住了。凉只会有一小会儿。'); }
+
+    // ── 背景：被窝内部 ──
+    var bg = ctx.createRadialGradient(L.cx, L.cy, 30, L.cx, L.cy, Math.max(w, h) * 0.7);
+    bg.addColorStop(0, '#1d1a18');
+    bg.addColorStop(1, '#0e0d0c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 被窝内壁（上缘弧+下缘弧，随温度泛暖）
+    var quiltT = ctx.createLinearGradient(0, 0, 0, L.cy - 60 * s);
+    quiltT.addColorStop(0, '#141210');
+    quiltT.addColorStop(1, tempColor(heat * 0.5, 0.28));
+    ctx.fillStyle = quiltT;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(w, 0);
+    ctx.lineTo(w, L.cy - 80 * s);
+    ctx.quadraticCurveTo(L.cx, L.cy - 130 * s, 0, L.cy - 80 * s);
+    ctx.closePath();
+    ctx.fill();
+    var quiltB = ctx.createLinearGradient(0, h, 0, L.cy + 60 * s);
+    quiltB.addColorStop(0, '#161311');
+    quiltB.addColorStop(1, tempColor(heat * 0.5, 0.28));
+    ctx.fillStyle = quiltB;
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(w, h);
+    ctx.lineTo(w, L.cy + 70 * s);
+    ctx.quadraticCurveTo(L.cx, L.cy + 120 * s, 0, L.cy + 70 * s);
+    ctx.closePath();
+    ctx.fill();
+    // 被窝缝光（上下被缘之间的一线暖光，温度越高越明显）
+    ctx.fillStyle = tempColor(heat, 0.08 + heat * 0.1);
+    ctx.fillRect(0, L.cy - 3 * s, w, 6 * s);
+
+    // ── 双手（左右向中间合拢）──
+    var sep = 118 * s * gap;      // 双掌中心距的一半
+    drawHand(L.cx - sep, L.cy, 1, heat, nowT, s);
+    drawHand(L.cx + sep, L.cy, -1, heat, nowT, s);
+
+    // 掌间暖光（合拢后）
+    if (gap < 0.9) {
+      var palmGlow = ctx.createRadialGradient(L.cx, L.cy, 4, L.cx, L.cy, 90 * s * (0.5 + heat * 0.7));
+      palmGlow.addColorStop(0, tempColor(heat, 0.16 + 0.1 * heat * (0.6 + 0.4 * Math.sin(glowP))));
+      palmGlow.addColorStop(1, tempColor(heat, 0));
+      ctx.fillStyle = palmGlow;
+      ctx.beginPath(); ctx.arc(L.cx, L.cy, 90 * s * (0.5 + heat * 0.7), 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 引导
+    if (heat < 0.03 && !pressing) {
+      ctx.fillStyle = 'rgba(180,170,150,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，双手夹紧', w / 2, L.cy + 140 * s);
+    }
+  }
+
+  // 一只手：掌形剪影（指=五条弧），dir=-1 左手（从左伸出，指尖朝右）
+  function drawHand(hx, hy, dir, heat, nowT, s) {
+    var skin = tempColor(0.25 + heat * 0.75, 0.92);
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.scale(dir, 1);
+    // 手掌（圆角长方微弧）
+    var palm = ctx.createLinearGradient(0, -34 * s, 0, 30 * s);
+    palm.addColorStop(0, tempColor(0.25 + heat * 0.75, 0.95));
+    palm.addColorStop(1, tempColor(0.1 + heat * 0.5, 0.95));
+    ctx.fillStyle = palm;
+    roundRect(-14 * s, -36 * s, 40 * s, 66 * s, 14 * s);
+    ctx.fill();
+    // 四指（弧形并拢，微随呼吸动）
+    var breathe = Math.sin(nowT / 800) * 1.2 * s;
+    for (var f = 0; f < 4; f++) {
+      var fy = -30 * s + f * 15 * s + breathe;
+      ctx.fillStyle = tempColor(0.2 + heat * 0.7, 0.92);
+      roundRect(20 * s, fy, 30 * s + f * 2 * s, 11 * s, 5.5 * s);
+      ctx.fill();
+    }
+    // 拇指（上侧搭过来）
+    ctx.fillStyle = tempColor(0.3 + heat * 0.7, 0.92);
+    ctx.save();
+    ctx.translate(6 * s, -30 * s);
+    ctx.rotate(-0.5);
+    roundRect(0, -6 * s, 30 * s, 12 * s, 6 * s);
+    ctx.fill();
+    ctx.restore();
+    // 掌心暖纹（温度高时现出掌纹微光）
+    if (heat > 0.35) {
+      ctx.strokeStyle = tempColor(heat, 0.25 + heat * 0.2);
+      ctx.lineWidth = 1.4;
+      for (var c = 0; c < 3; c++) {
+        ctx.beginPath();
+        ctx.moveTo(2 * s, -14 * s + c * 12 * s);
+        ctx.quadraticCurveTo(14 * s, -10 * s + c * 12 * s, 22 * s, -14 * s + c * 12 * s);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function tempColor(t, a) {
+    var r = Math.round(120 + (240 - 120) * t);
+    var g = Math.round(165 + (170 - 165) * t);
+    var b = Math.round(185 + (150 - 185) * t);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__hands = {
+    heat: function () { return +heat.toFixed(2); },
+    gap: function () { return +gap.toFixed(2); },
+    pressing: function () { return pressing; },
+    press: function () { pressing = true; },
+    release: function () { pressing = false; }
+  };
+})();
+</script>
+</body>
+</html>

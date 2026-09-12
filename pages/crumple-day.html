@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>揉掉今天</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e0d0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89268; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89268; border-color: #a89268; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>揉掉今天</h1>
+  <p>写废的三张纸，揉成团扔进纸篓。<br>今天的不如意，也一起。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 纸团：{x,y,vx,vy,r,shape,rot,vr,label,state:desk|fly|in|ground}
+  var balls = [];
+  var drag = null;          // {idx, x0,y0, x,y}
+  var inCount = 0;
+  var groundY = 0;
+  var saidOne = false, saidTwo = false, saidDone = false;
+  var flashT = 0;
+
+  var LABELS = ['开会的坏消息', '没赶上的那班车', '吵的那一架'];
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 800, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.groundY = h * 0.78;
+    L.binX = w * 0.72; L.binY = L.groundY;
+    L.binW = 92 * s; L.binH = 110 * s;
+    if (balls.length === 0) initBalls();
+    // 位置按比例重排（桌面纸团）
+    for (var i = 0; i < balls.length; i++) {
+      var b = balls[i];
+      if (b.state === 'desk') { b.x = w * (0.22 + i * 0.13); b.y = L.groundY - 26 * s; }
+      if (b.state === 'in') { b.x = L.binX; b.y = L.binY - L.binH + 16 * s; }
+      if (b.state === 'ground') { b.y = Math.min(b.y, L.groundY - b.r); }
+    }
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function initBalls() {
+    balls = [];
+    for (var i = 0; i < 3; i++) {
+      balls.push({
+        x: L.w * (0.22 + i * 0.13), y: L.groundY - 26 * L.s,
+        vx: 0, vy: 0, r: 22 * L.s,
+        shape: crumpleShape(i),
+        rot: rnd(i * 3) * 0.6 - 0.3, vr: 0,
+        label: LABELS[i], state: 'desk'
+      });
+    }
+  }
+  function crumpleShape(seed) {
+    var arr = [];
+    for (var i = 0; i < 9; i++) arr.push(0.72 + rnd(seed * 13 + i * 5.1) * 0.42);
+    return arr;
+  }
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 941.3) * 43758.5453) % 1; }
+
+  function pickBall(x, y) {
+    for (var i = balls.length - 1; i >= 0; i--) {
+      var b = balls[i];
+      if (b.state === 'in') continue;
+      var dx = x - b.x, dy = y - b.y;
+      if (dx * dx + dy * dy < (b.r + 14 * L.s) * (b.r + 14 * L.s)) return i;
+    }
+    return -1;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var idx = pickBall(ev.clientX, ev.clientY);
+    if (idx >= 0) {
+      drag = { idx: idx, x0: ev.clientX, y0: ev.clientY, x: ev.clientX, y: ev.clientY };
+      balls[idx].state = 'fly';
+      balls[idx].vx = 0; balls[idx].vy = 0;
+    }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!drag) return;
+    drag.x = ev.clientX; drag.y = ev.clientY;
+    var b = balls[drag.idx];
+    b.x = ev.clientX; b.y = ev.clientY;
+  });
+  window.addEventListener('pointerup', function (ev) {
+    if (!drag) return;
+    var b = balls[drag.idx];
+    // 抛掷向量：从按住点到松手点（反向甩出）
+    var vx = (ev.clientX - drag.x0) * 2.4;
+    var vy = (ev.clientY - drag.y0) * 2.4;
+    // 限制力度
+    var sp = Math.sqrt(vx * vx + vy * vy);
+    if (sp > 1400) { vx *= 1400 / sp; vy *= 1400 / sp; }
+    b.vx = vx; b.vy = vy;
+    b.vr = vx / 60;
+    b.state = 'fly';
+    drag = null;
+  });
+  window.addEventListener('pointercancel', function () { drag = null; });
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+    groundY = L.groundY;
+
+    // 飞行物理
+    for (var i = 0; i < balls.length; i++) {
+      var b = balls[i];
+      if (b.state !== 'fly') continue;
+      b.vy += 900 * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.rot += b.vr * dt;
+      // 进篓判定：下落中且纸心在篓口范围内、已过篓口高度
+      var inMouthX = Math.abs(b.x - L.binX) < L.binW * 0.32;
+      var mouthY = L.binY - L.binH;
+      if (b.vy > 0 && inMouthX && b.y > mouthY && b.y < mouthY + 30 * s && b.y < L.binY - 8 * s) {
+        b.state = 'in';
+        b.x = L.binX + (rnd(i + nowT | 0) - 0.5) * 10 * s;
+        b.y = L.binY - L.binH + 14 * s + inCount * 6 * s;
+        inCount++;
+        if (inCount === 1) { saidOne = true; say('咚。少一件。'); }
+        else if (inCount === 2) { say('再来。'); }
+        else if (inCount === 3 && !saidDone) { saidDone = true; say('今天，到此为止。明天是新的一张纸。', true); }
+        continue;
+      }
+      // 篓身碰撞（侧面弹开）
+      if (b.y > L.binY - L.binH && b.y < L.binY && Math.abs(b.x - L.binX) < L.binW / 2 + b.r * 0.5) {
+        if (b.x < L.binX && b.vx > 0) { b.x = L.binX - L.binW / 2 - b.r * 0.5; b.vx *= -0.4; }
+        if (b.x > L.binX && b.vx < 0) { b.x = L.binX + L.binW / 2 + b.r * 0.5; b.vx *= -0.4; }
+      }
+      // 落地
+      if (b.y >= groundY - b.r * 0.6) {
+        b.y = groundY - b.r * 0.6;
+        b.state = 'ground';
+        b.vx = 0; b.vy = 0;
+      }
+    }
+
+    if (flashT > 0) flashT -= dt * 2;
+
+    // ── 背景：深夜书桌一角 ──
+    var bg = ctx.createRadialGradient(w * 0.35, h * 0.4, 30, w * 0.45, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#171411');
+    bg.addColorStop(1, '#0c0a08');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 桌面（左侧）与地面（右侧）
+    var deskEdge = w * 0.52;
+    var desk = ctx.createLinearGradient(0, h * 0.3, 0, h);
+    desk.addColorStop(0, '#2a2118');
+    desk.addColorStop(1, '#1a1510');
+    ctx.fillStyle = desk;
+    ctx.fillRect(0, h * 0.3, deskEdge, h - h * 0.3);
+    var floor = ctx.createLinearGradient(0, L.groundY - 20 * s, 0, h);
+    floor.addColorStop(0, '#1d1811');
+    floor.addColorStop(1, '#12100c');
+    ctx.fillStyle = floor;
+    ctx.fillRect(deskEdge, L.groundY - 20 * s, w - deskEdge, h - L.groundY + 20 * s);
+    // 桌沿
+    ctx.fillStyle = 'rgba(220,190,130,0.12)';
+    ctx.fillRect(0, h * 0.3, deskEdge, 2);
+
+    // ── 纸篓 ──
+    drawBin(nowT);
+
+    // ── 纸团 ──
+    for (var p = 0; p < balls.length; p++) {
+      drawBall(balls[p], nowT);
+    }
+
+    // 投掷预示线
+    if (drag) {
+      var b2 = balls[drag.idx];
+      var vx = (drag.x - drag.x0) * 2.4, vy = (drag.y - drag.y0) * 2.4;
+      var sp = Math.sqrt(vx * vx + vy * vy);
+      if (sp > 1400) { vx *= 1400 / sp; vy *= 1400 / sp; }
+      ctx.strokeStyle = 'rgba(200,185,150,0.22)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([4, 5]);
+      ctx.beginPath();
+      var px2 = b2.x, py2 = b2.y, pvx = vx / 60, pvy = vy / 60;
+      ctx.moveTo(px2, py2);
+      for (var st = 0; st < 14; st++) {
+        px2 += pvx * 0.05; py2 += pvy * 0.05; pvy += 900 * 0.05 * 0.05 * 20;
+        ctx.lineTo(px2, py2);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 引导
+    if (inCount === 0 && !drag) {
+      var any = false;
+      for (var q = 0; q < balls.length; q++) if (balls[q].state !== 'in') any = true;
+      if (any) {
+        ctx.fillStyle = 'rgba(190,175,140,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('按住纸团，往纸篓方向甩出去', w * 0.3, L.groundY + 52 * s);
+      }
+    }
+  }
+
+  function drawBin(nowT) {
+    var s = L.s;
+    var x = L.binX, bottom = L.binY;
+    var bw = L.binW, bh = L.binH;
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x + 4 * s, bottom + 4 * s, bw * 0.62, 8 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 篓身（圆台）
+    var bin = ctx.createLinearGradient(x - bw / 2, 0, x + bw / 2, 0);
+    bin.addColorStop(0, '#37403a');
+    bin.addColorStop(0.5, '#48534b');
+    bin.addColorStop(1, '#2c342f');
+    ctx.fillStyle = bin;
+    ctx.beginPath();
+    ctx.moveTo(x - bw * 0.42, bottom - bh);
+    ctx.lineTo(x + bw * 0.42, bottom - bh);
+    ctx.lineTo(x + bw * 0.5, bottom);
+    ctx.lineTo(x - bw * 0.5, bottom);
+    ctx.closePath();
+    ctx.fill();
+    // 网格纹
+    ctx.strokeStyle = 'rgba(200,215,205,0.14)';
+    ctx.lineWidth = 1;
+    for (var g = 1; g < 5; g++) {
+      var gy = bottom - bh + bh * g / 5;
+      var gw = bw * (0.84 + 0.16 * g / 5) / 2;
+      ctx.beginPath();
+      ctx.moveTo(x - gw, gy); ctx.lineTo(x + gw, gy);
+      ctx.stroke();
+    }
+    for (var g2 = -2; g2 <= 2; g2++) {
+      ctx.beginPath();
+      ctx.moveTo(x + g2 * bw * 0.16, bottom - bh);
+      ctx.lineTo(x + g2 * bw * 0.19, bottom);
+      ctx.stroke();
+    }
+    // 篓口
+    ctx.fillStyle = '#1a201c';
+    ctx.beginPath();
+    ctx.ellipse(x, bottom - bh, bw * 0.42, 8 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,215,205,0.3)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    // 已投入的纸团露头
+    var cnt = 0;
+    for (var i2 = 0; i2 < balls.length; i2++) {
+      if (balls[i2].state === 'in') {
+        ctx.fillStyle = 'rgba(214,208,190,' + 0.9 - cnt * 0.15 + ')';
+        ctx.beginPath();
+        ctx.arc(x + (rnd(i2) - 0.5) * 14 * s, bottom - bh + 6 * s - cnt * 3 * s, 9 * s, 0, Math.PI * 2);
+        ctx.fill();
+        cnt++;
+      }
+    }
+  }
+
+  function drawBall(b, nowT) {
+    var s = L.s;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rot);
+    // 揉皱纸团（不规则多边形+折痕）
+    var body = ctx.createRadialGradient(-b.r * 0.3, -b.r * 0.3, b.r * 0.2, 0, 0, b.r * 1.1);
+    body.addColorStop(0, '#efe9d8');
+    body.addColorStop(0.7, '#d8d0ba');
+    body.addColorStop(1, '#b8ae96');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    for (var i = 0; i <= 9; i++) {
+      var a = i / 9 * Math.PI * 2;
+      var rr = b.r * b.shape[i % 9];
+      var px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py);
+      else {
+        var pa = (i - 0.5) / 9 * Math.PI * 2;
+        var pr = b.r * ((b.shape[(i - 1) % 9] + b.shape[i % 9]) / 2) * 1.02;
+        ctx.quadraticCurveTo(Math.cos(pa) * pr, Math.sin(pa) * pr, px, py);
+      }
+    }
+    ctx.closePath();
+    ctx.fill();
+    // 折痕
+    ctx.strokeStyle = 'rgba(120,110,88,0.4)';
+    ctx.lineWidth = 1;
+    for (var f = 0; f < 4; f++) {
+      ctx.beginPath();
+      var fa = rnd(f + b.label.length) * Math.PI * 2;
+      ctx.moveTo(Math.cos(fa) * b.r * 0.2, Math.sin(fa) * b.r * 0.2);
+      ctx.lineTo(Math.cos(fa + 1.2) * b.r * 0.75, Math.sin(fa + 1.2) * b.r * 0.75);
+      ctx.stroke();
+    }
+    // 字迹残影（第一张有）
+    if (b.label === LABELS[0]) {
+      ctx.strokeStyle = 'rgba(90,80,120,0.4)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-b.r * 0.4, -b.r * 0.1);
+      ctx.quadraticCurveTo(0, -b.r * 0.35, b.r * 0.35, -b.r * 0.05);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__day = {
+    left: function () { var n = 0; for (var i = 0; i < balls.length; i++) if (balls[i].state !== 'in') n++; return n; },
+    inCount: function () { return inCount; },
+    dragging: function () { return !!drag; },
+    dragTo: function (idx, x, y) {
+      drag = { idx: idx, x0: x, y0: y, x: x, y: y };
+      balls[idx].x = x; balls[idx].y = y;
+      balls[idx].state = 'fly';
+    },
+    releaseAt: function (x, y) {
+      if (!drag) return;
+      var b = balls[drag.idx];
+      var vx = (x - drag.x0) * 2.4, vy = (y - drag.y0) * 2.4;
+      var sp = Math.sqrt(vx * vx + vy * vy);
+      if (sp > 1400) { vx *= 1400 / sp; vy *= 1400 / sp; }
+      b.vx = vx; b.vy = vy; b.vr = vx / 60; b.state = 'fly';
+      drag = null;
+    }
+  };
+})();
+</script>
+</body>
+</html>

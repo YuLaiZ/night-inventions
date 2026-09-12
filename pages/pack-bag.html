@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>睡前装包</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e0d0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a08d68; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6b665c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a08d68; border-color: #a08d68; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>睡前装包</h1>
+  <p>明天要带的东西，摊了一地。<br>按住一件，拖进包里——四件齐了，拉上拉链。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 物品：{name, x,y, homeX,homeY, w, draw(ctx,s), state:out|moving|in}
+  var items = [];
+  var zip = 0;              // 拉链 0-1
+  var zipDrag = false;
+  var zipping = false;
+  var done = false;
+  var inCount = 0;
+  var dropFx = [];          // 入包微光
+  var saidKeys = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 800, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.bagX = w * 0.56; L.bagY = h * 0.58;   // 包口中心
+    L.bagW = 260 * s; L.bagH = 190 * s;
+    placeItems();
+  }
+  window.addEventListener('resize', layout);
+
+  function placeItems() {
+    var s = L.s;
+    var spots = [
+      [L.w * 0.13, L.h * 0.40], [L.w * 0.15, L.h * 0.55],
+      [L.w * 0.30, L.h * 0.48], [L.w * 0.20, L.h * 0.68]
+    ];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].state === 'out') { items[i].x = spots[i][0]; items[i].y = spots[i][1]; }
+      if (items[i].state === 'in') { items[i].x = L.bagX + (i % 2 ? 30 : -25) * s; items[i].y = L.bagY + 20 * s + Math.floor(i / 2) * 22 * s; }
+    }
+  }
+
+  function init() {
+    var s = Math.max(0.62, Math.min(1, Math.min(innerWidth / 800, innerHeight / 880)));
+    items = [
+      { name: 'keys', x: 0, y: 0, w: 40 * s, state: 'out' },
+      { name: 'earphone', x: 0, y: 0, w: 34 * s, state: 'out' },
+      { name: 'wallet', x: 0, y: 0, w: 46 * s, state: 'out' },
+      { name: 'cream', x: 0, y: 0, w: 26 * s, state: 'out' }
+    ];
+    layout();
+  }
+  init();
+
+  var dragIdx = -1;
+  function pick(x, y) {
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (it.state !== 'out') continue;
+      var dx = x - it.x, dy = y - it.y;
+      if (dx * dx + dy * dy < (it.w * 0.9) * (it.w * 0.9)) return i;
+    }
+    return -1;
+  }
+  function inBagZone(x, y) {
+    return Math.abs(x - L.bagX) < L.bagW * 0.42 && Math.abs(y - L.bagY) < L.bagH * 0.38;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (done) return;
+    // 拉链
+    if (inCount >= items.length) {
+      var s = L.s;
+      var zx = L.bagX - L.bagW / 2 + zip * L.bagW;
+      var dx = ev.clientX - zx, dy = ev.clientY - (L.bagY - L.bagH / 2);
+      if (dx * dx + dy * dy < (34 * s) * (34 * s)) { zipDrag = true; return; }
+    }
+    var idx = pick(ev.clientX, ev.clientY);
+    if (idx >= 0) dragIdx = idx;
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (zipDrag) {
+      var s = L.s;
+      var t = (ev.clientX - (L.bagX - L.bagW / 2)) / L.bagW;
+      zip = Math.max(0, Math.min(1, t));
+      if (zip >= 0.96 && !done) {
+        done = true;
+        say('包好了。明天的你，抬手就能拿到今天。', true);
+      }
+      return;
+    }
+    if (dragIdx >= 0) {
+      items[dragIdx].x = ev.clientX;
+      items[dragIdx].y = ev.clientY;
+    }
+  });
+  window.addEventListener('pointerup', function (ev) {
+    if (zipDrag) { zipDrag = false; return; }
+    if (dragIdx >= 0) {
+      var it = items[dragIdx];
+      if (inBagZone(ev.clientX, ev.clientY) && !done) {
+        it.state = 'in';
+        inCount++;
+        dropFx.push({ x: ev.clientX, y: ev.clientY, a: 1 });
+        var NAMES = { keys: '钥匙', earphone: '耳机', wallet: '钱包', cream: '护手霜' };
+        if (inCount === 1) say(NAMES[it.name] + '进包。');
+        else if (inCount === items.length) say('四件齐了。按住拉链头，拉上它。', true);
+        else say(NAMES[it.name] + '也进包了。还差 ' + (items.length - inCount) + ' 件。');
+        placeItems();
+      } else {
+        // 回到摊位
+        it.state = 'out';
+        placeItems();
+      }
+      dragIdx = -1;
+    }
+  });
+  window.addEventListener('pointercancel', function () { dragIdx = -1; zipDrag = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 617.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    for (var f = dropFx.length - 1; f >= 0; f--) {
+      dropFx[f].a -= dt * 1.6;
+      dropFx[f].y -= dt * 24;
+      if (dropFx[f].a <= 0) dropFx.splice(f, 1);
+    }
+
+    // ── 背景：暗地板 ──
+    var bg = ctx.createRadialGradient(w * 0.4, h * 0.5, 30, w * 0.45, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#171410');
+    bg.addColorStop(1, '#0c0a08');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 背包（打开的帆布包，俯视）──
+    drawBag(nowT);
+
+    // ── 物品 ──
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].state === 'in' && zip > 0.15) continue;  // 拉上后看不见
+      drawItem(items[i], nowT);
+    }
+
+    // 入包微光
+    for (var g = 0; g < dropFx.length; g++) {
+      var fx = dropFx[g];
+      ctx.strokeStyle = 'rgba(220,205,160,' + fx.a * 0.6 + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(fx.x, fx.y, 14 + (1 - fx.a) * 20, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // 引导
+    if (inCount === 0 && dragIdx < 0 && !done) {
+      ctx.fillStyle = 'rgba(190,175,140,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住一件，拖进包里', L.bagX, L.bagY + L.bagH / 2 + 44 * s);
+    }
+  }
+
+  function drawBag(nowT) {
+    var s = L.s;
+    var x = L.bagX, y = L.bagY, bw = L.bagW, bh = L.bagH;
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(x + 8 * s, y + bh * 0.52, bw * 0.56, bh * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 包身（圆角大矩形，帆布）
+    var canvasG = ctx.createLinearGradient(x - bw / 2, y - bh / 2, x + bw / 2, y + bh / 2);
+    canvasG.addColorStop(0, '#5a4d3a');
+    canvasG.addColorStop(0.5, '#6b5c45');
+    canvasG.addColorStop(1, '#463b2c');
+    ctx.fillStyle = canvasG;
+    roundRect(x - bw / 2, y - bh / 2 + (1 - zip) * 8 * s, bw, bh, 26 * s);
+    ctx.fill();
+    // 包身缝线
+    ctx.strokeStyle = 'rgba(220,205,170,0.2)';
+    ctx.lineWidth = 1.2;
+    roundRect(x - bw / 2 + 12 * s, y - bh / 2 + 12 * s, bw - 24 * s, bh - 24 * s, 18 * s);
+    ctx.stroke();
+    // 包口（拉链缝：未拉上时开口微张）
+    var openW = bw * 0.86 * (1 - zip);
+    if (openW > 2) {
+      ctx.fillStyle = '#181410';
+      ctx.beginPath();
+      ctx.ellipse(x, y - bh * 0.28, openW / 2, 14 * s * (1 - zip * 0.4), 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(200,185,150,0.4)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    // 拉链齿 + 拉链头
+    var zipY = y - bh * 0.28;
+    var zx = x - bw / 2 + zip * bw;
+    ctx.strokeStyle = 'rgba(210,195,160,' + (0.5 + zip * 0.3) + ')';
+    ctx.lineWidth = 3.4 * s;
+    ctx.setLineDash([5 * s, 4 * s]);
+    ctx.beginPath();
+    ctx.moveTo(x - bw * 0.44, zipY);
+    ctx.lineTo(x + bw * 0.44, zipY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 拉链头（可拖）
+    ctx.fillStyle = '#c8b47e';
+    roundRect(zx - 8 * s, zipY - 9 * s, 16 * s, 18 * s, 4 * s);
+    ctx.fill();
+    ctx.fillStyle = '#8a7748';
+    ctx.beginPath(); ctx.arc(zx, zipY + 12 * s, 4.5 * s, 0, Math.PI * 2); ctx.stroke();
+    // 已装物品的微鼓（拉上后）
+    if (zip > 0.6) {
+      ctx.fillStyle = 'rgba(255,240,200,' + 0.05 * zip + ')';
+      roundRect(x - bw * 0.36, y - bh * 0.1, bw * 0.72, bh * 0.5, 18 * s);
+      ctx.fill();
+    }
+  }
+
+  function drawItem(it, nowT) {
+    var s = L.s;
+    var x = it.x, y = it.y;
+    var bob = it.state === 'out' ? Math.sin(nowT / 700 + x) * 1.6 * s : 0;
+    ctx.save();
+    ctx.translate(x, y + bob);
+    if (it.name === 'keys') {
+      // 钥匙串：环+两把钥匙
+      ctx.strokeStyle = '#b8a66e';
+      ctx.lineWidth = 3.4 * s;
+      ctx.beginPath(); ctx.arc(0, 0, 11 * s, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#c8b47e';
+      roundRect(2 * s, 6 * s, 8 * s, 20 * s, 3 * s);
+      ctx.fill();
+      ctx.fillStyle = '#a8925e';
+      roundRect(-9 * s, 8 * s, 8 * s, 15 * s, 3 * s);
+      ctx.fill();
+    } else if (it.name === 'earphone') {
+      // 绕好的耳机圈
+      ctx.strokeStyle = '#d8d3c8';
+      ctx.lineWidth = 4 * s;
+      ctx.beginPath(); ctx.arc(0, 0, 13 * s, 0, Math.PI * 1.7); ctx.stroke();
+      ctx.fillStyle = '#e8e3d8';
+      ctx.beginPath(); ctx.arc(12 * s, -6 * s, 5 * s, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#d8d3c8';
+      ctx.beginPath(); ctx.arc(6 * s, 11 * s, 4.6 * s, 0, Math.PI * 2); ctx.fill();
+    } else if (it.name === 'wallet') {
+      // 短款钱包
+      ctx.fillStyle = '#7a5c40';
+      roundRect(-22 * s, -14 * s, 44 * s, 28 * s, 6 * s);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(230,210,170,0.5)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(-22 * s, -2 * s); ctx.lineTo(22 * s, -2 * s); ctx.stroke();
+      // 扣
+      ctx.fillStyle = '#c8b47e';
+      ctx.beginPath(); ctx.arc(14 * s, 4 * s, 3.4 * s, 0, Math.PI * 2); ctx.fill();
+    } else {
+      // 护手霜小支
+      ctx.fillStyle = '#9aa89a';
+      roundRect(-9 * s, -16 * s, 18 * s, 32 * s, 5 * s);
+      ctx.fill();
+      ctx.fillStyle = '#7d8a7d';
+      roundRect(-4 * s, -22 * s, 8 * s, 7 * s, 2 * s);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(245,245,235,0.7)';
+      ctx.fillRect(-6 * s, -4 * s, 12 * s, 2 * s);
+    }
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__pack = {
+    inBag: function () { return inCount; },
+    zip: function () { return +zip.toFixed(2); },
+    done: function () { return done; },
+    putItem: function (i) {
+      items[i].state = 'in';
+      inCount++;
+      var NAMES = { keys: '钥匙', earphone: '耳机', wallet: '钱包', cream: '护手霜' };
+      if (inCount === 1) say(NAMES[items[i].name] + '进包。');
+      else if (inCount === items.length) say('四件齐了。按住拉链头，拉上它。', true);
+      else say(NAMES[items[i].name] + '也进包了。还差 ' + (items.length - inCount) + ' 件。');
+      placeItems();
+    },
+    zipTo: function (t) { zip = Math.max(0, Math.min(1, t)); if (zip >= 0.96 && !done) { done = true; say('包好了。明天的你，抬手就能拿到今天。', true); } },
+    dragZip: function () { zipDrag = true; }
+  };
+})();
+</script>
+</body>
+</html>

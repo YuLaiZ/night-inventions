@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>睡眠眼罩</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e0d0c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89268; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89268; border-color: #a89268; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>睡眠眼罩</h1>
+  <p>枕头上放着一只睡眠眼罩。<br>按住屏幕，戴上试试——世界黑了，呼吸还在。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var wearing = false;      // 按住=戴眼罩中
+  var wearT = 0;            // 佩戴累计秒
+  var dark = 0;             // 黑暗程度 0-1（缓动）
+  var saidDark = false, saidBreath = false, saidOff = false;
+  var breathePhase = 0;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.bulbX = w * 0.22; L.bulbY = h * 0.34;   // 夜灯
+    L.pillowX = w * 0.5; L.pillowY = h * 0.6; // 枕头
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () {
+    wearing = true;
+  });
+  window.addEventListener('pointerup', function () { wearing = false; });
+  window.addEventListener('pointercancel', function () { wearing = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 611.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    if (wearing) {
+      wearT += dt;
+      if (dark < 0.97 && wearT > 0.4 && !saidDark) { saidDark = true; say('黑了。心跳变得好清楚。'); }
+      if (wearT > 6 && !saidBreath) { saidBreath = true; say('呼——吸——放——慢——'); }
+    } else {
+      if (dark > 0.5 && wearT > 3 && !saidOff) { saidOff = true; say('摘下来了。有点困了？'); }
+      wearT = 0;
+    }
+    dark += ((wearing ? 0.97 : 0) - dark) * Math.min(1, dt * 3.2);
+    breathePhase += dt * (Math.PI * 2 / 5);   // 5 秒一个呼吸循环
+
+    // ── 卧室（暗）──
+    var bg = ctx.createRadialGradient(L.bulbX, L.bulbY, 10, w * 0.5, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#1d1812');
+    bg.addColorStop(1, '#0d0b09');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 夜灯暖光（戴上后变暗）
+    var lampA = (1 - dark * 0.9);
+    var lamp = ctx.createRadialGradient(L.bulbX, L.bulbY, 4, L.bulbX, L.bulbY, 150 * s);
+    lamp.addColorStop(0, 'rgba(235,190,120,' + 0.35 * lampA + ')');
+    lamp.addColorStop(1, 'rgba(235,190,120,0)');
+    ctx.fillStyle = lamp;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(240,205,140,' + 0.85 * lampA + ')';
+    ctx.beginPath(); ctx.arc(L.bulbX, L.bulbY, 12 * s, 0, Math.PI * 2); ctx.fill();
+
+    // 床与枕头
+    var bed = ctx.createLinearGradient(0, h * 0.42, 0, h);
+    bed.addColorStop(0, '#2a231a');
+    bed.addColorStop(1, '#181410');
+    ctx.fillStyle = bed;
+    ctx.fillRect(0, h * 0.44, w, h * 0.56);
+    // 枕头
+    ctx.fillStyle = '#cfc7b4';
+    roundRect(L.pillowX - 110 * s, L.pillowY - 40 * s, 220 * s, 84 * s, 30 * s);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(120,110,90,0.25)';
+    ctx.fillRect(L.pillowX - 110 * s, L.pillowY - 6 * s, 220 * s, 2 * s);
+
+    // 眼罩（放在枕头上；戴上后盖满全屏）
+    if (dark < 0.85) {
+      drawMask(L.pillowX, L.pillowY - 6 * s, 1 - dark, nowT);
+    }
+
+    // ── 戴上后的黑 ──
+    if (dark > 0.01) {
+      // 呼吸微光脉冲（5 秒循环）
+      var br = 0.03 + 0.022 * (0.5 + 0.5 * Math.sin(breathePhase - Math.PI / 2));
+      ctx.fillStyle = 'rgba(8,9,11,' + Math.min(0.985, dark) + ')';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(150,160,185,' + br * dark + ')';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 戴上后黑暗中的文字（极淡）
+    if (dark > 0.9) {
+      var dim = (0.16 + 0.05 * Math.sin(breathePhase)) ;
+      ctx.fillStyle = 'rgba(190,195,215,' + dim + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      if (wearT > 2 && wearT < 6) ctx.fillText('黑了。心跳变得好清楚。', w / 2, h * 0.5);
+      else if (wearT >= 6) ctx.fillText('呼——吸——放——慢——', w / 2, h * 0.5);
+      else ctx.fillText('松开手就摘下来了', w / 2, h * 0.5);
+    }
+
+    // 引导
+    if (!wearing && dark < 0.1) {
+      ctx.fillStyle = 'rgba(190,175,140,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，戴上眼罩', w / 2, L.pillowY + 96 * s);
+    }
+  }
+
+  function drawMask(x, y, alpha, nowT) {
+    var s = L.s;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 松紧带
+    ctx.strokeStyle = '#4a4238';
+    ctx.lineWidth = 5 * s;
+    ctx.beginPath();
+    ctx.moveTo(x - 74 * s, y - 4 * s);
+    ctx.quadraticCurveTo(x, y - 26 * s, x + 74 * s, y - 4 * s);
+    ctx.stroke();
+    // 眼罩体（椭圆布片）
+    var mg = ctx.createLinearGradient(x, y - 20 * s, x, y + 20 * s);
+    mg.addColorStop(0, '#5a5048');
+    mg.addColorStop(1, '#3a332c');
+    ctx.fillStyle = mg;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 70 * s, 24 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 缝线
+    ctx.strokeStyle = 'rgba(220,210,190,0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 58 * s, 18 * s, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 中央小绣花
+    ctx.fillStyle = 'rgba(220,205,175,0.5)';
+    ctx.beginPath(); ctx.arc(x, y, 3 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__mask = {
+    wearing: function () { return wearing; },
+    dark: function () { return +dark.toFixed(2); },
+    wearT: function () { return +wearT.toFixed(1); },
+    press: function () { wearing = true; },
+    release: function () { wearing = false; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把耳朵贴进枕头</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0d10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #80808a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #928ba0; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #63606b; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8b8598;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55525c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #696671;
+    text-decoration: none;
+    border-bottom: 1px dotted #696671;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #928ba0; border-color: #928ba0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>把耳朵贴进枕头</h1>
+  <p>夜深了，床很软。<br>按住屏幕，把耳朵贴进枕头——听你自己的心跳。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var listening = false;    // 按住=耳朵贴下去
+  var sink = 0;             // 贴近程度 0-1（缓动）
+  var bpm = 72;             // 心跳（越听越慢）
+  var beatClock = 0;        // 搏动节拍时钟
+  var beatPulse = 0;        // 每搏脉冲 0-1（快落慢回）
+  var listenT = 0;          // 累计聆听秒
+  var saidListen = false, saidSlow = false, saidMore = false, saidUp = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.pillowY = h * 0.58;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () { listening = true; });
+  window.addEventListener('pointerup', function () { listening = false; });
+  window.addEventListener('pointercancel', function () { listening = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 841.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    sink += ((listening ? 1 : 0) - sink) * Math.min(1, dt * 3);
+    if (listening) {
+      listenT += dt;
+      bpm = Math.max(56, bpm - dt * 0.55);      // 越听越慢（72 → 56 下限）
+      beatClock += dt * (bpm / 60);
+      if (beatClock >= 1) beatClock -= 1;
+      // 搏动脉冲：主搏快落、余波慢回
+      if (beatClock < 0.18) beatPulse = Math.max(beatPulse, 1 - beatClock / 0.18);
+      else beatPulse = Math.max(0, beatPulse - dt * 1.6);
+
+      if (listenT > 1.2 && !saidListen) { saidListen = true; say('咚。咚。世界只剩这个。'); }
+      if (listenT > 10 && !saidSlow) { saidSlow = true; say('它慢下来了。你也是。'); }
+      if (listenT > 22 && !saidMore) { saidMore = true; say('再听一会儿。不着急。'); }
+    } else {
+      if (sink > 0.5 && listenT > 2 && !saidUp) { saidUp = true; say('枕头还记得刚才的节拍。'); }
+      beatPulse = Math.max(0, beatPulse - dt * 2);
+    }
+
+    // ── 背景：暗卧室 ──
+    var bg = ctx.createRadialGradient(w / 2, h * 0.4, 40, w / 2, h * 0.5, Math.max(w, h) * 0.8);
+    bg.addColorStop(0, '#16141b');
+    bg.addColorStop(1, '#0c0b0f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床单
+    var bed = ctx.createLinearGradient(0, L.pillowY - 40 * s, 0, h);
+    bed.addColorStop(0, '#262233');
+    bed.addColorStop(1, '#15121c');
+    ctx.fillStyle = bed;
+    ctx.fillRect(0, L.pillowY - 20 * s, w, h);
+
+    // ── 枕头（心跳搏动：微缩放）──
+    var pw = 300 * s, ph = 110 * s;
+    var pulse = beatPulse * 0.9 * sink;         // 只有贴住时才有搏动感
+    var pillowLift = sink * 14 * s;             // 贴近时视角下沉→枕头上移
+    ctx.save();
+    ctx.translate(w / 2, L.pillowY - pillowLift);
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(0, ph / 2 + 8 * s, pw * 0.55, 14 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 枕身
+    var pg = ctx.createLinearGradient(0, -ph / 2, 0, ph / 2);
+    pg.addColorStop(0, '#d8d2c4');
+    pg.addColorStop(1, '#b7b0a0');
+    ctx.fillStyle = pg;
+    roundRect(-pw / 2, -ph / 2 - pulse * 2 * s, pw * (1 + pulse * 0.01), ph * (1 + pulse * 0.012), 34 * s);
+    ctx.fill();
+    // 枕面缝线
+    ctx.strokeStyle = 'rgba(110,104,92,0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    roundRect(-pw / 2 + 16 * s, -ph / 2 + 14 * s, pw - 32 * s, ph - 28 * s, 24 * s);
+    ctx.stroke();
+
+    // 贴耳点标记（贴住时在枕心现出一个微光点，随搏动闪）
+    if (sink > 0.5) {
+      var beatGlow = ctx.createRadialGradient(0, -4 * s, 2, 0, -4 * s, 46 * s * (0.5 + beatPulse * 0.8));
+      beatGlow.addColorStop(0, 'rgba(200,190,230,' + 0.10 + 0.14 * beatPulse * sink + ')');
+      beatGlow.addColorStop(1, 'rgba(200,190,230,0)');
+      ctx.fillStyle = beatGlow;
+      ctx.fillRect(-pw / 2, -ph, pw * 2, ph * 2);
+      ctx.fillStyle = 'rgba(220,210,245,' + 0.35 + 0.5 * beatPulse + ')';
+      ctx.beginPath(); ctx.arc(0, -4 * s, 3.2 * s + beatPulse * 1.6 * s, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+
+    // 贴近时的暗角（视野收窄向枕心）
+    if (sink > 0.02) {
+      var vig = ctx.createRadialGradient(w / 2, L.pillowY - pillowLift, Math.min(w, h) * (0.62 - sink * 0.22), w / 2, h * 0.5, Math.max(w, h) * 0.75);
+      vig.addColorStop(0, 'rgba(0,0,0,0)');
+      vig.addColorStop(1, 'rgba(0,0,0,' + 0.55 * sink + ')');
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 引导
+    if (sink < 0.05 && !listening) {
+      ctx.fillStyle = 'rgba(165,158,180,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，把耳朵贴进枕头', w / 2, L.pillowY + 110 * s);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__heart = {
+    bpm: function () { return Math.round(bpm); },
+    listening: function () { return listening; },
+    sink: function () { return +sink.toFixed(2); },
+    t: function () { return +listenT.toFixed(1); },
+    press: function () { listening = true; },
+    release: function () { listening = false; }
+  };
+})();
+</script>
+</body>
+</html>

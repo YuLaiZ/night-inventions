@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜水龙头</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0f10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #82878a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #829a99; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #606a68; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #7f8d8b;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #525656;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #646a69;
+    text-decoration: none;
+    border-bottom: 1px dotted #646a69;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #829a99; border-color: #829a99; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜水龙头</h1>
+  <p>滴答。滴答。失眠的人最懂这个声音。<br>按住旋钮，慢慢地拧紧它。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var tightening = false;   // 按住拧旋钮
+  var tight = 0;            // 拧紧度 0-1（满=拧死）
+  var dripT = 0;            // 滴水计时
+  var drop = null;          // 正在坠落的水滴 {x,y,vy}
+  var dropGrow = 0;         // 龙头口聚水 0-1
+  var ripples = [];         // 池底涟漪
+  var finalDrop = false;    // 最后一滴彩蛋已放
+  var quietSince = 0;       // 安静起始时刻
+  var saidQuiet = false, saidLast = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.tapX = w * 0.5;
+    L.tapTop = h * 0.22;      // 旋钮中心
+    L.spoutY = h * 0.40;      // 出水口
+    L.poolY = h * 0.72;       // 池底水面
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function inKnob(x, y) {
+    var dx = x - L.tapX, dy = y - L.tapTop;
+    return dx * dx + dy * dy < (44 * L.s) * (44 * L.s);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!inKnob(ev.clientX, ev.clientY)) return;
+    tightening = true;
+  });
+  window.addEventListener('pointerup', function () { tightening = false; });
+  window.addEventListener('pointercancel', function () { tightening = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 571.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 拧紧：按住旋转
+    if (tightening && tight < 1) {
+      tight = Math.min(1, tight + dt / 3);
+      if (tight >= 1 && !saidQuiet) {
+        saidQuiet = true;
+        quietSince = nowT;
+        say('世界安静了。');
+      }
+    }
+    // 拧到底后再按住 2.5 秒：最后一滴
+    if (tight >= 1 && tightening && !finalDrop && nowT - quietSince > 2500) {
+      finalDrop = true;
+      drop = { x: L.tapX + 34 * s, y: L.spoutY + 8 * s, vy: 0 };
+      saidLast = false;
+    }
+    if (finalDrop && !saidLast && !drop && nowT - quietSince > 2500) {
+      saidLast = true;
+      say('连最后一滴都放下了。睡吧。', true);
+    }
+
+    // 滴水生成：频率随拧紧度锐减
+    if (!drop && tight < 1) {
+      var interval = 1.4 - tight * 1.05;    // 1.4s → 0.35s
+      dripT += dt;
+      dropGrow = Math.min(1, dripT / interval);
+      if (dripT >= interval) {
+        dripT = 0;
+        drop = { x: L.tapX + 34 * s, y: L.spoutY + 8 * s, vy: 0 };
+      }
+    } else {
+      dropGrow = tight >= 1 ? dropGrow : Math.max(0, dropGrow - dt);
+    }
+
+    // 水滴坠落
+    if (drop) {
+      drop.vy += 780 * dt;
+      drop.y += drop.vy * dt;
+      if (drop.y >= L.poolY) {
+        ripples.push({ x: drop.x, y: L.poolY, r: 2, a: 0.5 });
+        drop = null;
+      }
+    }
+    for (var r2 = ripples.length - 1; r2 >= 0; r2--) {
+      var rp = ripples[r2];
+      rp.r += dt * 30;
+      rp.a -= dt * 0.8;
+      if (rp.a <= 0) ripples.splice(r2, 1);
+    }
+
+    // ── 背景：暗洗手间墙砖 ──
+    ctx.fillStyle = '#121717';
+    ctx.fillRect(0, 0, w, h);
+    // 砖缝
+    ctx.strokeStyle = 'rgba(20,26,26,0.8)';
+    ctx.lineWidth = 1.4;
+    for (var row = 0; row < 8; row++) {
+      var ry = row * h * 0.11;
+      ctx.beginPath(); ctx.moveTo(0, ry); ctx.lineTo(w, ry); ctx.stroke();
+    }
+    for (var col = 0; col < 6; col++) {
+      var cxx = col * w / 6 + (row % 2) * 0;
+      ctx.beginPath(); ctx.moveTo(cxx, 0); ctx.lineTo(cxx, h); ctx.stroke();
+    }
+    // 中央微光
+    var glow = ctx.createRadialGradient(L.tapX, L.spoutY, 20, L.tapX, L.spoutY, Math.max(w, h) * 0.5);
+    glow.addColorStop(0, 'rgba(170,200,195,0.08)');
+    glow.addColorStop(1, 'rgba(170,200,195,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 洗手池沿 ──
+    var basinTop = L.poolY - 6 * s;
+    ctx.fillStyle = '#222a2b';
+    roundRect(L.tapX - 170 * s, basinTop - 26 * s, 340 * s, 40 * s, 10 * s);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(190,215,210,0.10)';
+    ctx.fillRect(L.tapX - 170 * s, basinTop - 26 * s, 340 * s, 2);
+
+    // 池内水面
+    var pool = ctx.createLinearGradient(0, L.poolY - 10 * s, 0, L.poolY + 40 * s);
+    pool.addColorStop(0, 'rgba(90,140,150,0.20)');
+    pool.addColorStop(1, 'rgba(90,140,150,0.05)');
+    ctx.fillStyle = pool;
+    ctx.beginPath();
+    ctx.ellipse(L.tapX, L.poolY, 150 * s, 34 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 涟漪
+    for (var r3 = 0; r3 < ripples.length; r3++) {
+      var rr = ripples[r3];
+      ctx.strokeStyle = 'rgba(170,215,210,' + rr.a * 0.6 + ')';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.ellipse(rr.x, rr.y, rr.r, rr.r * 0.24, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ── 水龙头 ──
+    drawTap(nowT);
+
+    // ── 水柱余滴（出水口到池面的细水线，拧紧前）──
+    if (tight < 1) {
+      var leakA = 0.06 + (1 - tight) * 0.05;
+      ctx.strokeStyle = 'rgba(170,215,215,' + leakA + ')';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(L.tapX + 34 * s, L.spoutY + 6 * s);
+      ctx.lineTo(L.tapX + 34 * s, L.poolY);
+      ctx.stroke();
+    }
+
+    // 坠落水滴
+    if (drop) {
+      var stretch = Math.min(2, 1 + drop.vy / 300);
+      ctx.fillStyle = 'rgba(180,225,225,0.85)';
+      ctx.beginPath();
+      ctx.ellipse(drop.x, drop.y, 3.2 * s, 4.6 * s * stretch, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 龙头口聚水（将落未落）
+    if (dropGrow > 0.05 && !drop) {
+      ctx.fillStyle = 'rgba(180,225,225,0.8)';
+      ctx.beginPath();
+      ctx.ellipse(L.tapX + 34 * s, L.spoutY + 8 * s + dropGrow * 3 * s, 3.4 * s * (0.5 + dropGrow * 0.7), 4.4 * s * (0.5 + dropGrow), 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 最后一滴（悬挂）
+    if (finalDrop && tight >= 1) {
+      var hang = 0.85 + Math.sin(nowT / 400) * 0.1;
+      ctx.fillStyle = 'rgba(190,230,230,0.9)';
+      ctx.beginPath();
+      ctx.ellipse(L.tapX + 34 * s, L.spoutY + 8 * s + 2 * s, 3.6 * s * hang, 5 * s * hang, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 悬滴高光
+      ctx.fillStyle = 'rgba(240,250,250,0.5)';
+      ctx.beginPath();
+      ctx.arc(L.tapX + 33 * s, L.spoutY + 6.5 * s, 1.1 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (tight < 0.05) {
+      ctx.fillStyle = 'rgba(150,175,172,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住旋钮，慢慢拧紧', L.tapX, L.poolY + 56 * s);
+    }
+  }
+
+  function drawTap(nowT) {
+    var s = L.s;
+    var x = L.tapX;
+    // 出水管（从墙伸出的横管+下弯口）
+    ctx.strokeStyle = '#3a4448';
+    ctx.lineWidth = 13 * s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 150 * s, L.spoutY - 30 * s);
+    ctx.lineTo(x - 40 * s, L.spoutY - 30 * s);
+    ctx.quadraticCurveTo(x - 6 * s, L.spoutY - 30 * s, x - 2 * s, L.spoutY + 2 * s);
+    ctx.stroke();
+    // 出水口
+    ctx.fillStyle = '#2c3437';
+    ctx.beginPath();
+    ctx.ellipse(x + 34 * s, L.spoutY + 6 * s, 9 * s, 5 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 立杆连旋钮
+    ctx.strokeStyle = '#3a4448';
+    ctx.lineWidth = 9 * s;
+    ctx.beginPath();
+    ctx.moveTo(x, L.spoutY - 30 * s);
+    ctx.lineTo(x, L.tapTop + 26 * s);
+    ctx.stroke();
+
+    // 十字旋钮（拧紧时旋转）
+    var knobA = tight * Math.PI * 1.5;
+    ctx.save();
+    ctx.translate(x, L.tapTop);
+    ctx.rotate(knobA);
+    // 金属圆座
+    var knob = ctx.createRadialGradient(-6 * s, -6 * s, 3, 0, 0, 38 * s);
+    knob.addColorStop(0, '#8fa5a2');
+    knob.addColorStop(0.7, '#5f7471');
+    knob.addColorStop(1, '#3c4a48');
+    ctx.fillStyle = knob;
+    ctx.beginPath(); ctx.arc(0, 0, 36 * s, 0, Math.PI * 2); ctx.fill();
+    // 十字柄
+    ctx.fillStyle = '#4d5f5c';
+    for (var a = 0; a < 4; a++) {
+      ctx.save();
+      ctx.rotate(a * Math.PI / 2);
+      roundRect(-7 * s, -40 * s, 14 * s, 34 * s, 6 * s);
+      ctx.fill();
+      // 柄端亮线
+      ctx.fillStyle = 'rgba(220,235,232,0.35)';
+      ctx.fillRect(-5 * s, -38 * s, 10 * s, 2.4 * s);
+      ctx.fillStyle = '#4d5f5c';
+      ctx.restore();
+    }
+    // 中心帽
+    ctx.fillStyle = '#2c3437';
+    ctx.beginPath(); ctx.arc(0, 0, 10 * s, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // 拧紧进度细弧
+    if (tight > 0.02 && tight < 1) {
+      ctx.strokeStyle = 'rgba(130,200,190,' + 0.35 + 0.15 * Math.sin(nowT / 300) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, L.tapTop, 46 * s, -Math.PI / 2, -Math.PI / 2 + tight * Math.PI * 2);
+      ctx.stroke();
+    }
+    // 拧满的安静标
+    if (tight >= 1) {
+      ctx.strokeStyle = 'rgba(130,200,190,0.35)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, L.tapTop, 46 * s, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__tap = {
+    tight: function () { return +tight.toFixed(2); },
+    dripping: function () { return tight < 1; },
+    drop: function () { return drop ? +drop.y.toFixed(0) : null; },
+    ripples: function () { return ripples.length; },
+    finalDrop: function () { return finalDrop; },
+    press: function () { tightening = true; },
+    release: function () { tightening = false; }
+  };
+})();
+</script>
+</body>
+</html>

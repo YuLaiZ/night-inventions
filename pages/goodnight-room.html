@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晚安，房间</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0b0c10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7f828a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8b8e9c; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #61646e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #85889a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #53555e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #666872;
+    text-decoration: none;
+    border-bottom: 1px dotted #666872;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8b8e9c; border-color: #8b8e9c; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>晚安，房间</h1>
+  <p>睡前最后一件事：跟房间里的它们，逐一说晚安。<br>点亮着的那个——它听到了，就会先睡。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 告别顺序：台灯→绿萝→水杯→闹钟→窗帘→(最后)今天的自己
+  var ORDER = ['lamp', 'plant', 'cup', 'clock', 'curtain', 'self'];
+  var GREET = {
+    lamp: '晚安，台灯。今天辛苦地亮了一整天。',
+    plant: '晚安，绿萝。土是湿的，别担心。',
+    cup: '晚安，水杯。剩半杯水，给夜里醒来的我。',
+    clock: '晚安，闹钟。明天七点，拜托了。',
+    curtain: '晚安，窗帘。缝留着，光认识路。',
+    self: '晚安，今天的自己。你已经做得够好了。'
+  };
+  var greeted = {};
+  ORDER.forEach(function (k) { greeted[k] = false; });
+  var curIdx = 0;
+  var fadeP = 0;            // 告别后熄灭动画
+  var allDone = false;
+  var saidFinal = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  // 物件布局（相对系数）
+  var POS = {
+    lamp:    { fx: 0.18, fy: 0.52 },
+    plant:   { fx: 0.30, fy: 0.62 },
+    cup:     { fx: 0.44, fy: 0.56 },
+    clock:   { fx: 0.62, fy: 0.47 },
+    curtain: { fx: 0.80, fy: 0.40 },
+    self:    { fx: 0.52, fy: 0.70 }
+  };
+
+  function hit(x, y) {
+    if (allDone || curIdx >= ORDER.length) return null;
+    var key = ORDER[curIdx];
+    var p = POS[key];
+    var px = p.fx * L.w, py = p.fy * L.h;
+    var dx = x - px, dy = y - py;
+    var r = key === 'curtain' ? 60 * L.s : 44 * L.s;
+    return dx * dx + dy * dy < r * r ? key : null;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var key = hit(ev.clientX, ev.clientY);
+    if (!key) return;
+    greeted[key] = true;
+    fadeP = 0.0001;
+    say(GREET[key]);
+    curIdx++;
+    if (curIdx >= ORDER.length && !allDone) {
+      allDone = true;
+    }
+  });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 141.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    var totalLit = ORDER.filter(function (k) { return !greeted[k]; }).length;
+
+    // ── 房间亮度：每道一次晚安，整体暗一分 ──
+    var doneCount = ORDER.length - totalLit - (allDone ? 0 : 0);
+    var ambient = 0.30 - doneCount * 0.042;    // 0.30 → ~0.09
+    if (allDone) ambient = 0.075;
+
+    // ── 墙与地板 ──
+    var wall = ctx.createLinearGradient(0, 0, 0, h * 0.72);
+    wall.addColorStop(0, 'rgba(22,24,32,' + (ambient + 0.14) + ')');
+    wall.addColorStop(1, 'rgba(30,32,42,' + (ambient + 0.14) + ')');
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 0, w, h * 0.72);
+    var floor = ctx.createLinearGradient(0, h * 0.72, 0, h);
+    floor.addColorStop(0, 'rgba(38,34,30,' + (ambient + 0.16) + ')');
+    floor.addColorStop(1, 'rgba(20,18,16,' + (ambient + 0.16) + ')');
+    ctx.fillStyle = floor;
+    ctx.fillRect(0, h * 0.72, w, h * 0.28);
+
+    // 窗外一线夜光（永远留着）
+    ctx.fillStyle = 'rgba(130,150,190,' + 0.10 + 0.02 * Math.sin(nowT / 900) + ')';
+    ctx.fillRect(w * 0.86, h * 0.22, w * 0.10, h * 0.3);
+
+    // ── 物件 ──
+    var allGreeted = ORDER.every(function (k) { return greeted[k]; });
+    // 台灯
+    drawLamp(POS.lamp, greeted, s, nowT, ambient);
+    // 绿萝
+    drawPlant(POS.plant, greeted, s, nowT, ambient);
+    // 水杯
+    drawCup(POS.cup, greeted, s, nowT, ambient);
+    // 闹钟
+    drawClock(POS.clock, greeted, s, nowT, ambient);
+    // 窗帘
+    drawCurtain(POS.curtain, greeted, s, nowT, ambient);
+    // 床+自己（最后）
+    drawSelf(POS.self, greeted, s, nowT, ambient);
+
+    // 当前待告别高亮圈
+    if (!allDone && curIdx < ORDER.length) {
+      var key = ORDER[curIdx];
+      var p = POS[key];
+      var pr = 34 * s + 3 * s * Math.sin(nowT / 380);
+      ctx.strokeStyle = 'rgba(220,210,180,' + 0.35 + 0.15 * Math.sin(nowT / 380) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath(); ctx.arc(p.fx * w, p.fy * h, pr, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      // 名字
+      var NAMES = { lamp: '台灯', plant: '绿萝', cup: '水杯', clock: '闹钟', curtain: '窗帘', self: '今天的自己' };
+      ctx.fillStyle = 'rgba(220,210,180,' + 0.55 + ')';
+      ctx.font = Math.round(12.5 * s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(NAMES[key], p.fx * w, p.fy * h + (key === 'curtain' ? -52 * s : 58 * s));
+    }
+
+    // 尾句
+    if (allDone && !saidFinal) {
+      saidFinal = true;
+      setTimeout(function () { say('都睡下了。你也是。晚安。', true); }, 900);
+    }
+
+    // 引导
+    if (!allDone && totalLit === ORDER.length && !greeted[ORDER[0]]) {
+      ctx.fillStyle = 'rgba(175,178,190,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点亮着的那个，说声晚安', w / 2, h * 0.9);
+    }
+    if (allDone) {
+      ctx.fillStyle = 'rgba(150,152,165,' + (0.2 + 0.1 * Math.sin(nowT / 700)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('（刷新页面，可以再道一次晚安）', w / 2, h * 0.9);
+    }
+  }
+
+  function drawLamp(p, greeted, s, nowT, ambient) {
+    var x = p.fx * L.w, y = p.fy * L.h;
+    var lit = !greeted.lamp;
+    // 灯罩
+    ctx.fillStyle = lit ? 'rgba(216,180,120,0.9)' : 'rgba(120,110,95,0.6)';
+    ctx.beginPath();
+    ctx.moveTo(x - 26 * s, y - 8 * s);
+    ctx.quadraticCurveTo(x, y - 58 * s, x + 26 * s, y - 8 * s);
+    ctx.closePath(); ctx.fill();
+    // 立杆
+    ctx.strokeStyle = lit ? 'rgba(180,150,100,0.8)' : 'rgba(110,100,85,0.6)';
+    ctx.lineWidth = 3.4 * s;
+    ctx.beginPath(); ctx.moveTo(x, y - 8 * s); ctx.lineTo(x, y + 34 * s); ctx.stroke();
+    // 底座
+    ctx.fillStyle = lit ? 'rgba(180,150,100,0.8)' : 'rgba(110,100,85,0.6)';
+    ctx.beginPath(); ctx.ellipse(x, y + 36 * s, 20 * s, 5 * s, 0, 0, Math.PI * 2); ctx.fill();
+    // 灯下光（亮时）
+    if (lit) {
+      var g = ctx.createRadialGradient(x, y - 6 * s, 4, x, y - 6 * s, 70 * s);
+      g.addColorStop(0, 'rgba(235,195,120,0.28)');
+      g.addColorStop(1, 'rgba(235,195,120,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - 80 * s, y - 70 * s, 160 * s, 160 * s);
+    }
+  }
+
+  function drawPlant(p, greeted, s, nowT, ambient) {
+    var x = p.fx * L.w, y = p.fy * L.h;
+    var lit = !greeted.plant;
+    // 花盆
+    ctx.fillStyle = lit ? 'rgba(150,110,80,0.85)' : 'rgba(95,85,70,0.6)';
+    ctx.beginPath();
+    ctx.moveTo(x - 15 * s, y - 6 * s); ctx.lineTo(x + 15 * s, y - 6 * s);
+    ctx.lineTo(x + 11 * s, y + 20 * s); ctx.lineTo(x - 11 * s, y + 20 * s);
+    ctx.closePath(); ctx.fill();
+    // 叶（数片，随夜呼吸微动）
+    var sway = Math.sin(nowT / 900) * 2 * s;
+    ctx.strokeStyle = lit ? 'rgba(120,170,110,0.85)' : 'rgba(70,90,70,0.6)';
+    ctx.lineWidth = 2.6 * s;
+    ctx.lineCap = 'round';
+    for (var l = 0; l < 5; l++) {
+      var a = -Math.PI / 2 + (l - 2) * 0.32;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 4 * s);
+      ctx.quadraticCurveTo(x + Math.cos(a) * 16 * s + sway, y - 24 * s, x + Math.cos(a) * 28 * s + sway * 1.6, y - 36 * s - Math.abs(l - 2) * 2 * s);
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+  }
+
+  function drawCup(p, greeted, s, nowT, ambient) {
+    var x = p.fx * L.w, y = p.fy * L.h;
+    var lit = !greeted.cup;
+    ctx.fillStyle = lit ? 'rgba(210,205,190,0.9)' : 'rgba(130,126,116,0.6)';
+    roundRect(x - 13 * s, y - 18 * s, 26 * s, 34 * s, 5 * s);
+    ctx.fill();
+    // 杯口
+    ctx.fillStyle = lit ? 'rgba(240,236,225,0.9)' : 'rgba(150,146,136,0.6)';
+    ctx.beginPath(); ctx.ellipse(x, y - 18 * s, 13 * s, 4 * s, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawClock(p, greeted, s, nowT, ambient) {
+    var x = p.fx * L.w, y = p.fy * L.h;
+    var lit = !greeted.clock;
+    ctx.fillStyle = lit ? 'rgba(190,195,210,0.9)' : 'rgba(115,118,130,0.6)';
+    ctx.beginPath(); ctx.arc(x, y, 17 * s, 0, Math.PI * 2); ctx.fill();
+    // 表盘指针（亮时走，道晚安后停）
+    ctx.strokeStyle = lit ? '#3c3f4a' : '#4a4d58';
+    ctx.lineWidth = 1.8 * s;
+    var nowMin = (nowT / 1000) % 60;
+    var a1 = nowMin / 60 * Math.PI * 2 - Math.PI / 2;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a1) * 10 * s, y + Math.sin(a1) * 10 * s); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 5 * s, y - 6 * s); ctx.stroke();
+  }
+
+  function drawCurtain(p, greeted, s, nowT, ambient) {
+    var x = p.fx * L.w, y = p.fy * L.h;
+    var lit = !greeted.curtain;
+    var cw = 54 * s, chh = 150 * s;
+    ctx.fillStyle = lit ? 'rgba(90,100,125,0.55)' : 'rgba(45,50,66,0.5)';
+    ctx.fillRect(x - cw / 2, y - chh / 2, cw, chh);
+    // 竖褶
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (var f = 0; f < 4; f++) {
+      ctx.beginPath();
+      ctx.moveTo(x - cw / 2 + (f + 0.5) * cw / 4, y - chh / 2);
+      ctx.lineTo(x - cw / 2 + (f + 0.5) * cw / 4, y + chh / 2);
+      ctx.stroke();
+    }
+  }
+
+  function drawSelf(p, greeted, s, nowT, ambient) {
+    var x = p.fx * L.w, y = p.fy * L.h;
+    var lit = !greeted.self;
+    // 床
+    ctx.fillStyle = lit ? 'rgba(120,105,85,0.7)' : 'rgba(75,66,54,0.6)';
+    roundRect(x - 90 * s, y - 16 * s, 180 * s, 52 * s, 12 * s);
+    ctx.fill();
+    // 躺卧剪影（自己）
+    ctx.fillStyle = lit ? 'rgba(52,50,70,0.9)' : 'rgba(30,28,40,0.8)';
+    ctx.beginPath();
+    ctx.ellipse(x - 20 * s, y + 2 * s, 34 * s, 11 * s, 0.06, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 22 * s, y - 8 * s, 9 * s, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function tempA(a) { return a; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__room = {
+    current: function () { return curIdx < ORDER.length ? ORDER[curIdx] : 'self-done'; },
+    greeted: function () { return ORDER.filter(function (k) { return greeted[k]; }).length; },
+    allDone: function () { return allDone; },
+    greet: function () {
+      var key = ORDER[curIdx];
+      if (!key) return;
+      greeted[key] = true;
+      curIdx++;
+      if (curIdx >= ORDER.length) allDone = true;
+    }
+  };
+})();
+</script>
+</body>
+</html>
