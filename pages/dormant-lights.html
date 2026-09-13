@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把小灯都贴上</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #08090b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7c7f86;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8b8e96; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5d6066; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #82858c;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e5054;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5f6167;
+    text-decoration: none;
+    border-bottom: 1px dotted #5f6167;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8b8e96; border-color: #8b8e96; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>把小灯都贴上</h1>
+  <p>黑暗的卧室里，总有些小灯闪个不停。<br>按住它们，一张一张贴住——房间才肯承认是夜里。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 待机灯：{fx,fy,color,mode:blink|steady|slow,name,covered,tilt}
+  var LIGHTS = [
+    { fx: 0.24, fy: 0.52, color: '110,230,140', mode: 'blink', name: '路由器', tilt: -7 },
+    { fx: 0.52, fy: 0.44, color: '240,90,80',  mode: 'steady', name: '电视', tilt: 5 },
+    { fx: 0.70, fy: 0.60, color: '120,200,240', mode: 'steady', name: '充电器', tilt: -4 },
+    { fx: 0.86, fy: 0.50, color: '240,180,90',  mode: 'slow',  name: '机顶盒', tilt: 8 }
+  ];
+  LIGHTS.forEach(function (l, i) { l.covered = false; l.tilt = (rnd(i * 7) - 0.5) * 16; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 131.3) * 43758.5453) % 1; }
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function hit(x, y) {
+    for (var i = 0; i < LIGHTS.length; i++) {
+      if (LIGHTS[i].covered) continue;
+      var lx = LIGHTS[i].fx * L.w, ly = LIGHTS[i].fy * L.h;
+      var dx = x - lx, dy = y - ly;
+      if (dx * dx + dy * dy < (30 * L.s) * (30 * L.s)) return i;
+    }
+    return -1;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var i = hit(ev.clientX, ev.clientY);
+    if (i < 0) return;
+    LIGHTS[i].covered = true;
+    var left = LIGHTS.filter(function (l) { return !l.covered; }).length;
+    if (left === 2) say('还有两个。它们在装无辜。');
+    else if (left === 1) say('最后一个了。');
+    else if (left === 0) say('都贴住了。房间终于承认是夜里了。', true);
+    else say('啪。世界安静了一点。');
+  });
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    // ── 背景：极暗卧室 ──
+    ctx.fillStyle = '#07080a';
+    ctx.fillRect(0, 0, w, h);
+    // 隐约的柜面轮廓
+    ctx.fillStyle = 'rgba(255,255,255,0.018)';
+    ctx.fillRect(w * 0.06, h * 0.56, w * 0.88, h * 0.1);
+    ctx.fillRect(w * 0.10, h * 0.40, w * 0.55, h * 0.16);
+
+    // ── 待机灯 ──
+    for (var i = 0; i < LIGHTS.length; i++) {
+      var lt = LIGHTS[i];
+      var lx = lt.fx * w, ly = lt.fy * h;
+      if (lt.covered) {
+        // 贴纸（米色小方块，微歪）
+        ctx.save();
+        ctx.translate(lx, ly);
+        ctx.rotate(lt.tilt * Math.PI / 180);
+        ctx.fillStyle = 'rgba(228,220,198,0.16)';
+        roundRect(-13 * s, -9 * s, 26 * s, 18 * s, 3 * s);
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
+      // 亮灭状态
+      var on = true;
+      if (lt.mode === 'blink') on = Math.floor(nowT / 600) % 2 === 0;
+      else if (lt.mode === 'slow') on = Math.sin(nowT / 900) > -0.3;
+      var a = on ? 0.9 : 0.12;
+      // 光晕
+      var g = ctx.createRadialGradient(lx, ly, 1, lx, ly, 22 * s);
+      g.addColorStop(0, 'rgba(' + lt.color + ',' + a * 0.5 + ')');
+      g.addColorStop(1, 'rgba(' + lt.color + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(lx, ly, 22 * s, 0, Math.PI * 2); ctx.fill();
+      // 灯点
+      ctx.fillStyle = 'rgba(' + lt.color + ',' + a + ')';
+      ctx.beginPath(); ctx.arc(lx, ly, 3.2 * s, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 引导
+    var left = LIGHTS.filter(function (l) { return !l.covered; }).length;
+    if (left === LIGHTS.length) {
+      ctx.fillStyle = 'rgba(150,152,160,' + (0.28 + 0.18 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住亮着的小灯，贴住它', w / 2, h * 0.8);
+    } else if (left > 0) {
+      ctx.fillStyle = 'rgba(150,152,160,' + 0.22 + ')';
+      ctx.font = '12px ui-monospace, Menlo, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('剩 ' + left + ' 盏', w / 2, h * 0.8);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__lights = {
+    lit: function () { return LIGHTS.filter(function (l) { return !l.covered; }).length; },
+    covered: function () { return LIGHTS.filter(function (l) { return l.covered; }).length; },
+    coverAt: function (i) {
+      LIGHTS[i].covered = true;
+      var left = LIGHTS.filter(function (l) { return !l.covered; }).length;
+      if (left === 2) say('还有两个。它们在装无辜。');
+      else if (left === 1) say('最后一个了。');
+      else if (left === 0) say('都贴住了。房间终于承认是夜里了。', true);
+      else say('啪。世界安静了一点。');
+    }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>半夜偷糖</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0c0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d8a86a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a08d70;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d8a86a; border-color: #d8a86a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>半夜偷糖</h1>
+  <p>床头柜的糖罐里，最后一颗留了好几天。<br>按住屏幕，伸手摸出来。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // 阶段：jar(糖在罐里) → taken(摸出带糖纸) → unwrapped(剥开含着) → melted(化完)
+  var phase = 'jar';
+  var pressT = 0;           // 按住进度（取出/剥开各需按住 1.2s）
+  var unwrapA = 0;          // 糖纸展开角
+  var melt = 0;             // 融化进度 0-1
+  var ripples = [];         // 甜蜜涟漪
+  var sparkles = [];        // 甜光点
+  var saidTaste = false, saidGone = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.jarX = w * 0.46; L.jarBase = h * 0.68;
+    L.candyX = w * 0.46; L.candyY = h * 0.68 - 15 * (Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880))));
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function hitJar(x, y) {
+    var dx = x - L.jarX, dy = y - (L.jarBase - 60 * L.s);
+    return dx * dx + dy * dy < (70 * L.s) * (70 * L.s);
+  }
+  function hitCandy(x, y) {
+    if (phase !== 'taken') return false;
+    var dx = x - L.candyX, dy = y - L.candyY;
+    return dx * dx + dy * dy < (40 * L.s) * (40 * L.s);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (phase === 'jar' && hitJar(ev.clientX, ev.clientY)) {
+      pressing = true;
+    } else if (phase === 'taken' && hitCandy(ev.clientX, ev.clientY)) {
+      pressing = true;
+    }
+  });
+  var pressing = false;
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 381.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    // 按住进度
+    if (pressing) {
+      pressT += dt / 1.2;
+      if (pressT >= 1) {
+        pressing = false;
+        pressT = 0;
+        if (phase === 'jar') {
+          phase = 'taken';
+          say('摸到了。橘子味的。');
+        } else if (phase === 'taken') {
+          phase = 'unwrapped';
+          say('甜的。今晚原谅自己了。');
+        }
+      }
+    }
+    // 含着融化
+    if (phase === 'unwrapped') {
+      melt = Math.min(1, melt + dt / 14);
+      if (Math.random() < dt * 1.5) {
+        sparkles.push({
+          x: L.candyX + (Math.random() - 0.5) * 20 * s,
+          y: L.candyY - 10 * s,
+          vy: -(12 + Math.random() * 14) * s,
+          a: 0.6, r: 1.2 + Math.random() * 1.4
+        });
+      }
+      if (melt >= 1 && !saidGone) {
+        saidGone = true;
+        phase = 'melted';
+        say('化完了。去睡吧。明天少吃点。', true);
+      }
+    }
+    // 甜蜜涟漪
+    if ((phase === 'unwrapped' || phase === 'melted') && Math.random() < dt * 0.8) {
+      ripples.push({ x: L.candyX, y: L.candyY, r: 6 * s, a: 0.4 });
+    }
+    for (var r2 = ripples.length - 1; r2 >= 0; r2--) {
+      var rp = ripples[r2];
+      rp.r += dt * 26; rp.a -= dt * 0.5;
+      if (rp.a <= 0) ripples.splice(r2, 1);
+    }
+    for (var sp = sparkles.length - 1; sp >= 0; sp--) {
+      var sk = sparkles[sp];
+      sk.y += sk.vy * dt; sk.a -= dt * 0.5;
+      if (sk.a <= 0) sparkles.splice(sp, 1);
+    }
+
+    // ── 背景：床头柜暖光 ──
+    var bg = ctx.createRadialGradient(L.jarX, h * 0.5, 30, L.jarX, h * 0.55, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#1c150e');
+    bg.addColorStop(1, '#0d0a07');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 柜面
+    var counter = ctx.createLinearGradient(0, L.jarBase, 0, h);
+    counter.addColorStop(0, '#2b2116');
+    counter.addColorStop(1, '#191209');
+    ctx.fillStyle = counter;
+    ctx.fillRect(0, L.jarBase, w, h - L.jarBase);
+    ctx.fillStyle = 'rgba(220,180,120,0.12)';
+    ctx.fillRect(0, L.jarBase, w, 2);
+
+    // ── 糖罐 ──
+    drawJar(nowT);
+
+    // ── 手里的糖 ──
+    if (phase === 'taken' || phase === 'unwrapped' || phase === 'melted') {
+      drawCandyHand(nowT);
+    }
+
+    // 甜蜜涟漪+光点
+    for (var r3 = 0; r3 < ripples.length; r3++) {
+      var rr = ripples[r3];
+      ctx.strokeStyle = 'rgba(240,190,120,' + rr.a * 0.5 + ')';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(rr.x, rr.y, rr.r, 0, Math.PI * 2); ctx.stroke();
+    }
+    for (var s3 = 0; s3 < sparkles.length; s3++) {
+      var sk = sparkles[s3];
+      ctx.fillStyle = 'rgba(255,220,150,' + sk.a + ')';
+      ctx.beginPath(); ctx.arc(sk.x, sk.y, sk.r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 引导
+    if (phase === 'jar') {
+      ctx.fillStyle = 'rgba(216,168,106,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住糖罐，摸一颗出来', w / 2, L.jarBase + 48 * s);
+    } else if (phase === 'taken') {
+      ctx.fillStyle = 'rgba(216,168,106,0.55)';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按住，剥开糖纸', L.candyX, L.candyY + 66 * s);
+    }
+  }
+
+  function drawJar(nowT) {
+    var s = L.s;
+    var x = L.jarX, base = L.jarBase;
+    var jw = 76 * s, jh = 92 * s;
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(x + 4 * s, base + 4 * s, jw * 0.6, 8 * s, 0, 0, Math.PI * 2); ctx.fill();
+    // 罐身玻璃
+    var jar = ctx.createLinearGradient(x - jw / 2, 0, x + jw / 2, 0);
+    jar.addColorStop(0, 'rgba(90,80,60,0.5)');
+    jar.addColorStop(0.5, 'rgba(140,125,95,0.4)');
+    jar.addColorStop(1, 'rgba(70,62,46,0.5)');
+    ctx.fillStyle = jar;
+    roundRect(x - jw / 2, base - jh, jw, jh, 10 * s);
+    ctx.fill();
+    // 罐口盖
+    ctx.fillStyle = '#4a3826';
+    roundRect(x - jw / 2 - 5 * s, base - jh - 14 * s, jw + 10 * s, 16 * s, 5 * s);
+    ctx.fill();
+    // 罐里的糖（几颗彩色）
+    var candyCols = ['#e8926a', '#7ab0a0', '#d8b46a', '#b07a8a'];
+    for (var c = 0; c < 4; c++) {
+      ctx.fillStyle = candyCols[c];
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.arc(x - jw * 0.22 + c * jw * 0.16, base - 20 * s + (c % 2) * 10 * s, 6.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // 玻璃高光
+    ctx.strokeStyle = 'rgba(255,245,220,0.25)';
+    ctx.lineWidth = 2 * s;
+    ctx.beginPath();
+    ctx.moveTo(x - jw * 0.3, base - jh + 10 * s);
+    ctx.quadraticCurveTo(x - jw * 0.38, base - jh * 0.4, x - jw * 0.28, base - 10 * s);
+    ctx.stroke();
+  }
+
+  function drawCandyHand(nowT) {
+    var s = L.s;
+    var x = L.candyX, y = L.candyY;
+    var pulse = Math.sin(nowT / 600) * 1.4 * s;
+
+    if (phase === 'unwrapped' || phase === 'melted') {
+      // 糖果本体（融化渐小）
+      var cr = 14 * s * (1 - melt * 0.55);
+      var candyG = ctx.createRadialGradient(x - cr * 0.3, y - cr * 0.3, 1, x, y, cr);
+      candyG.addColorStop(0, '#ffd9a0');
+      candyG.addColorStop(0.6, '#f0a860');
+      candyG.addColorStop(1, '#d8823e');
+      ctx.fillStyle = candyG;
+      ctx.beginPath(); ctx.arc(x, y, cr, 0, Math.PI * 2); ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(255,245,225,' + 0.6 * (1 - melt * 0.5) + ')';
+      ctx.beginPath(); ctx.arc(x - cr * 0.3, y - cr * 0.35, cr * 0.24, 0, Math.PI * 2); ctx.fill();
+      // 融化涟漪底
+      if (phase === 'melted') {
+        ctx.strokeStyle = 'rgba(240,190,120,' + 0.25 * (1 - melt * 0.4) + ')';
+        ctx.lineWidth = 2 * s;
+        ctx.beginPath(); ctx.ellipse(x, y + cr * 0.9, cr * 1.6, cr * 0.4, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+      // 甜光
+      var sw = ctx.createRadialGradient(x, y, 1, x, y, cr * 2.6);
+      sw.addColorStop(0, 'rgba(255,210,140,' + 0.14 + 0.05 * Math.sin(nowT / 380) + ')');
+      sw.addColorStop(1, 'rgba(255,210,140,0)');
+      ctx.fillStyle = sw;
+      ctx.beginPath(); ctx.arc(x, y, cr * 2.6, 0, Math.PI * 2); ctx.fill();
+      // 剥开的糖纸（两片，在糖果下方两侧）
+      if (melt < 0.7) {
+        ctx.fillStyle = 'rgba(232,146,106,' + 0.85 * (1 - melt * 0.5) + ')';
+        for (var p2 = -1; p2 <= 1; p2 += 2) {
+          ctx.save();
+          ctx.translate(x + p2 * cr * 1.5, y + cr * 0.6);
+          ctx.rotate(p2 * 0.5);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(p2 * 16 * s, -7 * s);
+          ctx.lineTo(p2 * 13 * s, 7 * s);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    } else {
+      // 带糖纸的糖（未剥）
+      var wr = 15 * s;
+      // 糖纸拧结
+      ctx.fillStyle = '#e8926a';
+      ctx.beginPath(); ctx.arc(x, y, wr, 0, Math.PI * 2); ctx.fill();
+      // 糖纸纹理（斜条纹）
+      ctx.strokeStyle = 'rgba(255,230,200,0.4)';
+      ctx.lineWidth = 1.4;
+      for (var l2 = -2; l2 <= 2; l2++) {
+        ctx.beginPath();
+        ctx.moveTo(x - wr + l2 * 6 * s + wr * 0.2, y - wr);
+        ctx.lineTo(x - wr + l2 * 6 * s + wr * 0.5, y + wr);
+        ctx.stroke();
+      }
+      // 两端拧结
+      ctx.fillStyle = '#d8823e';
+      ctx.beginPath();
+      ctx.moveTo(x - wr - 2 * s, y - 4 * s); ctx.lineTo(x - wr - 14 * s, y); ctx.lineTo(x - wr - 2 * s, y + 4 * s);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x + wr + 2 * s, y - 4 * s); ctx.lineTo(x + wr + 14 * s, y); ctx.lineTo(x + wr + 2 * s, y + 4 * s);
+      ctx.closePath(); ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(255,245,225,0.5)';
+      ctx.beginPath(); ctx.arc(x - wr * 0.3, y - wr * 0.35, 3.4 * s, 0, Math.PI * 2); ctx.fill();
+      // 脉动（诱惑感）
+      var sw2 = ctx.createRadialGradient(x, y, wr, x, y, wr * 2.2 + pulse);
+      sw2.addColorStop(0, 'rgba(255,200,130,0.18)');
+      sw2.addColorStop(1, 'rgba(255,200,130,0)');
+      ctx.fillStyle = sw2;
+      ctx.beginPath(); ctx.arc(x, y, wr * 2.2 + pulse, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function tempA(a) { return a; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__candy = {
+    phase: function () { return phase; },
+    melt: function () { return +melt.toFixed(2); },
+    press: function () {
+      pressing = true;
+      pressT = 0;
+    },
+    release: function () { pressing = false; pressT = 0; }
+  };
+})();
+</script>
+</body>
+</html>

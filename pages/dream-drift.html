@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>半梦半醒</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0a0d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7c7f88;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8b8fa2; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #60636e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #85889a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4f515a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #63656f;
+    text-decoration: none;
+    border-bottom: 1px dotted #63656f;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8b8fa2; border-color: #8b8fa2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>半梦半醒</h1>
+  <p>快睡着的时候，眼前会有画面来了又走。<br>按住屏幕，闭上眼——再看一会儿。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var dreaming = false;     // 按住=闭眼入梦
+  var dreamT = 0;           // 入梦累计
+  var dark = 0;             // 闭眼黑度
+  var drifts = [];          // 光影碎片
+  var streaks = [];         // 划过的光线
+  var saidFloat = false, saidGrab = false, saidOff = false;
+
+  var TINTS = [
+    '235,180,120',   // 暖橙
+    '180,160,235',   // 淡紫
+    '140,200,210',   // 青蓝
+    '235,150,160',   // 粉
+    '200,220,160'    // 黄绿
+  ];
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    L.w = w; L.h = h;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () {
+    dreaming = true;
+    if (!saidFloat) { saidFloat = true; say('它们不成形。也不用成形。'); }
+  });
+  window.addEventListener('pointerup', function () { dreaming = false; });
+  window.addEventListener('pointercancel', function () { dreaming = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 721.3) * 43758.5453) % 1; }
+
+  // 生成一个光影碎片
+  function makeDrift(nowT) {
+    var tint = TINTS[Math.floor(rnd(nowT | 0) * TINTS.length)];
+    return {
+      x: (0.15 + rnd((nowT | 0) + 1) * 0.7) * L.w,
+      y: (0.2 + rnd((nowT | 0) + 2) * 0.6) * L.h,
+      r: (30 + rnd((nowT | 0) + 3) * 70),
+      vx: (rnd((nowT | 0) + 4) - 0.5) * 12,
+      vy: -(4 + rnd((nowT | 0) + 5) * 8),
+      tint: tint,
+      a: 0,
+      ph: rnd((nowT | 0) + 6) * Math.PI * 2,
+      shape: rnd((nowT | 0) + 7)
+    };
+  }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h;
+
+    if (dreaming) {
+      dreamT += dt;
+      dark = Math.min(0.94, (typeof dark === 'undefined' ? 0 : dark) + dt * 1.2);
+      if (dreamT > 4 && !saidGrab && Math.random() < dt * 0.25) {
+        saidGrab = true;
+        say('快抓住了——又走了。');
+      }
+      // 生成碎片
+      if (drifts.length < 5 && Math.random() < dt * 0.8) drifts.push(makeDrift(nowT));
+      // 偶尔一道划过的光线
+      if (Math.random() < dt * 0.3) {
+        streaks.push({
+          x: Math.random() * w * 0.8, y: h * (0.15 + Math.random() * 0.5),
+          len: 60 + Math.random() * 120, a: 0.55, v: 260 + Math.random() * 160,
+          tint: TINTS[Math.floor(Math.random() * TINTS.length)]
+        });
+      }
+    } else {
+      if (dreamT > 8 && !saidOff) { saidOff = true; say('醒了？没事，它们夜里还会来。'); }
+      dreamT = 0;
+      for (var cl = drifts.length - 1; cl >= 0; cl--) {
+        drifts[cl].a -= dt * 1.5;
+        if (drifts[cl].a <= 0) drifts.splice(cl, 1);
+      }
+    }
+    var darkV = (typeof dark === 'undefined' ? 0 : dark);
+    if (!dreaming) darkV = Math.max(0, darkV - dt * 1.2);
+    window.__darkV = darkV;
+
+    // ── 闭眼后的内视底色 ──
+    ctx.fillStyle = '#08080b';
+    ctx.fillRect(0, 0, w, h);
+    // 内视底噪（极微弱的色斑呼吸）
+    var innerA = 0.03 + 0.02 * Math.sin(nowT / 2100) * darkV;
+    var inner = ctx.createRadialGradient(w / 2, h * 0.45, 20, w / 2, h * 0.45, Math.max(w, h) * 0.6);
+    inner.addColorStop(0, 'rgba(120,110,140,' + innerA + ')');
+    inner.addColorStop(1, 'rgba(120,110,140,0)');
+    ctx.fillStyle = inner;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 光影碎片 ──
+    for (var i = drifts.length - 1; i >= 0; i--) {
+      var d = drifts[i];
+      d.x += d.vx * dt + Math.sin(nowT / 1300 + d.ph) * 6 * dt;
+      d.y += d.vy * dt;
+      d.a += (dreaming ? dt * 0.5 : -dt * 0.8);
+      d.a = Math.max(0, Math.min(0.5, d.a));
+      if (d.a <= 0 && !dreaming) { drifts.splice(i, 1); continue; }
+      var wob = Math.sin(nowT / 900 + d.ph) * 0.12;
+      var g = ctx.createRadialGradient(d.x, d.y, 2, d.x, d.y, d.r);
+      g.addColorStop(0, 'rgba(' + d.tint + ',' + d.a + ')');
+      g.addColorStop(0.55, 'rgba(' + d.tint + ',' + d.a * 0.35 + ')');
+      g.addColorStop(1, 'rgba(' + d.tint + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      // 平滑闭合曲线（顶点经中点二次曲线连接，无折角）
+      var pts2 = [];
+      for (var a2 = 0; a2 < 12; a2++) {
+        var ang2 = a2 / 12 * Math.PI * 2;
+        var rr2 = d.r * (0.75 + 0.25 * Math.sin(a2 * 3 + d.ph + wob * 10));
+        pts2.push([d.x + Math.cos(ang2) * rr2, d.y + Math.sin(ang2) * rr2 * 0.8]);
+      }
+      for (var i3 = 0; i3 < 12; i3++) {
+        var cur = pts2[i3], nxt2 = pts2[(i3 + 1) % 12];
+        var mx = (cur[0] + nxt2[0]) / 2, my = (cur[1] + nxt2[1]) / 2;
+        if (i3 === 0) ctx.moveTo(mx, my);
+        else ctx.quadraticCurveTo(cur[0], cur[1], mx, my);
+      }
+      // 闭合回第一段
+      var lastP = pts2[11], firstP = pts2[0];
+      ctx.quadraticCurveTo(lastP[0], lastP[1], (lastP[0] + firstP[0]) / 2, (lastP[1] + firstP[1]) / 2);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── 划过的光线 ──
+    for (var s2 = streaks.length - 1; s2 >= 0; s2--) {
+      var sk = streaks[s2];
+      sk.x += sk.v * dt;
+      sk.a -= dt * 0.9;
+      if (sk.a <= 0 || sk.x > w + sk.len) { streaks.splice(s2, 1); continue; }
+      var sg = ctx.createLinearGradient(sk.x, sk.y, sk.x + sk.len, sk.y);
+      sg.addColorStop(0, 'rgba(' + sk.tint + ',0)');
+      sg.addColorStop(0.5, 'rgba(' + sk.tint + ',' + sk.a * 0.5 + ')');
+      sg.addColorStop(1, 'rgba(' + sk.tint + ',0)');
+      ctx.fillStyle = sg;
+      ctx.fillRect(sk.x, sk.y, sk.len, 1.4);
+    }
+
+    // 引导
+    if (!dreaming && darkV < 0.1) {
+      ctx.fillStyle = 'rgba(160,162,178,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，闭上眼', w / 2, h * 0.88);
+    }
+    // 黑暗中的暗字
+    if (darkV > 0.8) {
+      var dimT = 0.14 + 0.05 * Math.sin(nowT / 1700);
+      ctx.fillStyle = 'rgba(185,188,205,' + dimT + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      if (dreamT > 1.5 && dreamT < 7) ctx.fillText('松开手就醒了', w / 2, h * 0.55);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__drift = {
+    dreaming: function () { return dreaming; },
+    t: function () { return +dreamT.toFixed(1); },
+    dark: function () {
+      return +((dreaming ? 0.94 : 0)).toFixed(2);
+    },
+    drifts: function () { return drifts.length; },
+    press: function () { dreaming = true; },
+    release: function () { dreaming = false; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>引月光上枕</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0b0d12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7e838f;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a8b0c8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #606675; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8b93ac;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4f545c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #62666f;
+    text-decoration: none;
+    border-bottom: 1px dotted #62666f;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a8b0c8; border-color: #a8b0c8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>引月光上枕</h1>
+  <p>今晚的月光很好，别浪费了。<br>按住拖动小镜子——把月光引到你的枕头上。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var angle = 0.5;          // 镜子角度系数 0-1（映射反射光斑位置）
+  var dragging = false;
+  var dragStartX = 0;
+  var angleStart = 0;
+  var onPillow = false;     // 光斑对准枕心
+  var onPillowT = 0;        // 对准持续时长
+  var saidNear = false, saidDone = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 800, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.winX = w * 0.18; L.winY = h * 0.22;    // 窗户（月光来源）
+    L.mirrorX = w * 0.24; L.mirrorY = h * 0.6; // 小镜子
+    L.pillowX = w * 0.72; L.pillowY = h * 0.56; // 枕心目标
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  function spotPos() {
+    // 光斑位置随镜子角度（0-1）从窗下沿地面/床面移动到枕头
+    var t = angle;
+    var x = L.mirrorX + (L.pillowX - L.mirrorX) * t;
+    var y = (L.mirrorY + 30 * L.s) + (L.pillowY - L.mirrorY - 10 * L.s) * t;
+    return { x: x, y: y };
+  }
+  function onTarget() {
+    var p = spotPos();
+    var dx = p.x - L.pillowX, dy = p.y - L.pillowY;
+    return dx * dx + dy * dy < (46 * L.s) * (46 * L.s);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var s = L.s;
+    var mx = L.mirrorX, my = L.mirrorY;
+    var dx = ev.clientX - mx, dy = ev.clientY - my;
+    if (dx * dx + dy * dy < (52 * s) * (52 * s)) {
+      dragging = true;
+      dragStartX = ev.clientX;
+      angleStart = angle;
+    }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+    angle = Math.max(0, Math.min(1, angleStart + (ev.clientX - dragStartX) / (L.w * 0.35)));
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+  window.addEventListener('pointercancel', function () { dragging = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    onPillow = onTarget();
+    if (onPillow) {
+      onPillowT += dt;
+      if (onPillowT > 1.5 && !saidDone) {
+        saidDone = true;
+        say('月光替你占了枕头边的位置。睡吧，它守着。', true);
+      }
+    } else {
+      onPillowT = 0;
+    }
+
+    // ── 背景：暗卧室 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0e1218');
+    bg.addColorStop(0.7, '#12161d');
+    bg.addColorStop(1, '#0b0e11');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 窗户（左上）与月光束 ──
+    var ww = 110 * s, wh = 140 * s;
+    var wx = L.winX, wy = L.winY;
+    ctx.fillStyle = '#131a24';
+    roundRect(wx, wy, ww, wh, 4 * s);
+    ctx.fill();
+    ctx.strokeStyle = '#2a3442';
+    ctx.lineWidth = 3 * s;
+    roundRect(wx, wy, ww, wh, 4 * s);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
+    // 月亮在窗中
+    ctx.fillStyle = 'rgba(235,235,210,0.9)';
+    ctx.beginPath();
+    ctx.arc(wx + ww * 0.66, wy + wh * 0.3, 11 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#131a24';
+    ctx.beginPath();
+    ctx.arc(wx + ww * 0.66 - 7 * s, wy + wh * 0.3 - 4 * s, 9.5 * s, 0, Math.PI * 2);
+    ctx.fill();
+    // 月光斜洒（窗外到屋内地面）
+    var moonbeam = ctx.createLinearGradient(wx, wy, L.mirrorX, L.mirrorY);
+    moonbeam.addColorStop(0, 'rgba(210,225,245,0.14)');
+    moonbeam.addColorStop(1, 'rgba(210,225,245,0.03)');
+    ctx.fillStyle = moonbeam;
+    ctx.beginPath();
+    ctx.moveTo(wx + ww * 0.2, wy);
+    ctx.lineTo(wx + ww * 0.75, wy);
+    ctx.lineTo(L.mirrorX + 40 * s, L.mirrorY);
+    ctx.lineTo(L.mirrorX - 40 * s, L.mirrorY);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── 小镜子（立在窗台下）──
+    var mx = L.mirrorX, my = L.mirrorY;
+    // 支架
+    ctx.strokeStyle = '#3a4148';
+    ctx.lineWidth = 4 * s;
+    ctx.beginPath(); ctx.moveTo(mx, my + 20 * s); ctx.lineTo(mx, my + 52 * s); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(mx - 10 * s, my + 50 * s); ctx.lineTo(mx + 10 * s, my + 50 * s); ctx.stroke();
+    // 镜面（椭圆，倾角随 angle 微转）
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.rotate(-0.25 + angle * 0.5 - 0.25);
+    var mirror = ctx.createLinearGradient(-26 * s, 0, 26 * s, 0);
+    mirror.addColorStop(0, '#39434c');
+    mirror.addColorStop(0.5, '#77828c');
+    mirror.addColorStop(1, '#39434c');
+    ctx.fillStyle = mirror;
+    ctx.beginPath(); ctx.ellipse(0, 0, 30 * s, 22 * s, 0, 0, Math.PI * 2); ctx.fill();
+    // 镜面反光弧
+    ctx.strokeStyle = 'rgba(220,235,250,0.5)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(0, 0, 22 * s, 15 * s, 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    ctx.restore();
+
+    // ── 床与枕头（右下）──
+    var px = L.pillowX, py = L.pillowY;
+    // 床沿
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.fillRect(px - 150 * s, py - 60 * s, 320 * s, 130 * s);
+    // 枕头
+    var pillow = ctx.createLinearGradient(px, py - 30 * s, px, py + 30 * s);
+    pillow.addColorStop(0, '#d5cfbe');
+    pillow.addColorStop(1, '#b5ae9c');
+    ctx.fillStyle = pillow;
+    roundRect(px - 80 * s, py - 32 * s, 160 * s, 64 * s, 24 * s);
+    ctx.fill();
+    // 枕心虚线目标（未对准时）
+    if (!onPillow) {
+      ctx.strokeStyle = 'rgba(210,220,240,' + 0.2 + 0.1 * Math.sin(nowT / 500) + ')';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.arc(px, py, 26 * s, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // ── 反射光斑 ──
+    var p = spotPos();
+    var spotR = (26 + Math.sin(nowT / 800) * 3) * s;
+    // 光路（镜面→光斑的斜束）
+    var beamG = ctx.createLinearGradient(mx, my, p.x, p.y);
+    beamG.addColorStop(0, 'rgba(205,220,245,0.10)');
+    beamG.addColorStop(1, 'rgba(205,220,245,0.04)');
+    ctx.fillStyle = beamG;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(p.x - spotR, p.y);
+    ctx.lineTo(p.x + spotR, p.y);
+    ctx.closePath();
+    ctx.fill();
+    // 枕面光斑
+    var spotG = ctx.createRadialGradient(p.x, p.y, 3, p.x, p.y, spotR);
+    spotG.addColorStop(0, 'rgba(230,238,252,' + (0.5 + 0.08 * Math.sin(nowT / 500)) + ')');
+    spotG.addColorStop(1, 'rgba(230,238,252,0)');
+    ctx.fillStyle = spotG;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, spotR, spotR * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 对准枕心的甜蜜提示
+    if (onPillow) {
+      ctx.fillStyle = 'rgba(190,205,235,' + 0.4 + 0.1 * Math.sin(nowT / 400) + ')';
+      ctx.font = Math.round(12.5 * s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('就这个位置。光替你守着枕头。', px, py - 52 * s);
+    }
+
+    // 引导
+    if (angle < 0.98 && !dragging && !onPillow) {
+      ctx.fillStyle = 'rgba(160,170,195,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住镜子左右拖，把光斑引到枕头上', mx, my + 76 * s);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__moon = {
+    angle: function () { return +angle.toFixed(2); },
+    onPillow: function () { return onPillow; },
+    dragging: function () { return dragging; },
+    dragTo: function (a) { angle = Math.max(0, Math.min(1, a)); }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>梳顺今夜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0c0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89268; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89268; border-color: #a89268; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>梳顺今夜</h1>
+  <p>睡前梳头的老规矩，这里只要十下。<br>按住屏幕，从头顶慢慢往下——一下，是一下。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var combing = false;      // 按住梳头中
+  var combY = 0;            // 梳子当前 y
+  var strokes = 0;          // 已完成梳的次数（0-10）
+  var strokeP = 0;          // 当前一下的进度 0-1
+  var smooth = 0;           // 头发顺滑度 0-1（= strokes/10）
+  var looseHairs = [];      // 掉落的断发
+  var saidHalf = false, saidDone = false;
+
+  var TOTAL = 10;
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2;
+    L.headY = h * 0.34;       // 头顶
+    L.hairEnd = h * 0.72;     // 发尾
+    L.combStart = h * 0.40;
+    L.combEnd = h * 0.66;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () {
+    if (strokes >= TOTAL) return;
+    combing = true;
+    combY = L.combStart;
+    strokeP = 0;
+  });
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
+  function release() {
+    if (combing) {
+      combing = false;
+      // 中途松手不算一下，梳子归位
+    }
+  }
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 741.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+    smooth = Math.min(1, strokes / TOTAL);
+
+    // 梳动推进
+    if (combing && strokes < TOTAL) {
+      strokeP += dt / 0.9;
+      combY = L.combStart + (L.combEnd - L.combStart) * easeInOut(Math.min(1, strokeP));
+      // 梳动掉发（偶尔）
+      if (Math.random() < dt * 2.2) {
+        looseHairs.push({
+          x: L.cx + (Math.random() - 0.5) * 60 * s,
+          y: combY,
+          vy: 20 + Math.random() * 20,
+          rot: Math.random() * Math.PI,
+          va: (Math.random() - 0.5) * 2,
+          a: 0.8
+        });
+      }
+      if (strokeP >= 1) {
+        strokes++;
+        combing = false;
+        if (strokes === 5) { saidHalf = true; say('打结的地方，慢一点。'); }
+        if (strokes >= TOTAL && !saidDone) {
+          saidDone = true;
+          say('顺了。头发的，心里的。', true);
+        }
+      }
+    }
+    for (var lh = looseHairs.length - 1; lh >= 0; lh--) {
+      var hh = looseHairs[lh];
+      hh.y += hh.vy * dt; hh.rot += hh.va * dt; hh.a -= dt * 0.25;
+      if (hh.a <= 0) looseHairs.splice(lh, 1);
+    }
+
+    // ── 背景：暗+镜前光 ──
+    var bg = ctx.createRadialGradient(L.cx, h * 0.4, 40, L.cx, h * 0.5, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#1a1713');
+    bg.addColorStop(1, '#0c0a08');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 头发（背影：从头顶垂下的发束）──
+    var hairX = L.cx;
+    var hairTop = L.headY;
+    var hairLen = L.hairEnd - L.headY;
+    // 头型轮廓（颅顶弧）
+    ctx.fillStyle = 'rgba(58,46,36,0.95)';
+    ctx.beginPath();
+    ctx.ellipse(hairX, hairTop + 4 * s, 62 * s, 52 * s, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    // 发束主体（若干条弧线束，乱→顺随 smooth）
+    var strands = 9;
+    for (var st = 0; st < strands; st++) {
+      var sx = hairX + (st - (strands - 1) / 2) * 26 * s;
+      var chaos = (1 - smooth) * 26 * s * (0.4 + rnd(st * 3) * 0.8);
+      var sway = Math.sin(nowT / 1400 + st) * 3 * s * (1 - smooth * 0.6);
+      ctx.strokeStyle = 'rgba(' + Math.round(72 + smooth * 30) + ',' + Math.round(58 + smooth * 26) + ',' + Math.round(44 + smooth * 20) + ',0.95)';
+      ctx.lineWidth = (15 - Math.abs(st - (strands - 1) / 2) * 1.6) * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(hairX, hairTop);
+      // 乱发：中部随机偏移；顺发：平滑垂落
+      var midX = sx + Math.sin(st * 4.7) * chaos;
+      var endX = sx + Math.sin(st * 2.3) * chaos * 0.7 + sway;
+      ctx.bezierCurveTo(
+        sx + (midX - sx) * 0.4, hairTop + hairLen * 0.3,
+        midX + (endX - midX) * 0.3, hairTop + hairLen * 0.62,
+        endX, hairTop + hairLen
+      );
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+
+    // 顺滑光泽（smooth 高时现出一条高光带）
+    if (smooth > 0.4) {
+      var gl = ctx.createLinearGradient(hairX - 40 * s, 0, hairX + 40 * s, 0);
+      gl.addColorStop(0, 'rgba(255,240,215,0)');
+      gl.addColorStop(0.5, 'rgba(255,240,215,' + 0.10 * smooth + ')');
+      gl.addColorStop(1, 'rgba(255,240,215,0)');
+      ctx.fillStyle = gl;
+      ctx.fillRect(hairX - 40 * s, hairTop + 10 * s, 80 * s, hairLen * 0.8);
+    }
+
+    // ── 梳子 ──
+    var combVisible = combing || strokeP > 0 && strokeP < 1;
+    if (combVisible) {
+      var cy2 = combY;
+      ctx.save();
+      ctx.translate(hairX, cy2);
+      // 梳柄
+      ctx.fillStyle = '#8a6a42';
+      roundRect(-9 * s, -30 * s, 18 * s, 26 * s, 5 * s);
+      ctx.fill();
+      // 梳背+齿
+      ctx.fillStyle = '#a8845a';
+      roundRect(-34 * s, -6 * s, 68 * s, 12 * s, 5 * s);
+      ctx.fill();
+      ctx.strokeStyle = '#a8845a';
+      ctx.lineWidth = 2.2 * s;
+      ctx.lineCap = 'round';
+      for (var th = -30 * s; th <= 30 * s; th += 7.5 * s) {
+        ctx.beginPath();
+        ctx.moveTo(th, 6 * s);
+        ctx.lineTo(th, 16 * s);
+        ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+      ctx.restore();
+    }
+
+    // 断发
+    for (var lh2 = 0; lh2 < looseHairs.length; lh2++) {
+      var lhh = looseHairs[lh2];
+      ctx.save();
+      ctx.translate(lhh.x, lhh.y);
+      ctx.rotate(lhh.rot);
+      ctx.strokeStyle = 'rgba(70,58,44,' + lhh.a + ')';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-5 * s, 0);
+      ctx.quadraticCurveTo(0, 3 * s, 7 * s, -2 * s);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 进度（已梳 N 下）
+    if (strokes > 0 && strokes < TOTAL) {
+      ctx.fillStyle = 'rgba(190,175,140,0.6)';
+      ctx.font = Math.round(12 * s) + 'px ui-monospace, Menlo, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('第 ' + strokes + ' 下 / ' + TOTAL, L.cx, h * 0.84);
+    }
+
+    // 引导
+    if (strokes === 0 && !combing) {
+      ctx.fillStyle = 'rgba(190,175,140,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，从头顶慢慢往下梳', L.cx, h * 0.9);
+    }
+  }
+
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__comb = {
+    strokes: function () { return strokes; },
+    combing: function () { return combing; },
+    smooth: function () { return +smooth.toFixed(2); },
+    press: function () { combing = true; combY = L.combStart; strokeP = 0; },
+    release: release
+  };
+})();
+</script>
+</body>
+</html>

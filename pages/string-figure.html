@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>翻花绳</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c0d10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #7f828a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8b93a0; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #61646e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .figure-name {
+    position: absolute; left: 0; right: 0; bottom: 18vh;
+    text-align: center;
+    font-size: 15px; letter-spacing: 0.3em; padding-left: 0.3em;
+    color: #9a9fb2;
+    z-index: 3;
+    transition: opacity 0.4s ease;
+  }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #85889a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #53555e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #666872;
+    text-decoration: none;
+    border-bottom: 1px dotted #666872;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8b93a0; border-color: #8b93a0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>翻花绳</h1>
+  <p>一根绳，两只手，能翻出一个晚上。<br>按住屏幕——指尖穿进去，翻到下一个花样。</p>
+</div>
+
+<div class="figure-name" id="figname"></div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var figname = document.getElementById('figname');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // ── 花样定义（12 顶点，归一化坐标，画布中心为原点，y 向下）──
+  function circle(r, n, rot) {
+    var arr = [];
+    for (var i = 0; i < n; i++) {
+      var a = rot + i / n * Math.PI * 2;
+      arr.push([Math.cos(a) * r, Math.sin(a) * r * 0.86]);
+    }
+    return arr;
+  }
+  function linePts(x0, y0, x1, y1, n) {
+    var arr = [];
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      arr.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
+    }
+    return arr;
+  }
+  var FIGS = [
+    { name: '穿绳圈', pts: circle(0.62, 12, -Math.PI / 2) },
+    { name: '平行线', pts: linePts(-0.85, -0.18, 0.85, -0.18, 6)
+      .concat(linePts(-0.85, 0.26, 0.85, 0.26, 6)) },
+    { name: '小猫爪', pts: circle(0.3, 4, -Math.PI / 2).concat([
+      [-0.62, -0.34], [-0.5, -0.72], [0.0, -0.5],
+      [0.62, -0.34], [0.5, -0.72]
+    ]) },
+    { name: '大桥', pts: [
+      [-0.85, 0.4], [-0.62, 0.1], [-0.3, -0.28], [0, -0.42],
+      [0.3, -0.28], [0.62, 0.1], [0.85, 0.4],
+      [0.4, 0.4], [0, 0.42], [-0.4, 0.4],
+      [-0.15, -0.42], [0.15, -0.42]
+    ] },
+    { name: '菱形', pts: [
+      [0, -0.75], [0.55, 0], [0, 0.75], [-0.55, 0],
+      [0, -0.4], [0.3, 0], [0, 0.4], [-0.3, 0],
+      [0, -0.15], [0.12, 0], [0, 0.15], [-0.12, 0]
+    ] },
+    { name: '星星', pts: (function () {
+      var arr = [];
+      for (var i = 0; i < 10; i++) {
+        var a = -Math.PI / 2 + i / 10 * Math.PI * 2;
+        var r = i % 2 === 0 ? 0.78 : 0.32;
+        arr.push([Math.cos(a) * r, Math.sin(a) * r]);
+      }
+      arr.push([0, -0.06], [0.02, 0.02]);
+      return arr;
+    })() },
+    { name: '两根筷子', pts: linePts(-0.3, -0.75, -0.3, 0.75, 6)
+      .concat(linePts(0.3, -0.75, 0.3, 0.75, 6)) }
+  ];
+
+  var figIdx = 0;
+  var nextIdx = 1 % FIGS.length;
+  var morph = 0;            // 翻转插值 0=当前花样 1=下一个
+  var flipping = false;
+  var pressing = false;
+
+  var L = {};
+  function layout() {
+    canvas.width = innerWidth * DPR;
+    canvas.height = innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    L.w = innerWidth; L.h = innerHeight;
+    L.cx = innerWidth / 2; L.cy = innerHeight * 0.46;
+    L.R = Math.min(innerWidth, innerHeight) * 0.33;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () {
+    if (flipping) return;
+    pressing = true;
+    flipping = true;
+    morph = 0.0001;
+    var nm = FIGS[nextIdx].name;
+    figname.style.opacity = 0;
+    setTimeout(function () {
+      figname.textContent = nm;
+      figname.style.opacity = 1;
+    }, 420);
+    if (nm === '小猫爪') say('翻出一只猫爪。喵。');
+    else if (nm === '星星') say('摘到一颗星星了。');
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  var last = Date.now();
+  var sway = 0;
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h;
+
+    if (flipping) {
+      morph = Math.min(1, morph + dt * 1.3);
+      if (morph >= 1) {
+        flipping = false;
+        figIdx = nextIdx;
+        nextIdx = (nextIdx + 1) % FIGS.length;
+        morph = 0;
+        if (figIdx === 0) say('又回到「穿绳圈」。翻花绳就是这样，没有终点。');
+      }
+    }
+    sway = Math.sin(nowT / 1200) * 0.02;
+
+    var w0 = L.w, h0 = L.h;
+    var bg = ctx.createRadialGradient(L.cx, L.cy, 30, L.cx, L.cy, Math.max(w0, h0) * 0.75);
+    bg.addColorStop(0, '#15161c');
+    bg.addColorStop(1, '#0b0c0f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w0, h0);
+
+    // ── 指尖（上下两排，随花样微动）──
+    var f = FIGS[nextIdx].pts;
+    ctx.fillStyle = 'rgba(140,135,150,0.55)';
+    for (var f1 = 0; f1 < 5; f1++) {
+      var fxx = L.cx - L.R * 0.7 + f1 * L.R * 0.35;
+      ctx.beginPath(); ctx.arc(fxx, L.cy - L.R * 1.06, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(fxx, L.cy + L.R * 1.06, 8, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ── 绳图（顶点插值）──
+    var A = FIGS[figIdx].pts, B = FIGS[nextIdx].pts;
+    var e = morph < 1 ? (morph < 0.5 ? 2 * morph * morph : 1 - Math.pow(-2 * morph + 2, 2) / 2) : 1;
+    var sc = L.R;
+    ctx.save();
+    ctx.translate(L.cx, L.cy);
+    ctx.rotate(sway);
+    // 绳影
+    ctx.strokeStyle = 'rgba(150,155,175,0.10)';
+    ctx.lineWidth = 7;
+    drawPoly(mixPts(A, B, e), sc, 0, 4);
+    // 绳体
+    ctx.strokeStyle = 'rgba(228,220,195,0.85)';
+    ctx.lineWidth = 2.6;
+    drawPoly(mixPts(A, B, e), sc, 0, 0);
+    // 绳高光
+    ctx.strokeStyle = 'rgba(255,250,235,0.35)';
+    ctx.lineWidth = 1;
+    drawPoly(mixPts(A, B, e), sc, -1.5, 0);
+    ctx.restore();
+
+    function drawPoly(pts, scale, dy, dx) {
+      ctx.beginPath();
+      for (var i = 0; i < pts.length; i++) {
+        var px = pts[i][0] * scale + dx, py = pts[i][1] * scale * 0.92 + dy;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    function mixPts(a, b, t) {
+      var out = [];
+      for (var i = 0; i < a.length; i++) {
+        out.push([a[i][0] + (b[i][0] - a[i][0]) * t, a[i][1] + (b[i][1] - a[i][1]) * t]);
+      }
+      return out;
+    }
+
+    // 引导
+    if (!pressing && morph >= 1) {
+      ctx.fillStyle = 'rgba(160,164,180,' + (0.28 + 0.18 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，翻到下一个花样', w0 / 2, h0 * 0.88);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  figname.textContent = FIGS[0].name;
+
+  // QA 钩子（无私人信息）
+  window.__string = {
+    figure: function () { return FIGS[flipping ? nextIdx : figIdx].name; },
+    morph: function () { return +morph.toFixed(2); },
+    next: function () {
+      if (!flipping) { flipping = true; morph = 0.0001; }
+    }
+  };
+})();
+</script>
+</body>
+</html>

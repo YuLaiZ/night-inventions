@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>书签那页</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0c0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89268; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #93876f;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89268; border-color: #a89268; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>书签那页</h1>
+  <p>一本书翻到夹书签的那页，是留给睡不着的你的。<br>点书页翻读——读完，夹回书签就好。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  // ── 页文池 ──
+  var PAGES = [
+    '白天的那些事，像公交车一样开走了。站台还在，车不会回来。',
+    '你今天也认真活过了。认真吃饭，认真烦恼，认真想睡又睡不着。',
+    '窗外的路灯不知道，它们排成的光带，有人靠着窗看了很久。',
+    '明天的事是明天的。今晚只负责呼吸，和躺平。',
+    '有人在这个夜里醒着，和你看同一片天。你们不认识，但算同行。',
+    '烦恼在夜里会放大三倍。所以现在看到的，都不是它真实的大小。',
+    '被窝温度刚好的时候，人就什么都不想了。快了。',
+    '最后一页了。书说：合上我，睡吧。我一直在这里。'
+  ];
+  var pageIdx = 0;          // 当前读到第几段
+  var state = 'closed';     // closed → opening → open → closing → shut
+  var openA = 0;            // 开书动画 0-1
+  var flipA = 0;           // 翻页动画 0-1
+  var flipping = false;
+  var bookA = 0;            // 合书动画 0-1
+  var readAll = false;
+  var saidLast = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 820, h / 900)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2; L.cy = h * 0.54;
+    L.bw = 250 * s; L.bh = 170 * s;   // 单页尺寸
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var s = L.s;
+    var x = ev.clientX, y = ev.clientY;
+    if (state === 'closed') {
+      // 点书封面 → 开书
+      if (Math.abs(x - L.cx) < L.bw && Math.abs(y - L.cy) < L.bh * 0.8) {
+        state = 'opening';
+      }
+    } else if (state === 'open') {
+      // 点右页 → 翻页
+      if (x > L.cx && !flipping) {
+        flipping = true;
+        flipA = 0;
+        if (pageIdx >= PAGES.length - 1) readAll = true;
+        else pageIdx++;
+      }
+      // 点书签绳 → 合书
+      var sx = L.cx + L.bw * 0.62, sy = L.cy - L.bh / 2 - 18 * s;
+      var dx = x - sx, dy = y - sy;
+      if (dx * dx + dy * dy < (26 * s) * (26 * s)) {
+        state = 'closing';
+      }
+    }
+  });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 151.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    if (state === 'opening') {
+      openA = Math.min(1, openA + dt * 1.4);
+      if (openA >= 1) {
+        state = 'open';
+        say('这页是留给你的。');
+      }
+    }
+    if (flipping) {
+      flipA += dt * 1.6;
+      if (flipA >= 1) { flipping = false; flipA = 0; }
+    }
+    if (state === 'closing') {
+      bookA += dt * 1.2;
+      if (bookA >= 1) {
+        state = 'shut';
+        if (readAll) say('今晚就读到这里。剩下的，梦里接着读。', true);
+        else say('夹回去了。随时可以再来读。', true);
+      }
+    }
+
+    // ── 背景：床头暖光 ──
+    var bg = ctx.createRadialGradient(w * 0.5, h * 0.45, 30, w * 0.5, h * 0.5, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#1c1710');
+    bg.addColorStop(1, '#0d0a07');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 被褥
+    var quilt = ctx.createLinearGradient(0, h * 0.7, 0, h);
+    quilt.addColorStop(0, '#2b2318');
+    quilt.addColorStop(1, '#191410');
+    ctx.fillStyle = quilt;
+    ctx.fillRect(0, h * 0.7, w, h * 0.3);
+
+    // ── 书 ──
+    var bw = L.bw, bh = L.bh;
+    var cx = L.cx, cy = L.cy;
+
+    // 合上的书（封面）+ 书签绳
+    if (state === 'closed' || state === 'shut') {
+      var coverA = state === 'shut' ? Math.min(1, bookA) : 1;
+      ctx.save();
+      ctx.globalAlpha = coverA;
+      ctx.translate(cx, cy + 10 * s);
+      // 书影
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath(); ctx.ellipse(4 * s, bh / 2 + 6 * s, bw * 0.55, 12 * s, 0, 0, Math.PI * 2); ctx.fill();
+      // 封面
+      var cov = ctx.createLinearGradient(-bw / 2, 0, bw / 2, bh);
+      cov.addColorStop(0, '#5a4632');
+      cov.addColorStop(1, '#42321f');
+      ctx.fillStyle = cov;
+      roundRect(-bw / 2, -bh / 2, bw, bh, 6 * s);
+      ctx.fill();
+      // 封面装饰线
+      ctx.strokeStyle = 'rgba(216,180,120,0.4)';
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(-bw / 2 + 16 * s, -bh / 2 + 16 * s, bw - 32 * s, bh - 32 * s);
+      // 书签绳从书顶垂出
+      ctx.strokeStyle = '#b4472f';
+      ctx.lineWidth = 2.2 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx + bw * 0.3, cy - bh / 2 - 2 * s);
+      ctx.quadraticCurveTo(cx + bw * 0.34, cy - bh / 2 - 20 * s, cx + bw * 0.42, cy - bh / 2 - 14 * s);
+      ctx.stroke();
+      ctx.fillStyle = '#d8c8a0';
+      ctx.font = Math.round(13 * s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('今晚读到的一页', cx, cy - bh / 2 - 34 * s);
+      ctx.restore();
+    }
+
+    // ── 摊开的书 ──
+    if (state !== 'closed' && state !== 'shut') {
+      var openEase = easeInOut(state === 'opening' ? openA : 1);
+      // 左右两页（中缝凹陷）
+      var pageY = cy - bh / 2 + (1 - openEase) * -20 * s;
+      // 书影
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath();
+      ctx.ellipse(cx + 5 * s, cy + bh / 2 + 8 * s, bw * 1.05, 14 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 左页
+      var lp = ctx.createLinearGradient(0, pageY, 0, pageY + bh);
+      lp.addColorStop(0, '#efe8d4');
+      lp.addColorStop(1, '#ded5bc');
+      ctx.fillStyle = lp;
+      ctx.beginPath();
+      ctx.moveTo(cx, pageY + 6 * s);
+      ctx.quadraticCurveTo(cx - bw * 0.4, pageY - 8 * s, cx - bw, pageY);
+      ctx.lineTo(cx - bw, pageY + bh);
+      ctx.quadraticCurveTo(cx - bw * 0.4, pageY + bh + 8 * s, cx, pageY + bh - 4 * s);
+      ctx.closePath();
+      ctx.fill();
+      // 右页
+      var rp = ctx.createLinearGradient(0, pageY, 0, pageY + bh);
+      rp.addColorStop(0, '#f2ebd8');
+      rp.addColorStop(1, '#e2d9c2');
+      ctx.fillStyle = rp;
+      ctx.beginPath();
+      ctx.moveTo(cx, pageY + 6 * s);
+      ctx.quadraticCurveTo(cx + bw * 0.4, pageY - 8 * s, cx + bw, pageY);
+      ctx.lineTo(cx + bw, pageY + bh);
+      ctx.quadraticCurveTo(cx + bw * 0.4, pageY + bh + 8 * s, cx, pageY + bh - 4 * s);
+      ctx.closePath();
+      ctx.fill();
+      // 中缝
+      ctx.strokeStyle = 'rgba(120,100,70,0.35)';
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath(); ctx.moveTo(cx, pageY + 4 * s); ctx.lineTo(cx, pageY + bh - 4 * s); ctx.stroke();
+      // 页面文字（横排几行，右页）
+      var txt = PAGES[pageIdx];
+      ctx.fillStyle = 'rgba(70,62,48,0.9)';
+      ctx.font = Math.round(13.5 * s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      // 手动折行（每行约 11 字）
+      var perLine = 11;
+      var lines = [];
+      for (var ci = 0; ci < txt.length; ci += perLine) lines.push(txt.slice(ci, ci + perLine));
+      var lineH = 24 * s;
+      var startY = pageY + bh * 0.34;
+      for (var li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li], cx + bw * 0.3, startY + li * lineH);
+      }
+      // 页码
+      ctx.fillStyle = 'rgba(120,105,80,0.5)';
+      ctx.font = Math.round(10 * s) + 'px ui-monospace, Menlo, monospace';
+      ctx.fillText(String(pageIdx + 1) + ' / ' + PAGES.length, cx + bw * 0.3, pageY + bh - 14 * s);
+
+      // 翻页动画（右页掀起）
+      if (flipping) {
+        var fa = easeInOut(flipA);
+        ctx.fillStyle = 'rgba(238,230,210,' + (0.92 - fa * 0.1) + ')';
+        ctx.beginPath();
+        ctx.moveTo(cx, pageY + 6 * s);
+        // 掀起的页绕中缝翻到左侧
+        var tipX = cx + bw * (1 - fa) * 0.9;
+        ctx.quadraticCurveTo(tipX + bw * 0.2, pageY - 30 * s * (1 - fa), tipX, pageY + bh * fa * 0.5 + 10 * s);
+        ctx.quadraticCurveTo(cx + bw * 0.2, pageY + bh * 0.6, cx, pageY + bh - 4 * s);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // 书签绳（右页角）
+      ctx.strokeStyle = '#b4472f';
+      ctx.lineWidth = 2 * s;
+      ctx.beginPath();
+      ctx.moveTo(cx + bw * 0.5, cy - bh / 2 - 4 * s);
+      ctx.quadraticCurveTo(cx + bw * 0.58, cy - bh / 2 - 20 * s, cx + bw * 0.62, cy - bh / 2 - 12 * s);
+      ctx.stroke();
+      // 书签提示圈
+      if (pageIdx >= PAGES.length - 1 && !flipping) {
+        var sr = 16 * s + 2 * s * Math.sin(nowT / 380);
+        ctx.strokeStyle = 'rgba(216,180,120,0.6)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(cx + bw * 0.62, cy - bh / 2 - 12 * s, sr, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = 'rgba(216,180,120,0.7)';
+        ctx.font = Math.round(11.5 * s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.fillText('点书签，合上', cx + bw * 0.62, cy - bh / 2 - 40 * s);
+      }
+      // 翻页提示
+      if (!flipping && pageIdx < PAGES.length - 1) {
+        ctx.fillStyle = 'rgba(200,188,155,' + (0.35 + 0.15 * Math.sin(nowT / 520)) + ')';
+        ctx.font = Math.round(12 * s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('点右页，翻页', cx + bw * 0.55, pageY + bh + 26 * s);
+      }
+    }
+  }
+
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__book = {
+    state: function () { return state; },
+    page: function () { return pageIdx; },
+    open: function () { if (state === 'closed') { state = 'opening'; openA = 0.0001; } },
+    nextPage: function () { if (state === 'open' && !flipping) { flipping = true; flipA = 0; pageIdx = Math.min(PAGES.length - 1, pageIdx + 1); } },
+    closeBook: function () { if (state === 'open') { state = 'closing'; bookA = 0.0001; } }
+  };
+})();
+</script>
+</body>
+</html>

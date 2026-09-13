@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抱住玩偶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0c0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8a857c;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8a276; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e695f; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a08d70;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57534b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6d675c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6d675c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8a276; border-color: #c8a276; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>抱住玩偶</h1>
+  <p>床尾有只旧玩偶，陪你睡了很多年。<br>按住屏幕，把它拉过来抱住。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var hugging = false;      // 按住抱紧
+  var hugs = 0;             // 抱的次数
+  var hugA = 0;             // 抱紧程度 0-1（缓动）
+  var approach = 0;         // 第三次主动蹭近
+  var breath = 0;
+  var saidClose = false, saidSpot = false, saidSelf = false;
+
+  var L = {};
+  function layout() {
+    var w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var s = Math.max(0.62, Math.min(1, Math.min(w / 780, h / 880)));
+    L.w = w; L.h = h; L.s = s;
+    L.cx = w / 2; L.cy = h * 0.55;
+  }
+  window.addEventListener('resize', layout);
+  layout();
+
+  canvas.addEventListener('pointerdown', function () {
+    if (hugA > 0.5) return;
+    hugging = true;
+    hugs++;
+    if (hugs === 1) say('它被抱紧的时候，眼睛闭上了。');
+    else if (hugs === 2) say('塞进被窝的位置，刚刚好。');
+    else if (hugs >= 3) { approach = 0.0001; say('这次是它自己蹭过来的。晚安。', true); }
+  });
+  window.addEventListener('pointerup', function () { hugging = false; });
+  window.addEventListener('pointercancel', function () { hugging = false; });
+
+  function rnd(i) { return Math.abs(Math.sin(i * 127.1 + 911.3) * 43758.5453) % 1; }
+
+  var last = Date.now();
+  function tick() {
+    var nowT = Date.now();
+    var dt = Math.min(0.05, (nowT - last) / 1000);
+    last = nowT;
+    var w = L.w, h = L.h, s = L.s;
+
+    breath += dt;
+    hugA += ((hugging || approach > 0.5 ? 1 : 0) - hugA) * Math.min(1, dt * 3.5);
+    if (approach > 0 && approach < 1) approach = Math.min(1, approach + dt * 0.45);
+
+    // ── 背景：夜灯暗卧房 ──
+    var bg = ctx.createRadialGradient(w * 0.2, h * 0.3, 20, w * 0.5, h * 0.5, Math.max(w, h) * 0.75);
+    bg.addColorStop(0, '#1c1712');
+    bg.addColorStop(1, '#0d0b09');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床
+    var bed = ctx.createLinearGradient(0, h * 0.5, 0, h);
+    bed.addColorStop(0, '#2b231a');
+    bed.addColorStop(1, '#1a1510');
+    ctx.fillStyle = bed;
+    ctx.fillRect(0, h * 0.56, w, h * 0.44);
+    // 被子折线
+    ctx.strokeStyle = 'rgba(200,180,140,0.06)';
+    ctx.lineWidth = 1.4;
+    for (var q = 0; q < 4; q++) {
+      var qy = h * (0.66 + q * 0.08);
+      ctx.beginPath(); ctx.moveTo(0, qy); ctx.quadraticCurveTo(w / 2, qy - 14 * s, w, qy); ctx.stroke();
+    }
+
+    // ── 玩偶熊 ──
+    var hugShift = hugA * 40 * s;        // 被拉近
+    var squeeze = hugA * 0.12;           // 抱紧挤压
+    var glowA = hugA * (0.5 + 0.5 * Math.sin(breath * 2)) * 0.35;
+
+    var bx = L.cx + hugShift * 0.4;
+    var by = L.cy + hugA * 8 * s;
+
+    // 暖光（被抱住时）
+    if (hugA > 0.05) {
+      var g = ctx.createRadialGradient(bx, by, 10 * s, bx, by, 170 * s);
+      g.addColorStop(0, 'rgba(255,205,140,' + glowA + ')');
+      g.addColorStop(1, 'rgba(255,205,140,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(bx - 180 * s, by - 180 * s, 360 * s, 360 * s);
+    }
+
+    // 耳朵
+    ctx.fillStyle = '#b58a58';
+    for (var e2 = -1; e2 <= 1; e2 += 2) {
+      ctx.beginPath();
+      ctx.arc(bx + e2 * 34 * s, by - 62 * s, 14 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#d8b088';
+      ctx.beginPath();
+      ctx.arc(bx + e2 * 34 * s, by - 62 * s, 7.5 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#b58a58';
+    }
+    // 头
+    var head = ctx.createRadialGradient(bx - 8 * s, by - 42 * s, 6, bx, by - 34 * s, 46 * s);
+    head.addColorStop(0, '#d8b088');
+    head.addColorStop(1, '#b58a58');
+    ctx.fillStyle = head;
+    ctx.beginPath();
+    ctx.arc(bx, by - 34 * s, 42 * s * (1 + squeeze * 0.35), 0, Math.PI * 2);
+    ctx.fill();
+    // 吻部
+    ctx.fillStyle = '#e0c49c';
+    ctx.beginPath();
+    ctx.ellipse(bx, by - 22 * s, 15 * s, 11 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#4a3826';
+    ctx.beginPath(); ctx.arc(bx, by - 26 * s, 3.4 * s, 0, Math.PI * 2); ctx.fill();
+    // 眼睛（抱紧闭眼 / 平时睁）
+    ctx.strokeStyle = '#4a3826';
+    ctx.lineWidth = 2.4 * s;
+    for (var ey = -1; ey <= 1; ey += 2) {
+      ctx.beginPath();
+      if (hugA > 0.4) {
+        ctx.arc(bx + ey * 15 * s, by - 40 * s, 5.5 * s, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#4a3826';
+        ctx.beginPath(); ctx.arc(bx + ey * 15 * s, by - 40 * s, 3.6 * s, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#b58a58';
+      }
+    }
+    // 嘴（微微上扬）
+    ctx.strokeStyle = '#6a4e2e';
+    ctx.lineWidth = 1.6 * s;
+    ctx.beginPath();
+    ctx.arc(bx, by - 17 * s, 6 * s, Math.PI * 0.15, Math.PI * 0.85);
+    ctx.stroke();
+
+    // 身体（抱紧被挤压变宽扁）
+    var body = ctx.createLinearGradient(bx - 40 * s, 0, bx + 40 * s, 0);
+    body.addColorStop(0, '#c99e6c');
+    body.addColorStop(0.5, '#b58a58');
+    body.addColorStop(1, '#9c7648');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.ellipse(bx, by + 34 * s, (46 + squeeze * 130) * s, (56 - squeeze * 20) * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 肚皮
+    ctx.fillStyle = '#e0c49c';
+    ctx.beginPath();
+    ctx.ellipse(bx, by + 38 * s, (28 + squeeze * 80) * s, (34 - squeeze * 8) * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 手臂（抱紧时张开着「回抱」）
+    ctx.strokeStyle = '#b58a58';
+    ctx.lineWidth = 12 * s;
+    ctx.lineCap = 'round';
+    var armA = hugA * 0.5;
+    for (var ar = -1; ar <= 1; ar += 2) {
+      ctx.beginPath();
+      ctx.moveTo(bx + ar * 40 * s, by + 12 * s);
+      ctx.quadraticCurveTo(bx + ar * (62 + armA * 10) * s, by + 2 * s, bx + ar * (30 - armA * 22) * s, by - 16 * s);
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+
+    // 引导
+    if (hugs === 0 && !hugging) {
+      ctx.fillStyle = 'rgba(200,162,118,' + (0.3 + 0.2 * Math.sin(nowT / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，抱住它', w / 2, h * 0.88);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__plush = {
+    hugging: function () { return hugging; },
+    hugs: function () { return hugs; },
+    hugA: function () { return +hugA.toFixed(2); },
+    press: function () { hugging = true; hugs++; },
+    release: function () { hugging = false; }
+  };
+})();
+</script>
+</body>
+</html>

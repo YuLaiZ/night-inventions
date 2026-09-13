@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回笼觉预约单</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12151c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4136;
+    overflow-x: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6a6258;
+    text-decoration: none;
+    border-bottom: 1px dotted #6a6258;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9a8f80; border-color: #9a8f80; }
+  .copy {
+    margin: 52px auto 26px;
+    text-align: center;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89880; margin-bottom: 10px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e655a; letter-spacing: 0.08em; }
+  .slip {
+    width: min(520px, 88vw);
+    margin: 0 auto;
+    background: #efe7d6;
+    padding: 30px 34px 26px;
+    border-radius: 3px;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+    position: relative;
+    transform: rotate(-0.6deg);
+  }
+  .slip.rerolled { animation: land 0.45s ease; }
+  @keyframes land {
+    0% { transform: rotate(1.1deg) translateY(-14px); opacity: 0.2; }
+    100% { transform: rotate(-0.6deg) translateY(0); opacity: 1; }
+  }
+  .slip::before {
+    content: '';
+    position: absolute; top: 10px; left: 10px; right: 10px; bottom: 10px;
+    border: 1px solid rgba(90, 70, 50, 0.18);
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .slip-head {
+    text-align: center;
+    border-bottom: 2px solid #4a4136;
+    padding-bottom: 12px;
+    margin-bottom: 6px;
+  }
+  .slip-head h2 {
+    font-size: 19px; font-weight: 600; letter-spacing: 0.5em;
+    padding-left: 0.5em;
+    color: #3a332a;
+  }
+  .slip-no {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: #7a6f5e; letter-spacing: 0.12em;
+    margin-top: 8px;
+  }
+  .rows { margin-top: 14px; }
+  .row {
+    display: flex;
+    padding: 9px 2px;
+    border-bottom: 1px dashed rgba(90, 70, 50, 0.25);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .k {
+    flex: 0 0 6.2em;
+    color: #8a7d68;
+    letter-spacing: 0.14em;
+  }
+  .row .v { flex: 1; color: #3a332a; }
+  .stamp {
+    position: absolute;
+    right: 26px; bottom: 18px;
+    width: 86px; height: 86px;
+    border: 3px solid rgba(178, 58, 44, 0.78);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transform: rotate(12deg);
+    color: rgba(178, 58, 44, 0.82);
+    font-size: 15px; font-weight: 600;
+    letter-spacing: 0.18em;
+    padding-left: 0.18em;
+    text-align: center;
+    line-height: 1.5;
+  }
+  .stamp::after {
+    content: '';
+    position: absolute; inset: 5px;
+    border: 1px solid rgba(178, 58, 44, 0.45);
+    border-radius: 50%;
+  }
+  .reroll {
+    display: block;
+    margin: 26px auto 0;
+    background: none;
+    border: 1px solid #5a5044;
+    border-radius: 999px;
+    color: #a89880;
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    padding: 9px 26px 9px calc(26px + 0.22em);
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.25s, color 0.25s;
+  }
+  .reroll:hover { border-color: #a89880; color: #d8c8a8; }
+  .tip {
+    text-align: center;
+    font-size: 12px; color: #5c554b;
+    letter-spacing: 0.1em;
+    margin-top: 14px;
+    min-height: 20px;
+  }
+  footer {
+    text-align: center;
+    margin: 44px 0 16px;
+    font-size: 11px; color: #56504a;
+    letter-spacing: 0.04em;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+
+<div class="copy">
+  <h1>回笼觉预约单</h1>
+  <p>夜班打烊了，天却还没到正式起床的点。<br>这一觉不该偷偷睡——给它开一张单子，名正言顺。</p>
+</div>
+
+<div class="slip" id="slip">
+  <div class="slip-head">
+    <h2>回笼觉预约单</h2>
+    <div class="slip-no" id="slipNo"></div>
+  </div>
+  <div class="rows">
+    <div class="row"><span class="k">申请人</span><span class="v">夜班值班员（刚刚下班）</span></div>
+    <div class="row"><span class="k">预约时段</span><span class="v" id="vSlot"></span></div>
+    <div class="row"><span class="k">回笼理由</span><span class="v" id="vReason"></span></div>
+    <div class="row"><span class="k">睡姿偏好</span><span class="v" id="vPose"></span></div>
+    <div class="row"><span class="k">免打扰等级</span><span class="v" id="vDnd"></span></div>
+    <div class="row"><span class="k">审批意见</span><span class="v" id="vApproval"></span></div>
+  </div>
+  <div class="stamp" id="stamp">被窝<br>管理处</div>
+</div>
+
+<button class="reroll" id="reroll">再约一单</button>
+<div class="tip" id="tip">单子由被窝管理处最终解释——它一般都批。</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var SLOTS = [
+    '早餐后 · 09:30 – 10:10', '午前 · 10:00 – 10:45',
+    '看完手机就睡 · 11:00 前开工', '阳光晒到枕头那一刻起 · 时长不限',
+    '早饭前眯一小觉 · 40 分钟'
+  ];
+  var REASONS = [
+    '梦没做完，回去把结尾续上。',
+    '昨晚值班太尽职，现申请一笔睡眠补贴。',
+    '被窝凉透了，得有人去把它焐热。',
+    '枕头的另一面还没睡过，想去看看。',
+    '今早的闹钟配不上这个天气。',
+    '梦里有人留了话，必须回去听完。'
+  ];
+  var POSES = [
+    '右侧躺，脸朝背光那一边。',
+    '蜷成一只虾米，严丝合缝。',
+    '大字型，本单包含整张床。',
+    '抱着被角，留一只耳朵听雨。'
+  ];
+  var DND = [
+    '★★☆　快递可以敲，事情不行。',
+    '★★★　电话也不接，梦想除外。',
+    '☆☆☆　轻声细语可以商量。',
+    '★★★　地球挪位再叫我。'
+  ];
+  var APPROVALS = [
+    '准。',
+    '准。但十点半必须滚起来。',
+    '准。毯子归管理处代管。',
+    '准。批得比你想的痛快。',
+    '不准也得准。'
+  ];
+
+  var seq = Math.floor(Math.random() * 900) + 100;
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function render() {
+    var now = new Date();
+    var d = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+    seq = (seq + 1 + Math.floor(Math.random() * 3)) % 1000;
+    document.getElementById('slipNo').textContent =
+      'No. HL-' + d + '-' + String(seq).padStart(3, '0');
+    document.getElementById('vSlot').textContent = pick(SLOTS);
+    document.getElementById('vReason').textContent = pick(REASONS);
+    document.getElementById('vPose').textContent = pick(POSES);
+    document.getElementById('vDnd').textContent = pick(DND);
+    document.getElementById('vApproval').textContent = pick(APPROVALS);
+  }
+
+  document.getElementById('reroll').addEventListener('click', function () {
+    render();
+    var slip = document.getElementById('slip');
+    slip.classList.remove('rerolled');
+    void slip.offsetWidth;
+    slip.classList.add('rerolled');
+    document.getElementById('tip').textContent = pick([
+      '管理处提醒：回笼觉的核心竞争力是心安理得。',
+      '这一单作废了，作废的单子也要好好睡。',
+      '换了个时段，被窝没换，还是那个被窝。',
+      '第 ' + (Math.floor(Math.random() * 8) + 2) + ' 次预约。管理处已经习惯了。'
+    ]);
+  });
+
+  render();
+
+  // QA 钩子（无私人信息）
+  window.__nap = {
+    reroll: function () { document.getElementById('reroll').click(); },
+    fields: function () {
+      return ['vSlot', 'vReason', 'vPose', 'vDnd', 'vApproval'].map(function (id) {
+        return document.getElementById(id).textContent;
+      });
+    },
+    no: function () { return document.getElementById('slipNo').textContent; }
+  };
+})();
+</script>
+</body>
+</html>

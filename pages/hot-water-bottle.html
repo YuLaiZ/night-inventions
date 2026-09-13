@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>灌一只热水袋</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0b111a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4148;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a6a58; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6a5a52; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a07a62;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #5a5450;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6a5a52;
+    text-decoration: none;
+    border-bottom: 1px dotted #6a5a52;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9a7a62; border-color: #9a7a62; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>灌一只热水袋</h1>
+  <p>后半夜的被窝，凉得像另一张床。<br>按住袋口灌热水——八分满就收手，剩两分给热气走路。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var phase = 'idle';   // idle → capping → sliding → bedded
+  var level = 0;        // 水位 0-1
+  var filling = false;  // 正在按住灌水
+  var hugs = 0;         // 入被窝后的抱紧次数
+  var done = 0;         // 完成入被窝次数
+  var capT = 0;         // 盖塞子进度
+  var slideT = 0;       // 滑进被窝进度
+  var haloBloom = 0;    // 抱紧时的暖光绽放 0-1
+  var wobble = 0;       // 灌水时囊体微晃
+  var steam = [];       // 热气 {x,y,vy,a,dx}
+  var drops = [];       // 水流碎点
+  var sparks = [];      // 咔哒星芒 {x,y,a}
+  var saidFill = false;
+  var hugLines = ['抱紧一点，暖得更实。', '它比你还晚睡，比你先凉。', '这只袋子，守夜比谁都称职。'];
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.74;
+    L.bw = Math.min(L.w * 0.24, 150);       // 囊体宽
+    L.bh = L.bw * 1.34;                     // 囊体高
+    L.stoolH = L.h * 0.055;
+    L.bx = L.w * 0.27 - L.bw / 2;           // 囊体左缘（在凳上时）
+    L.by = L.floorY - L.stoolH - L.bh;      // 囊体顶
+    L.bedX0 = L.w * 0.55;
+    L.bedX = L.bedX0 + (L.w - L.bedX0) * 0.30 - L.bw / 2; // 被窝里最终位置
+    L.bedY = L.floorY - 34 - L.bh; // 底部坐进被子隆起（上 2/3 露出被面）
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function bottleRect() {
+    // 返回当前囊体左上角与缩放（滑动期间插值）
+    var t = phase === 'sliding' || phase === 'bedded' ? (phase === 'bedded' ? 1 : easeIO(slideT)) : 0;
+    return {
+      x: L.bx + (L.bedX - L.bx) * t,
+      y: L.by + (L.bedY - L.by) * t,
+      w: L.bw,
+      h: L.bh
+    };
+  }
+  function easeIO(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function hitBottle(x, y) {
+    var r = bottleRect();
+    var pad = 26;
+    return x > r.x - pad && x < r.x + r.w + pad && y > r.y - pad && y < r.y + r.h + pad;
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress(x, y) {
+    if (phase === 'bedded') { hug(); return; }
+    if (phase !== 'idle' || filling) return;
+    if (hitBottle(x, y)) {
+      filling = true;
+      if (!saidFill) { saidFill = true; say('水声放轻，别吵醒楼梯。'); }
+    }
+  }
+  function endPress() {
+    if (!filling) return;
+    filling = false;
+    if (level >= 0.85) {
+      phase = 'capping'; capT = 0;
+      var r = bottleRect();
+      sparks.push({ x: r.x + r.w / 2, y: r.y - 8, a: 1 });
+      say('八分满。塞好塞子，放进被窝——');
+    } else if (level < 0.5) {
+      say('还温吞着，再按一会儿。');
+    } else {
+      say('再灌两口，让它暖到后半夜。');
+    }
+  }
+  function hug() {
+    hugs++;
+    haloBloom = 1;
+    say(hugLines[(hugs - 1) % hugLines.length]);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { filling = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (filling) {
+      level = Math.min(1, level + dt * 0.30);
+      wobble = Math.min(1, wobble + dt * 3);
+      var r0 = bottleRect();
+      if (Math.random() < dt * 26) {
+        drops.push({ x: r0.x + r0.w / 2 + (Math.random() - 0.5) * 3, y: r0.y - 46, v: 240 + Math.random() * 80 });
+      }
+      if (Math.random() < dt * 7) {
+        steam.push({ x: r0.x + r0.w / 2 + (Math.random() - 0.5) * r0.w * 0.5, y: r0.y - 10, vy: 26 + Math.random() * 22, a: 0.5, dx: (Math.random() - 0.5) * 14 });
+      }
+    } else {
+      wobble = Math.max(0, wobble - dt * 2.2);
+    }
+    if (phase === 'capping') {
+      capT += dt / 0.55;
+      if (capT >= 1) { phase = 'sliding'; slideT = 0; }
+    } else if (phase === 'sliding') {
+      slideT += dt / 1.25;
+      if (slideT >= 1) {
+        slideT = 1; phase = 'bedded'; done++;
+        say('被窝从脚那一头先暖起来。这一夜，冻不着了。', true);
+      }
+    }
+    haloBloom = Math.max(0, haloBloom - dt * 0.8);
+    for (var sp = sparks.length - 1; sp >= 0; sp--) {
+      sparks[sp].a -= dt * 1.6;
+      if (sparks[sp].a <= 0) sparks.splice(sp, 1);
+    }
+    for (var dr = drops.length - 1; dr >= 0; dr--) {
+      drops[dr].y += drops[dr].v * dt;
+      var rc = bottleRect();
+      if (drops[dr].y > rc.y - 6) { drops.splice(dr, 1); continue; }
+    }
+    for (var st = steam.length - 1; st >= 0; st--) {
+      var sm = steam[st];
+      sm.y -= sm.vy * dt; sm.x += sm.dx * dt; sm.a -= dt * 0.30;
+      if (sm.a <= 0) steam.splice(st, 1);
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.floorY);
+    bg.addColorStop(0, '#0b111a');
+    bg.addColorStop(1, '#101722');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.floorY);
+    ctx.fillStyle = '#0a0e15';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(160,150,140,0.10)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // 床垫沿（被子之下）
+    ctx.fillStyle = '#131b28';
+    ctx.fillRect(L.bedX0 + 12, L.floorY - 34, w - L.bedX0 - 12, 34);
+
+    // 入窝阶段：瓶身先画，下半截藏进被子
+    var inBed = phase === 'sliding' || phase === 'bedded';
+    if (inBed) drawBottle(now);
+
+    // 被子隆起
+    var mound = ctx.createLinearGradient(L.bedX0, L.floorY - 120, L.bedX0, L.floorY);
+    mound.addColorStop(0, '#2a2330');
+    mound.addColorStop(1, '#1c1822');
+    ctx.fillStyle = mound;
+    ctx.beginPath();
+    ctx.moveTo(L.bedX0 - 8, L.floorY);
+    ctx.quadraticCurveTo(L.bedX0 + (w - L.bedX0) * 0.18, L.floorY - 108, L.bedX0 + (w - L.bedX0) * 0.52, L.floorY - 96);
+    ctx.quadraticCurveTo(L.w + 10, L.floorY - 84, L.w + 10, L.floorY);
+    ctx.closePath();
+    ctx.fill();
+    // 被褶
+    ctx.strokeStyle = 'rgba(200,170,150,0.07)';
+    ctx.lineWidth = 1.4;
+    for (var f = 0; f < 3; f++) {
+      ctx.beginPath();
+      ctx.moveTo(L.bedX0 + (w - L.bedX0) * (0.28 + f * 0.2), L.floorY - 92 + f * 14);
+      ctx.quadraticCurveTo(L.bedX0 + (w - L.bedX0) * (0.40 + f * 0.2), L.floorY - 62 + f * 12, L.bedX0 + (w - L.bedX0) * (0.55 + f * 0.18), L.floorY - 34);
+      ctx.stroke();
+    }
+
+    // 暖光晕叠在被子上面：热气从被窝里洇出来
+    if (inBed) drawHalo(now);
+
+    // 凳子 + 囊体（在凳上时）
+    if (phase === 'idle' || phase === 'capping') {
+      ctx.fillStyle = '#241d18';
+      ctx.fillRect(L.w * 0.27 - 34, L.floorY - L.stoolH, 68, L.stoolH);
+      ctx.fillRect(L.w * 0.27 - 28, L.floorY - L.stoolH + 4, 7, L.stoolH - 4);
+      ctx.fillRect(L.w * 0.27 + 21, L.floorY - L.stoolH + 4, 7, L.stoolH - 4);
+      ctx.fillStyle = 'rgba(200,170,140,0.10)';
+      ctx.fillRect(L.w * 0.27 - 34, L.floorY - L.stoolH, 68, 2);
+      drawBottle(now);
+    }
+
+    // 灌水水流（按住时从画面上方注入）
+    var b = bottleRect();
+    if (filling) {
+      var hx = b.x + b.w / 2 + Math.sin(now / 90) * wobble * 1.2;
+      ctx.strokeStyle = 'rgba(150,200,215,0.55)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(hx, 0);
+      ctx.lineTo(hx + Math.sin(now / 70) * 1.4, b.y - 14);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(170,215,230,0.7)';
+      for (var d2 = 0; d2 < drops.length; d2++) {
+        ctx.beginPath();
+        ctx.ellipse(drops[d2].x, drops[d2].y, 1.6, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 热气
+    for (var s3 = 0; s3 < steam.length; s3++) {
+      var sm2 = steam[s3];
+      ctx.strokeStyle = 'rgba(230,220,210,' + (sm2.a * 0.5) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(sm2.x, sm2.y);
+      ctx.quadraticCurveTo(sm2.x + 5, sm2.y - 9, sm2.x + sm2.dx * 0.4, sm2.y - 18);
+      ctx.stroke();
+    }
+    // 咔哒星芒
+    for (var pk = 0; pk < sparks.length; pk++) {
+      var pkk = sparks[pk];
+      ctx.strokeStyle = 'rgba(255,215,160,' + pkk.a + ')';
+      ctx.lineWidth = 2;
+      for (var ray = 0; ray < 6; ray++) {
+        var ang = ray * Math.PI / 3 + 0.4;
+        var r1 = 5 + (1 - pkk.a) * 14;
+        var r2 = r1 + 7 * pkk.a;
+        ctx.beginPath();
+        ctx.moveTo(pkk.x + Math.cos(ang) * r1, pkk.y + Math.sin(ang) * r1);
+        ctx.lineTo(pkk.x + Math.cos(ang) * r2, pkk.y + Math.sin(ang) * r2);
+        ctx.stroke();
+      }
+    }
+
+    // 引导提示
+    if (!saidFill && phase === 'idle') {
+      ctx.fillStyle = 'rgba(200,160,130,' + (0.32 + 0.22 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住袋口，灌热水', b.x + b.w / 2, b.y + b.h + 40);
+    }
+  }
+
+  function drawBottle(now) {
+    var b = bottleRect();
+    var warm = level;
+    var bodyCol = mixCol([82, 65, 74], [162, 75, 53], warm);
+    var wob = Math.sin(now / 90) * wobble * 1.2;
+    ctx.save();
+    ctx.translate(wob, 0);
+    ctx.beginPath();
+    roundBottle(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = rgb(bodyCol);
+    ctx.fill();
+
+    // 袋内水（裁剪到囊体）
+    ctx.save();
+    ctx.clip();
+    var waterTop = b.y + b.h * (1 - 0.86 * level) + b.h * 0.07;
+    var wg = ctx.createLinearGradient(0, waterTop, 0, b.y + b.h);
+    wg.addColorStop(0, mixCss([110, 160, 170], [255, 190, 120], warm));
+    wg.addColorStop(1, mixCss([60, 100, 120], [220, 110, 60], warm));
+    ctx.fillStyle = wg;
+    ctx.beginPath();
+    ctx.moveTo(b.x - 4, b.y + b.h + 4);
+    for (var wx = b.x - 4; wx <= b.x + b.w + 4; wx += 6) {
+      var wyv = waterTop + Math.sin(wx / 17 + now / 260) * (1.6 + wobble * 2.6) + Math.sin(wx / 7 - now / 170) * wobble * 1.4;
+      ctx.lineTo(wx, wyv);
+    }
+    ctx.lineTo(b.x + b.w + 4, b.y + b.h + 4);
+    ctx.closePath();
+    ctx.fill();
+    // 橡胶竖纹
+    ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+    ctx.lineWidth = 2;
+    for (var rib = 1; rib < 5; rib++) {
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.w * rib / 5, b.y + b.h * 0.10);
+      ctx.lineTo(b.x + b.w * rib / 5, b.y + b.h * 0.94);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 暖边
+    ctx.beginPath();
+    roundBottle(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = 'rgba(255,170,110,' + (0.10 + warm * 0.38) + ')';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 颈口 + 塞子
+    var cxm = b.x + b.w / 2;
+    ctx.fillStyle = rgb(mixCol([70, 56, 62], [140, 64, 46], warm));
+    ctx.fillRect(cxm - 9, b.y - 12, 18, 14);
+    var capDrop = phase === 'capping' ? Math.min(1, capT) * 7 : phase === 'sliding' || phase === 'bedded' ? 7 : 0;
+    ctx.fillStyle = '#6b5a3e';
+    ctx.fillRect(cxm - 7, b.y - 17 + capDrop, 14, 7);
+    ctx.fillStyle = 'rgba(255,230,180,0.22)';
+    ctx.fillRect(cxm - 7, b.y - 17 + capDrop, 14, 2);
+    ctx.restore();
+  }
+
+  function drawHalo(now) {
+    var b = bottleRect();
+    var warm = level;
+    var pulse = 0.55 + 0.16 * Math.sin(now / 850);
+    var glowA = (phase === 'bedded' ? pulse : 0.35 * slideT) * (0.35 + warm * 0.65) + haloBloom * 0.5;
+    var gr = ctx.createRadialGradient(b.x + b.w / 2, b.y + b.h / 3, 4, b.x + b.w / 2, b.y + b.h / 3, b.w * 3.1);
+    gr.addColorStop(0, 'rgba(255,170,110,' + (0.30 * glowA + 0.22) + ')');
+    gr.addColorStop(0.5, 'rgba(230,130,80,' + (0.14 * glowA + 0.08) + ')');
+    gr.addColorStop(1, 'rgba(230,130,80,0)');
+    ctx.fillStyle = gr;
+    ctx.fillRect(b.x - b.w * 3, b.y - b.w * 3, b.w * 7, b.h + b.w * 6);
+    // 暖浮尘
+    for (var m2 = 0; m2 < 5; m2++) {
+      var mx = b.x + b.w / 2 + Math.sin(now / (900 + m2 * 210) + m2 * 2.3) * b.w * 1.5;
+      var my = b.y + b.h / 2 - ((now / (34 + m2 * 11)) % (b.h + 70)) + b.h * 0.6;
+      ctx.fillStyle = 'rgba(255,190,130,' + (0.10 + 0.08 * Math.sin(now / 500 + m2)) + ')';
+      ctx.fillRect(mx, my, 2, 2);
+    }
+  }
+
+  function roundBottle(x, y, w2, h2) {
+    var r = w2 * 0.34;
+    var shoulder = h2 * 0.16; // 顶部收肩
+    ctx.moveTo(x, y + shoulder + r * 0.4);
+    ctx.quadraticCurveTo(x - w2 * 0.02, y + shoulder * 0.5, x + w2 * 0.30, y + shoulder * 0.28);
+    ctx.lineTo(x + w2 * 0.5 - 9, y + 2);
+    ctx.lineTo(x + w2 * 0.5 + 9, y + 2);
+    ctx.quadraticCurveTo(x + w2 + w2 * 0.02, y + shoulder * 0.5, x + w2, y + shoulder + r * 0.4);
+    ctx.lineTo(x + w2, y + h2 - r);
+    ctx.quadraticCurveTo(x + w2, y + h2, x + w2 - r, y + h2);
+    ctx.lineTo(x + r, y + h2);
+    ctx.quadraticCurveTo(x, y + h2, x, y + h2 - r);
+    ctx.closePath();
+  }
+
+  function mixCol(a, b2, t) {
+    return [Math.round(a[0] + (b2[0] - a[0]) * t), Math.round(a[1] + (b2[1] - a[1]) * t), Math.round(a[2] + (b2[2] - a[2]) * t)];
+  }
+  function rgb(c) { return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; }
+  function mixCss(a, b2, t) { return rgb(mixCol(a, b2, t)); }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__bottle = {
+    level: function () { return +level.toFixed(2); },
+    phase: function () { return phase; },
+    done: function () { return done; },
+    hugs: function () { return hugs; },
+    rect: function () { var r = bottleRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }; },
+    press: function (xr, yr) { var r = bottleRect(); startPress(r.x + r.w / 2 + (xr || 0), r.y + r.h / 2 + (yr || 0)); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>
