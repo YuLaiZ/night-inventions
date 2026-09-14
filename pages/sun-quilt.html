@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晒被子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #131a22;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c525a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #828a70; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c625a; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #98a088;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #545a52;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c625a;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c625a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #98a088; border-color: #98a088; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>晒被子</h1>
+  <p>早上的太阳不烫，风也不吵。<br>按住拍被子——把灰尘拍出去，把太阳的味道拍进去。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var beating = false;     // 按住拍
+  var beatT = 0;           // 拍打相位
+  var beats = 0;           // 拍打次数
+  var dusts = [];          // 灰尘 {x,y,vx,vy,a,r}
+  var fluff = 0;           // 蓬松度 0-1（随拍打涨）
+  var saidStart = false;
+  var saidDone = false;
+  var squish = 0;          // 拍下的压缩量
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.railY = L.h * 0.44;
+    L.qw = Math.min(L.w * 0.44, L.h * 0.36, 330);
+    L.qh = Math.min(L.h * 0.30, 205);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    beating = true;
+    if (!saidStart) { saidStart = true; say('一下，两下——灰尘最怕这个。'); }
+    else if (fluff > 0.7 && !saidDone) { /* 快好了 */ }
+  }
+  function endPress() {
+    beating = false;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { beating = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (beating && fluff < 1) {
+      beatT += dt * 4.6;
+      // 一个相位 = 一下
+      if (Math.sin(beatT) > 0.92 && squish < 0.1) {
+        beats++;
+        squish = 1;
+        // 拍出灰尘（越拍到后面越少）
+        var n = Math.max(2, Math.round(14 * (1 - fluff)));
+        for (var i = 0; i < n; i++) {
+          dusts.push({
+            x: L.w * 0.5 + (Math.random() - 0.5) * L.qw * 0.9,
+            y: L.railY + L.qh * (0.2 + Math.random() * 0.6),
+            vx: (Math.random() - 0.5) * 60,
+            vy: -30 - Math.random() * 50,
+            a: 0.7,
+            r: 1.5 + Math.random() * 2.5
+          });
+        }
+        if (beats === 6) say('扑——扑——阳光也来帮忙了。');
+        if (beats === 14) say('灰尘越来越少，蓬松越来越多。');
+      }
+      fluff = Math.min(1, fluff + dt * 0.05);
+      if (fluff >= 1 && !saidDone) {
+        saidDone = true;
+        say('好了。太阳的味道，装进被子里了。', true);
+      }
+    }
+    squish = Math.max(0, squish - dt * 3.2);
+    for (var d = dusts.length - 1; d >= 0; d--) {
+      var du = dusts[d];
+      du.x += du.vx * dt + Math.sin(now / 500 + du.y * 0.05) * 8 * dt;
+      du.y += du.vy * dt;
+      du.vy += 12 * dt;          // 灰尘飘得慢
+      du.a -= dt * 0.25;
+      if (du.a <= 0) dusts.splice(d, 1);
+    }
+
+    // ── 背景：晴天早晨 ──
+    var sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, '#9db8cc');
+    sky.addColorStop(0.6, '#c2d3d8');
+    sky.addColorStop(1, '#d8d2be');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+    // 太阳（左上）与光束
+    var sunX = w * 0.16, sunY = h * 0.12;
+    var sun = ctx.createRadialGradient(sunX, sunY, 6, sunX, sunY, w * 0.34);
+    sun.addColorStop(0, 'rgba(255,244,210,0.95)');
+    sun.addColorStop(0.18, 'rgba(255,238,190,0.5)');
+    sun.addColorStop(1, 'rgba(255,238,190,0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 晾衣杆 ──
+    ctx.strokeStyle = '#6a5f4c';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.10, L.railY);
+    ctx.lineTo(w * 0.90, L.railY);
+    ctx.stroke();
+    // 杆支架
+    ctx.strokeStyle = '#4c4438';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.16, L.railY);
+    ctx.lineTo(w * 0.14, L.railY + 60);
+    ctx.moveTo(w * 0.84, L.railY);
+    ctx.lineTo(w * 0.86, L.railY + 60);
+    ctx.stroke();
+
+    // ── 被子（搭在杆上，随拍打压缩/回弹，越拍越蓬）──
+    var qx = (w - L.qw) / 2;
+    var qy = L.railY;
+    var puff = 1 + fluff * 0.22 + Math.sin(now / 800) * 0.012;
+    var sq = 1 - squish * 0.10;
+    var qh2 = L.qh * puff * sq;
+    ctx.save();
+    ctx.translate(w / 2, qy);
+    // 阴影侧
+    var qg = ctx.createLinearGradient(0, -qh2 * 0.1, 0, qh2);
+    qg.addColorStop(0, '#d8a44e');
+    qg.addColorStop(0.5, '#c98c3e');
+    qg.addColorStop(1, '#a8702f');
+    ctx.fillStyle = qg;
+    ctx.beginPath();
+    ctx.moveTo(-L.qw / 2, 0);
+    ctx.quadraticCurveTo(-L.qw / 2 - 10, qh2 * 0.55, -L.qw * 0.46, qh2 * 0.96);
+    ctx.quadraticCurveTo(0, qh2 * 1.05, L.qw * 0.46, qh2 * 0.96);
+    ctx.quadraticCurveTo(L.qw / 2 + 10, qh2 * 0.55, L.qw / 2, 0);
+    ctx.quadraticCurveTo(0, -qh2 * 0.16, -L.qw / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+    // 被面缝格（纵线 + 横线）
+    ctx.save();
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(120,80,30,0.22)';
+    ctx.lineWidth = 1.4;
+    for (var vq = 1; vq < 7; vq++) {
+      ctx.beginPath();
+      ctx.moveTo(-L.qw / 2 + L.qw / 7 * vq, 0);
+      ctx.lineTo(-L.qw / 2 + L.qw / 7 * vq - 6, qh2);
+      ctx.stroke();
+    }
+    for (var hq = 1; hq < 3; hq++) {
+      ctx.beginPath();
+      ctx.moveTo(-L.qw / 2, qh2 / 3 * hq);
+      ctx.lineTo(L.qw / 2, qh2 / 3 * hq);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // 杆压出的上沿
+    ctx.strokeStyle = 'rgba(255,244,210,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-L.qw / 2, 0);
+    ctx.quadraticCurveTo(0, -qh2 * 0.16, L.qw / 2, 0);
+    ctx.stroke();
+    ctx.restore();
+
+    // 拍子（进行中出现的竹拍子剪影）
+    if (beating) {
+      var hitPhase = Math.max(0, Math.sin(beatT));
+      ctx.save();
+      ctx.translate(w / 2 + Math.cos(beatT) * 30, qy - 40 - hitPhase * 26);
+      ctx.rotate(0.5 + Math.sin(beatT) * 0.3);
+      ctx.strokeStyle = '#7a6448';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(0, -70);
+      ctx.lineTo(0, -12);
+      ctx.stroke();
+      ctx.fillStyle = '#9a7c50';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(-16, -14, 32, 18, 5);
+      else ctx.rect(-16, -14, 32, 18);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── 灰尘（逆光小点）──
+    for (var k = 0; k < dusts.length; k++) {
+      var d2 = dusts[k];
+      ctx.fillStyle = 'rgba(255,238,200,' + d2.a * 0.55 + ')';
+      ctx.beginPath();
+      ctx.arc(d2.x, d2.y, d2.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 蓬松度（等宽数字）──
+    ctx.fillStyle = 'rgba(120,126,116,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('蓬松 ' + Math.round(fluff * 100) + '%' + (saidDone ? ' · 完成' : ''), w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(90,98,88,' + (0.35 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住被子，拍打它', w / 2, qy + L.qh * puff + 52);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__quilt = {
+    beats: function () { return beats; },
+    fluff: function () { return fluff; },
+    dusts: function () { return dusts.length; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

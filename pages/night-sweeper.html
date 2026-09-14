@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫街的人</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0f14;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a5058;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #74828e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #565e66; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8a959e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e545a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #565e66;
+    text-decoration: none;
+    border-bottom: 1px dotted #565e66;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a959e; border-color: #8a959e; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>扫街的人</h1>
+  <p>凌晨四点，街是空的，扫帚是醒的。<br>按住扫帚左右扫——沙、沙、沙，天亮前把街还回去。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var sweeping = false;    // 按住扫
+  var broomX = null;       // 扫帚当前位置
+  var sweepDir = 1;        // 扫动方向（自动往复）
+  var sweepT = 0;          // 扫动动画相位
+  var dusts = [];          // 尘土小粒
+  var saidStart = false;
+  var saidDone = false;
+
+  var debris = [];         // 落叶纸屑 {x, yj, type, rot, inPile, vx}
+  var PILE_K = 0.78;       // 归堆位置（相对宽）
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.streetY = L.h * 0.62;
+    L.broomY = L.streetY + L.h * 0.10;
+    L.pileX = L.w * PILE_K;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  seedDebris();
+
+  function seedDebris() {
+    debris = [];
+    var n = 14;
+    for (var i = 0; i < n; i++) {
+      debris.push({
+        x: L.w * (0.06 + Math.random() * 0.86),
+        yj: (Math.random() - 0.5) * L.h * 0.16,
+        type: Math.random() < 0.6 ? 'leaf' : 'paper',
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 2,
+        inPile: false,
+        vx: 0
+      });
+    }
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress(x, y) {
+    sweeping = true;
+    broomX = x;
+    if (!saidStart) { saidStart = true; say('沙、沙、沙。不吵，扫就是了。'); }
+  }
+  function movePress(x, y) {
+    if (sweeping) broomX = x;
+  }
+  function endPress() {
+    sweeping = false;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointermove', function (ev) { movePress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { sweeping = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (sweeping && broomX != null) {
+      sweepT += dt * 7;
+      // 扫帚经过的碎屑被推向归堆点
+      var anyOut = false;
+      for (var i = 0; i < debris.length; i++) {
+        var d = debris[i];
+        if (d.inPile) continue;
+        anyOut = true;
+        var dx = broomX - d.x;
+        if (Math.abs(dx) < 150) {
+          // 往归堆点方向推
+          var dir = L.pileX > d.x ? 1 : -1;
+          d.vx += dir * dt * (1600 * (1 - Math.abs(dx) / 150));
+        }
+      }
+      // 扫动扬尘
+      if (Math.random() < dt * 22) {
+        dusts.push({
+          x: broomX + (Math.random() - 0.5) * 70,
+          y: L.broomY + 14 + (Math.random() - 0.5) * 10,
+          vy: -20 - Math.random() * 26,
+          a: 0.5
+        });
+      }
+    }
+    // 碎屑移动与归堆判定
+    var remain = 0;
+    for (var j = 0; j < debris.length; j++) {
+      var dd = debris[j];
+      if (dd.inPile) continue;
+      dd.x += dd.vx * dt;
+      dd.rot += dd.vr * dt * Math.min(1, Math.abs(dd.vx) / 60);
+      dd.vx *= Math.max(0, 1 - 2.2 * dt);
+      if (Math.abs(dd.x - L.pileX) < 14 && Math.abs(dd.vx) < 20) {
+        dd.inPile = true;
+        dd.x = L.pileX + (Math.random() - 0.5) * 26;
+      }
+      if (!dd.inPile) remain++;
+    }
+    // 全部归堆（一次性，松手与否无关）
+    if (debris.length && remain === 0 && !saidDone) {
+      saidDone = true;
+      say('街亮回原来的颜色了。天也快了。', true);
+    }
+    for (var k = dusts.length - 1; k >= 0; k--) {
+      var du = dusts[k];
+      du.y += du.vy * dt; du.a -= dt * 1.1;
+      if (du.a <= 0) dusts.splice(k, 1);
+    }
+
+    // ── 背景：天将微亮的凌晨街景 ──
+    var sky = ctx.createLinearGradient(0, 0, 0, L.streetY);
+    sky.addColorStop(0, '#0a0f16');
+    sky.addColorStop(0.75, '#101a24');
+    sky.addColorStop(1, '#182632');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, L.streetY);
+    // 街面
+    var st = ctx.createLinearGradient(0, L.streetY, 0, h);
+    st.addColorStop(0, '#1a2026');
+    st.addColorStop(1, '#12171c');
+    ctx.fillStyle = st;
+    ctx.fillRect(0, L.streetY, w, h - L.streetY);
+    ctx.fillStyle = 'rgba(190,200,210,0.08)';
+    ctx.fillRect(0, L.streetY, w, 2);
+    // 车道虚线
+    ctx.strokeStyle = 'rgba(200,190,140,0.10)';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([26, 30]);
+    ctx.beginPath();
+    ctx.moveTo(0, L.streetY + (h - L.streetY) * 0.72);
+    ctx.lineTo(w, L.streetY + (h - L.streetY) * 0.72);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // 远处楼宇轮廓
+    ctx.fillStyle = 'rgba(30,42,54,0.8)';
+    for (var b = 0; b < 6; b++) {
+      var bw = w * (0.10 + (b % 3) * 0.05);
+      var bh = L.streetY * (0.22 + (b * 37 % 20) / 100);
+      var bx = w * (0.04 + b * 0.16);
+      ctx.fillRect(bx, L.streetY - bh, bw, bh);
+      // 一两扇未睡的窗
+      if (b % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,214,140,0.14)';
+        ctx.fillRect(bx + bw * 0.3, L.streetY - bh * 0.6, 7, 9);
+        ctx.fillStyle = 'rgba(30,42,54,0.8)';
+      }
+    }
+
+    // ── 归堆点虚线圈（完成前提示）──
+    var remain2 = debris.filter(function (d3) { return !d3.inPile; }).length;
+    if (remain2 > 0) {
+      ctx.strokeStyle = 'rgba(200,205,210,0.10)';
+      ctx.setLineDash([4, 6]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(L.pileX, L.broomY + 8, 30, 9, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // ── 碎屑 ──
+    for (var m = 0; m < debris.length; m++) {
+      var e = debris[m];
+      var ex = e.x, ey = L.broomY + 6 + e.yj * 0.4 + (e.inPile ? -3 : 0);
+      if (e.type === 'leaf') {
+        ctx.fillStyle = e.inPile ? 'rgba(178,124,70,0.9)' : 'rgba(178,124,70,0.8)';
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(e.rot);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 7, 3.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        ctx.fillStyle = e.inPile ? 'rgba(210,206,196,0.85)' : 'rgba(210,206,196,0.7)';
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(e.rot * 0.4);
+        ctx.fillRect(-6, -4, 12, 8);
+        ctx.restore();
+      }
+    }
+    // 碎屑堆
+    var piled = debris.length - remain2;
+    if (piled > 0) {
+      ctx.fillStyle = 'rgba(178,124,70,0.55)';
+      ctx.beginPath();
+      ctx.ellipse(L.pileX, L.broomY + 4, 16 + piled * 1.2, 6 + piled * 0.35, 0, Math.PI, 0);
+      ctx.fill();
+    }
+
+    // ── 扫帚（按住时出现并跟随）──
+    if (sweeping && broomX != null) {
+      var sx = broomX + Math.sin(sweepT) * 4;
+      ctx.save();
+      ctx.translate(sx, L.broomY);
+      ctx.rotate(Math.sin(sweepT) * 0.16 + 0.35);
+      // 帚把
+      ctx.strokeStyle = '#8a6c48';
+      ctx.lineWidth = 4.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -L.h * 0.30);
+      ctx.lineTo(0, -22);
+      ctx.stroke();
+      // 帚头
+      ctx.fillStyle = '#b08d52';
+      ctx.beginPath();
+      ctx.moveTo(-7, -22);
+      ctx.lineTo(7, -22);
+      ctx.lineTo(13, 2);
+      ctx.lineTo(-13, 2);
+      ctx.closePath();
+      ctx.fill();
+      // 帚穗
+      ctx.strokeStyle = 'rgba(60,48,32,0.55)';
+      ctx.lineWidth = 1.2;
+      for (var t2 = -11; t2 <= 11; t2 += 3.6) {
+        ctx.beginPath();
+        ctx.moveTo(t2 * 0.5, -18);
+        ctx.lineTo(t2, 2);
+        ctx.stroke();
+      }
+      // 扎绳
+      ctx.strokeStyle = '#5c4428';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-9, -14);
+      ctx.lineTo(9, -14);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 扬尘 ──
+    for (var d4 = 0; d4 < dusts.length; d4++) {
+      var du2 = dusts[d4];
+      ctx.fillStyle = 'rgba(190,180,160,' + du2.a * 0.5 + ')';
+      ctx.fillRect(du2.x, du2.y, 1.8, 1.8);
+    }
+
+    // ── 战绩（等宽数字）──
+    ctx.fillStyle = 'rgba(190,198,206,0.55)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('还剩 ' + remain2 + ' 片', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(170,180,188,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住街面，左右扫', w / 2, L.broomY + 52);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/movePress/endPress）
+  window.__sweep = {
+    remain: function () { return debris.filter(function (d) { return !d.inPile; }).length; },
+    piled: function () { return debris.filter(function (d) { return d.inPile; }).length; },
+    sweeping: function () { return sweeping; },
+    press: function (xr) { startPress(L.w * (xr == null ? 0.3 : xr)); },
+    move: function (xr) { movePress(L.w * xr); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

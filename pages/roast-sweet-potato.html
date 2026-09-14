@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>路边烤红薯</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0b09;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4e4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #96795c; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5e5750; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #ac8e6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #524c44;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5e5750;
+    text-decoration: none;
+    border-bottom: 1px dotted #5e5750;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #ac8e6a; border-color: #ac8e6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>路边烤红薯</h1>
+  <p>铁皮桶一立，炭火一拢，甜味就开始在街上走。<br>按住翻红薯——糖油渗出来的时候，就熟了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var turning = false;     // 按住翻
+  var doneness = 0;        // 0-1 熟度
+  var flipT = 0;           // 翻动动画相位
+  var aromas = [];         // 香气线 {x,y,a,dx}
+  var stage = 0;           // 0 炉中 → 1 掰开上桌
+  var breakT = 0;          // 掰开动画
+  var saidStart = false;
+  var saidDone = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.groundY = L.h * 0.76;
+    L.ovenX = L.w * 0.5;
+    L.ovenY = L.groundY - L.h * 0.10;
+    L.ovenW = Math.min(L.w * 0.30, 210);
+    L.ovenH = Math.min(L.h * 0.24, 190);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (stage === 1) {
+      // 再来一个
+      stage = 0; doneness = 0; breakT = 0; saidDone = false;
+      say('再挑一个圆润的。这桶糖多。');
+      return;
+    }
+    turning = true;
+    if (!saidStart) { saidStart = true; say('炭火正旺。给它们翻个身。'); }
+    else if (doneness < 0.4) say('急不得，甜是慢慢烤出来的。');
+    else if (doneness < 0.85) say('闻见没？糖油开始渗了。');
+  }
+  function endPress() {
+    turning = false;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { turning = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (turning && stage === 0) {
+      doneness = Math.min(1, doneness + dt * 0.055);
+      flipT += dt * 6;
+      // 香气
+      if (Math.random() < dt * (2 + doneness * 6)) {
+        aromas.push({
+          x: L.ovenX + (Math.random() - 0.5) * L.ovenW * 0.7,
+          y: L.ovenY - L.ovenH * 0.5,
+          a: 0.55,
+          dx: (Math.random() - 0.5) * 16,
+          ph: Math.random() * 6
+        });
+      }
+      if (doneness >= 1) {
+        turning = false;
+        stage = 1;
+        breakT = 0;
+        saidDone = true;
+        say('掰开了——糖心。烫手，也值得。', true);
+      }
+    }
+    if (stage === 1) {
+      breakT = Math.min(1, breakT + dt * 1.6);
+    }
+    for (var a = aromas.length - 1; a >= 0; a--) {
+      var ar = aromas[a];
+      ar.y -= 30 * dt; ar.x += Math.sin(ar.y / 22 + ar.ph) * 14 * dt; ar.a -= dt * 0.22;
+      if (ar.a <= 0) aromas.splice(a, 1);
+    }
+
+    var warmth = 0.25 + doneness * 0.5;
+
+    // ── 背景：夜街一角 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d0b09');
+    bg.addColorStop(1, '#151009');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 炭火光
+    var fire = ctx.createRadialGradient(L.ovenX, L.ovenY, 10, L.ovenX, L.ovenY, L.w * 0.5);
+    fire.addColorStop(0, 'rgba(255,150,70,' + 0.16 * warmth + ')');
+    fire.addColorStop(1, 'rgba(255,150,70,0)');
+    ctx.fillStyle = fire;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#141008';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(210,160,100,0.08)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    // ── 铁皮桶炉 ──
+    ctx.save();
+    ctx.translate(L.ovenX, L.ovenY);
+    var og = ctx.createLinearGradient(-L.ovenW / 2, 0, L.ovenW / 2, 0);
+    og.addColorStop(0, '#23201c');
+    og.addColorStop(0.5, '#3c3630');
+    og.addColorStop(1, '#1c1915');
+    ctx.fillStyle = og;
+    ctx.fillRect(-L.ovenW / 2, -L.ovenH / 2, L.ovenW, L.ovenH);
+    // 桶箍
+    ctx.strokeStyle = 'rgba(10,8,6,0.8)';
+    ctx.lineWidth = 3;
+    for (var hoop = -1; hoop <= 1; hoop++) {
+      ctx.beginPath();
+      ctx.moveTo(-L.ovenW / 2, hoop * L.ovenH * 0.3);
+      ctx.lineTo(L.ovenW / 2, hoop * L.ovenH * 0.3);
+      ctx.stroke();
+    }
+    // 开口（桶口朝上，内里炭火）
+    ctx.fillStyle = '#0c0a08';
+    ctx.beginPath();
+    ctx.ellipse(0, -L.ovenH / 2, L.ovenW * 0.46, L.ovenH * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var coalG = ctx.createRadialGradient(0, -L.ovenH / 2, 2, 0, -L.ovenH / 2, L.ovenW * 0.4);
+    coalG.addColorStop(0, 'rgba(255,150,60,' + (0.5 + 0.3 * Math.sin(now / 300) * warmth) + ')');
+    coalG.addColorStop(1, 'rgba(180,60,20,0.15)');
+    ctx.fillStyle = coalG;
+    ctx.beginPath();
+    ctx.ellipse(0, -L.ovenH / 2 + 3, L.ovenW * 0.4, L.ovenH * 0.11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 红薯们（桶口沿，熟度越高越亮越塌）
+    for (var pi = 0; pi < 3; pi++) {
+      var ox = (pi - 1) * L.ovenW * 0.26;
+      var oy = -L.ovenH / 2 + 2 + Math.sin(pi * 2.1) * 3;
+      var pr = 13 + pi * 1.5;
+      var skin = Math.round(96 + doneness * 60);
+      ctx.fillStyle = 'rgb(' + Math.round(skin * 0.62) + ',' + Math.round(skin * 0.36) + ',' + Math.round(skin * 0.26) + ')';
+      ctx.beginPath();
+      ctx.ellipse(ox, oy, pr, pr * 0.68, (pi - 1) * 0.5 + Math.sin(flipT + pi) * 0.12 * (turning ? 1 : 0), 0, Math.PI * 2);
+      ctx.fill();
+      // 糖油渗亮
+      if (doneness > 0.45) {
+        ctx.fillStyle = 'rgba(230,150,60,' + (doneness - 0.45) * 1.2 + ')';
+        ctx.beginPath();
+        ctx.ellipse(ox + pr * 0.3, oy - pr * 0.2, pr * 0.24, pr * 0.13, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    // ── 掰开的红薯（完工上桌）──
+    if (stage === 1) {
+      var bt = 1 - Math.pow(1 - breakT, 3);
+      var sPotX = L.w * 0.22, sPotY = L.groundY - 16;
+      var half = L.ovenW * 0.18 * (1 + bt * 0.2);
+      var gap = bt * 26;
+      // 两半薯身
+      for (var hf = 0; hf < 2; hf++) {
+        var dir2 = hf === 0 ? -1 : 1;
+        ctx.save();
+        ctx.translate(sPotX + dir2 * gap * 0.5, sPotY);
+        ctx.rotate(dir2 * bt * 0.16);
+        // 皮
+        ctx.fillStyle = '#7a4426';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, half, half * 0.68, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 瓤（金黄放射）
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(0, 0, half * 0.9, half * 0.6, 0, 0, Math.PI * 2);
+        ctx.clip();
+        var flesh = ctx.createRadialGradient(dir2 * gap * 0.5, 0, 1, dir2 * gap * 0.5, 0, half);
+        flesh.addColorStop(0, '#ffd98a');
+        flesh.addColorStop(0.6, '#f0a94e');
+        flesh.addColorStop(1, '#c87830');
+        ctx.fillStyle = flesh;
+        ctx.fillRect(-half * 1.2, -half, half * 2.4, half * 2);
+        // 纤维纹
+        ctx.strokeStyle = 'rgba(200,120,50,0.4)';
+        ctx.lineWidth = 1.2;
+        for (var fi = -2; fi <= 2; fi++) {
+          ctx.beginPath();
+          ctx.moveTo(dir2 * gap * 0.5, fi * half * 0.22);
+          ctx.quadraticCurveTo(dir2 * half * 0.4, fi * half * 0.26, dir2 * half, fi * half * 0.18);
+          ctx.stroke();
+        }
+        ctx.restore();
+        ctx.restore();
+      }
+      // 热气
+      for (var st2 = 0; st2 < 3; st2++) {
+        var sY2 = sPotY - half * 0.8 - ((now / (30 + st2 * 8)) % 46);
+        ctx.strokeStyle = 'rgba(235,220,200,' + (0.28 - st2 * 0.07) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(sPotX + (st2 - 1) * 8, sY2 + 10);
+        ctx.quadraticCurveTo(sPotX + (st2 - 1) * 8 + 5, sY2, sPotX + (st2 - 1) * 8 - 3, sY2 - 10);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(200,160,110,' + (0.3 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('掰开了', sPotX, sPotY + half * 0.9 + 22);
+    }
+
+    // ── 香气线 ──
+    for (var q = 0; q < aromas.length; q++) {
+      var q2 = aromas[q];
+      ctx.strokeStyle = 'rgba(240,200,140,' + q2.a * 0.5 + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(q2.x, q2.y);
+      ctx.bezierCurveTo(q2.x + 6, q2.y - 12, q2.x - 6, q2.y - 24, q2.x + q2.dx, q2.y - 36);
+      ctx.stroke();
+    }
+
+    // ── 熟度（等宽数字）──
+    ctx.fillStyle = 'rgba(196,186,166,0.55)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(doneness * 100) + '%', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (stage === 0) {
+      if (!saidStart) {
+        ctx.fillStyle = 'rgba(200,178,148,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('按住炉口，翻红薯', L.ovenX, L.groundY + 46);
+      }
+    } else {
+      ctx.fillStyle = 'rgba(200,178,148,' + (0.3 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按一下，再烤一个', L.w * 0.22, sPotY + half * 0.9 + 46);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__potato = {
+    doneness: function () { return +doneness.toFixed(3); },
+    stage: function () { return stage; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

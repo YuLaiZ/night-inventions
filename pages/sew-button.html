@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缝扣子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #101216;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a8474; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #615e54; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #9a9282;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #57544c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #615e54;
+    text-decoration: none;
+    border-bottom: 1px dotted #615e54;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9a9282; border-color: #9a9282; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>缝扣子</h1>
+  <p>深夜活儿不赶时间：一颗扣子，一根线。<br>按住开缝——八针走完，它就再掉不下来了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 8;           // 总针数
+  var stitching = false;   // 按住走针
+  var stitchF = 0;         // 已完成针数（浮点，含进行中）
+  var sewn = 0;            // 缝好的扣子数
+  var resting = false;     // 当前扣子完工
+  var threadCol = [178, 66, 54];
+  var saidStart = false;
+  var needleJit = 0;
+
+  var BTN_COLS = [
+    { face: [172, 138, 92], edge: [128, 100, 62] },
+    { face: [110, 124, 138], edge: [78, 90, 104] },
+    { face: [148, 96, 96], edge: [110, 68, 68] }
+  ];
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.56;
+    L.fw = Math.min(L.w * 0.72, L.h * 0.5, 460); // 布宽
+    L.fh = L.fw * 0.66;
+    L.br = Math.min(L.fw * 0.17, 58);            // 扣子半径
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 四个扣眼（相对扣心，扣半径比例）
+  var HOLES = [[-0.38, -0.38], [0.38, -0.38], [0.38, 0.38], [-0.38, 0.38]];
+  // 八针的走线路径：每针 = [起点孔, 终点孔]
+  var STITCHES = [[0, 3], [1, 2], [0, 3], [1, 2], [0, 1], [3, 2], [0, 1], [3, 2]];
+
+  function hitArea(x, y) {
+    var dx = x - L.cx, dy = y - L.cy;
+    return dx * dx + dy * dy < (L.fw * 0.62) * (L.fw * 0.62);
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress(x, y) {
+    if (resting) {
+      stitchF = 0; resting = false;
+      var c = BTN_COLS[(sewn) % BTN_COLS.length];
+      threadCol = [178 + (sewn * 37) % 50, 66, 54 + (sewn * 23) % 60];
+      say('再来一颗，换个颜色。');
+      return;
+    }
+    if (stitching || stitchF >= TOTAL) return;
+    if (hitArea(x, y)) {
+      stitching = true;
+      if (!saidStart) { saidStart = true; say('针脚走密一点，别急。'); }
+    }
+  }
+  function endPress() { stitching = false; }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { stitching = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (stitching && stitchF < TOTAL) {
+      stitchF = Math.min(TOTAL, stitchF + dt * 1.6);
+      needleJit = Math.sin(now / 70) * 1.2;
+      if (stitchF >= TOTAL) {
+        stitching = false; resting = true; sewn++;
+        if (sewn === 1) say('扣子牢了。明天掉不了。', true);
+        else say('又一颗，稳稳的。', true);
+      }
+    }
+
+    // ── 背景：深色木桌 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#101216');
+    bg.addColorStop(1, '#15130f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 衣料（微旋转的圆角矩形，织纹）──
+    ctx.save();
+    ctx.translate(L.cx, L.cy);
+    ctx.rotate(-0.05);
+    var fw = L.fw, fh = L.fh;
+    var fab = ctx.createLinearGradient(0, -fh / 2, 0, fh / 2);
+    fab.addColorStop(0, '#3a4048');
+    fab.addColorStop(1, '#2e343c');
+    ctx.fillStyle = fab;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-fw / 2, -fh / 2, fw, fh, 14);
+    else ctx.rect(-fw / 2, -fh / 2, fw, fh);
+    ctx.fill();
+    // 织纹
+    ctx.strokeStyle = 'rgba(220,225,235,0.05)';
+    ctx.lineWidth = 1;
+    for (var g = -fh / 2 + 7; g < fh / 2; g += 7) {
+      ctx.beginPath();
+      ctx.moveTo(-fw / 2 + 6, g);
+      ctx.lineTo(fw / 2 - 6, g);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,230,180,0.10)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-fw / 2 + 1, -fh / 2 + 1, fw - 2, fh - 2);
+    // 锁边线头（扣子掉落后留下的毛边）
+    ctx.strokeStyle = 'rgba(200,190,170,0.28)';
+    ctx.lineWidth = 1.2;
+    for (var f = 0; f < 7; f++) {
+      var fa = f * 1.9;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(fa) * 10, Math.sin(fa) * 10 - 2);
+      ctx.quadraticCurveTo(Math.cos(fa) * 18, Math.sin(fa) * 18 - 6, Math.cos(fa) * 24, Math.sin(fa) * 20);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ── 扣子（完工后才画本体压住线迹；未完工画半透明虚位）──
+    var B = BTN_COLS[sewn % BTN_COLS.length];
+    var doneK = Math.min(1, stitchF / TOTAL);
+    ctx.save();
+    ctx.translate(L.cx, L.cy);
+    ctx.rotate(0.06);
+    if (!resting && stitchF === 0) {
+      // 虚位圈：扣子还没放上来
+      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = 'rgba(220,215,200,0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, L.br, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      // 扣子本体
+      var bf = ctx.createRadialGradient(-L.br * 0.3, -L.br * 0.35, L.br * 0.15, 0, 0, L.br * 1.1);
+      bf.addColorStop(0, 'rgb(' + B.face.join(',') + ')');
+      bf.addColorStop(1, 'rgb(' + B.edge.join(',') + ')');
+      ctx.fillStyle = bf;
+      ctx.beginPath();
+      ctx.arc(0, 0, L.br, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // 外圈凸边
+      ctx.strokeStyle = 'rgba(255,240,210,0.18)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, L.br * 0.8, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 四个扣眼
+    for (var hi = 0; hi < 4; hi++) {
+      ctx.fillStyle = 'rgba(20,16,12,0.75)';
+      ctx.beginPath();
+      ctx.ellipse(HOLES[hi][0] * L.br, HOLES[hi][1] * L.br, L.br * 0.1, L.br * 0.14, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // ── 线迹（画在扣子下层布面上：从孔到孔的弧线）──
+    if (stitchF > 0) {
+      ctx.save();
+      ctx.translate(L.cx, L.cy);
+      ctx.rotate(0.06);
+      var full = Math.floor(stitchF);
+      var frac = stitchF - full;
+      ctx.strokeStyle = 'rgb(' + threadCol.join(',') + ')';
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = 'round';
+      for (var s = 0; s < Math.min(full, TOTAL); s++) {
+        drawStitch(STITCHES[s], 1);
+      }
+      if (full < TOTAL && frac > 0) drawStitch(STITCHES[full], frac * 0.8);
+      ctx.restore();
+    }
+
+    // ── 针（进行中才出现，停在当前线迹针尖处）──
+    if (stitching && stitchF < TOTAL) {
+      var idx = Math.floor(stitchF);
+      var fr = stitchF - idx;
+      var pair = STITCHES[idx];
+      var ax = HOLES[pair[0]][0] * L.br, ay = HOLES[pair[0]][1] * L.br;
+      var bx = HOLES[pair[1]][0] * L.br, by = HOLES[pair[1]][1] * L.br;
+      var nx2 = ax + (bx - ax) * fr + needleJit;
+      var ny2 = ay + (by - ay) * fr + needleJit * 0.6;
+      ctx.save();
+      ctx.translate(L.cx, L.cy);
+      ctx.rotate(0.06);
+      ctx.translate(nx2, ny2);
+      ctx.rotate(Math.atan2(by - ay, bx - ax));
+      ctx.fillStyle = '#c2c6cc';
+      ctx.beginPath();
+      ctx.moveTo(L.br * 0.34, 0);
+      ctx.lineTo(-L.br * 0.22, -2.4);
+      ctx.lineTo(-L.br * 0.22, 2.4);
+      ctx.closePath();
+      ctx.fill();
+      // 尾线
+      ctx.strokeStyle = 'rgb(' + threadCol.join(',') + ')';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(-L.br * 0.22, 0);
+      ctx.quadraticCurveTo(-L.br * 0.55, L.br * 0.3, -L.br * 0.9, L.br * 0.22);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 完工提示 ──
+    if (resting) {
+      ctx.fillStyle = 'rgba(220,212,196,' + (0.3 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，缝下一颗', L.cx, L.cy + L.fh * 0.62);
+    }
+
+    // ── 针数（等宽数字）──
+    var st = Math.min(TOTAL, Math.floor(stitchF));
+    ctx.fillStyle = 'rgba(200,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(st + ' / ' + TOTAL + ' 针', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(170,164,146,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住布面，开始缝', L.cx, L.cy + L.fh * 0.62);
+    }
+
+    function drawStitch(pair2, k) {
+      var ax2 = HOLES[pair2[0]][0] * L.br, ay2 = HOLES[pair2[0]][1] * L.br;
+      var bx2 = HOLES[pair2[1]][0] * L.br, by2 = HOLES[pair2[1]][1] * L.br;
+      var mx2 = (ax2 + bx2) / 2, my2 = (ay2 + by2) / 2;
+      var dx2 = bx2 - ax2, dy2 = by2 - ay2;
+      var len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1;
+      var ox2 = -dy2 / len2 * L.br * 0.16, oy2 = dx2 / len2 * L.br * 0.16;
+      ctx.beginPath();
+      ctx.moveTo(ax2, ay2);
+      ctx.quadraticCurveTo(mx2 + ox2, my2 + oy2, ax2 + (bx2 - ax2) * k, ay2 + (by2 - ay2) * k);
+      ctx.stroke();
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__sew = {
+    progress: function () { return stitchF; },
+    done: function () { return sewn; },
+    resting: function () { return resting; },
+    press: function () { startPress(L.cx, L.cy); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

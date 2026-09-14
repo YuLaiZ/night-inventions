@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>换灯泡</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0d12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4e54;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8c8474; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c6068; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a89e88;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a58;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c6068;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c6068;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89e88; border-color: #a89e88; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>换灯泡</h1>
+  <p>后半夜，灯丝熬完了它的一整夜。<br>按住往下旋——旧的下来，新的上去，咔哒，满屋都亮。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 阶段：dead(烧了) → unscrewing(旋下) → empty(空口) → screwing(旋新) → lit(亮)
+  var phase = 'dead';
+  var twist = 0;         // 当前旋进程度 0=全旋出 1=旋紧
+  var rounds = 0;        // 换好的次数
+  var flickT = 0;        // 死灯偶尔闪
+  var turn = 0;          // 旋转变画（螺纹滚动）
+  var glow = 0;          // 点亮瞬间闪白
+  var saidStart = false;
+  var TEMPS = [
+    { core: '255,236,190', halo: '255,214,140', name: '暖黄' },
+    { core: '235,244,255', halo: '190,216,255', name: '月白' },
+    { core: '255,224,178', halo: '255,190,120', name: '烛色' }
+  ];
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.socketY = L.h * 0.30;
+    L.R = Math.min(L.w * 0.13, 74);        // 灯泡半径
+    L.drop = L.R * 1.5;                    // 全旋出时下落距离
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (phase === 'dead') {
+      phase = 'unscrewing';
+      if (!saidStart) { saidStart = true; say('逆时针，慢一点，别烫手。'); }
+    } else if (phase === 'empty') {
+      phase = 'screwing';
+      twist = 0;
+      say('新的来了——扶正，旋。');
+    } else if (phase === 'lit') {
+      // 再来一轮：换色温
+      phase = 'unscrewing'; twist = 0;
+      say('亮着也能换？这屋的手法很野。');
+    }
+  }
+  function endPress() {
+    if (phase === 'unscrewing' && twist <= 0.02) { phase = 'dead'; return; }
+    if (phase === 'unscrewing' && twist < 1) {
+      // 松手中途：灯泡悬在半途，继续按住接着旋
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (phase === 'unscrewing') {
+      twist -= dt * 0.55;
+      turn += dt * 9;
+      if (twist <= 0) {
+        twist = 0; phase = 'empty';
+        say('旧的下来了，还挺烫。按住，把新的旋上去。');
+      }
+    } else if (phase === 'screwing') {
+      twist += dt * 0.55;
+      turn += dt * 9;
+      if (twist >= 1) {
+        twist = 1; phase = 'lit'; rounds++;
+        glow = 1;
+        if (rounds === 1) say('咔哒。满屋都醒了。', true);
+        else if (rounds === 2) say('换了' + TEMPS[1].name + '。房间换了个心情。', true);
+        else say('这一盏，能再熬一整夜。', true);
+      }
+    } else if (phase === 'dead') {
+      flickT -= dt;
+      if (flickT <= 0) flickT = 1.4 + Math.random() * 2.6;
+    }
+    glow = Math.max(0, glow - dt * 0.8);
+
+    var lit = phase === 'lit' ? 1 : 0;
+    var lightAmt = lit ? Math.min(1, 0.75 + glow * 0.5) : 0;
+
+    // ── 背景：房间随灯亮起 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0a0d12');
+    bg.addColorStop(1, '#0d1016');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 地板与墙的提示（灯亮时显形）
+    if (lightAmt > 0.02) {
+      ctx.fillStyle = 'rgba(120,104,78,' + lightAmt * 0.13 + ')';
+      ctx.fillRect(0, h * 0.78, w, h * 0.22);
+      ctx.strokeStyle = 'rgba(160,140,100,' + lightAmt * 0.16 + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, h * 0.78); ctx.lineTo(w, h * 0.78);
+      ctx.stroke();
+      // 小桌
+      ctx.fillStyle = 'rgba(100,88,64,' + lightAmt * 0.16 + ')';
+      ctx.fillRect(w * 0.68, h * 0.62, w * 0.16, 8);
+      ctx.fillRect(w * 0.70, h * 0.62, 6, h * 0.16);
+      ctx.fillRect(w * 0.82, h * 0.62, 6, h * 0.16);
+    }
+
+    // ── 灯光锥（亮时）──
+    if (lightAmt > 0.02) {
+      var T = TEMPS[(rounds - 1 + TEMPS.length) % TEMPS.length];
+      var cone = ctx.createRadialGradient(L.cx, L.socketY + L.R * 1.2, 6, L.cx, L.socketY + L.R * 1.2, L.h * 0.75);
+      cone.addColorStop(0, 'rgba(' + T.halo + ',' + 0.34 * lightAmt + ')');
+      cone.addColorStop(0.5, 'rgba(' + T.halo + ',' + 0.12 * lightAmt + ')');
+      cone.addColorStop(1, 'rgba(' + T.halo + ',0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(L.cx - L.R * 0.5, L.socketY + L.R);
+      ctx.lineTo(L.cx - L.w * 0.55, h);
+      ctx.lineTo(L.cx + L.w * 0.55, h);
+      ctx.lineTo(L.cx + L.R * 0.5, L.socketY + L.R);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── 灯泡本体 ──
+    var bulbY = L.socketY + L.R * 0.9 + (1 - twist) * L.drop;
+    var inSocket = twist > 0;
+    if (phase !== 'empty') {
+      ctx.save();
+      ctx.translate(L.cx, bulbY);
+      // 玻璃
+      var isDead = phase === 'dead' || phase === 'unscrewing';
+      var T2 = TEMPS[(rounds - 1 + TEMPS.length) % TEMPS.length];
+      var glass = ctx.createRadialGradient(-L.R * 0.3, -L.R * 0.3, L.R * 0.1, 0, 0, L.R);
+      if (isDead) {
+        glass.addColorStop(0, 'rgba(150,152,158,0.5)');
+        glass.addColorStop(1, 'rgba(96,100,108,0.55)');
+      } else if (phase === 'screwing') {
+        var warmIn = twist;
+        glass.addColorStop(0, 'rgba(' + T2.core + ',' + (0.25 + warmIn * 0.6) + ')');
+        glass.addColorStop(1, 'rgba(' + T2.halo + ',' + (0.2 + warmIn * 0.45) + ')');
+      } else {
+        glass.addColorStop(0, 'rgba(' + T2.core + ',0.95)');
+        glass.addColorStop(1, 'rgba(' + T2.halo + ',0.75)');
+      }
+      ctx.fillStyle = glass;
+      ctx.beginPath();
+      ctx.arc(0, 0, L.R, 0, Math.PI * 2);
+      ctx.fill();
+      // 死灯偶尔闪一下残光
+      if (phase === 'dead' && flickT < 0.09) {
+        ctx.fillStyle = 'rgba(255,240,210,0.25)';
+        ctx.beginPath();
+        ctx.arc(0, 0, L.R, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,' + (isDead ? 0.18 : 0.35) + ')';
+      ctx.beginPath();
+      ctx.ellipse(-L.R * 0.34, -L.R * 0.36, L.R * 0.2, L.R * 0.12, -0.7, 0, Math.PI * 2);
+      ctx.fill();
+      // 灯丝（死灯断丝 / 亮灯发光丝）
+      ctx.strokeStyle = isDead ? 'rgba(80,82,88,0.9)' : 'rgba(255,246,214,0.95)';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(-L.R * 0.28, -L.R * 0.15);
+      if (isDead) {
+        ctx.lineTo(-L.R * 0.08, -L.R * 0.3);
+        ctx.moveTo(L.R * 0.1, L.R * 0.05);
+        ctx.lineTo(L.R * 0.28, -L.R * 0.1);
+      } else {
+        ctx.quadraticCurveTo(0, L.R * 0.22, L.R * 0.28, -L.R * 0.15);
+      }
+      ctx.stroke();
+      // 螺口（带旋转的螺纹）
+      var shH = L.R * 0.62;
+      ctx.fillStyle = '#7a7468';
+      ctx.fillRect(-L.R * 0.34, L.R * 0.86, L.R * 0.68, shH);
+      ctx.strokeStyle = 'rgba(40,38,34,0.7)';
+      ctx.lineWidth = 2;
+      var scroll = (turn * 6) % 7;
+      for (var th = -1; th < 4; th++) {
+        var yy = L.R * 0.9 + th * 7 + (7 - scroll) * 0.5;
+        if (yy < L.R * 0.88 || yy > L.R * 0.86 + shH - 1) continue;
+        ctx.beginPath();
+        ctx.moveTo(-L.R * 0.34, yy);
+        ctx.lineTo(L.R * 0.34, yy - 2.5);
+        ctx.stroke();
+      }
+      // 触点
+      ctx.fillStyle = '#5c5850';
+      ctx.beginPath();
+      ctx.arc(0, L.R * 0.86 + shH + 3, L.R * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      // 空灯口：暗示新泡待命
+      ctx.save();
+      ctx.translate(L.cx, L.socketY + L.R * 0.9);
+      ctx.fillStyle = '#5c5850';
+      ctx.fillRect(-L.R * 0.36, 0, L.R * 0.72, L.R * 0.34);
+      ctx.restore();
+      if (Math.floor(now / 600) % 2 === 0) {
+        ctx.fillStyle = 'rgba(200,190,166,' + (0.3 + 0.14 * Math.sin(now / 240)) + ')';
+        ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('新的就托在手上', L.cx, bulbY + L.R * 1.9);
+      }
+    }
+
+    // ── 灯罩 ──
+    ctx.save();
+    ctx.translate(L.cx, L.socketY);
+    var shadeG = ctx.createLinearGradient(-L.R * 1.1, 0, L.R * 1.1, 0);
+    var shA = 0.30 + lightAmt * 0.5;
+    shadeG.addColorStop(0, 'rgba(70,66,58,' + shA + ')');
+    shadeG.addColorStop(0.5, 'rgba(150,138,112,' + shA + ')');
+    shadeG.addColorStop(1, 'rgba(70,66,58,' + shA + ')');
+    ctx.fillStyle = shadeG;
+    ctx.beginPath();
+    ctx.moveTo(-L.R * 1.15, 0);
+    ctx.quadraticCurveTo(0, -L.R * 1.5, L.R * 1.15, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,180,140,' + (0.25 + lightAmt * 0.4) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-L.R * 1.15, 0);
+    ctx.quadraticCurveTo(0, -L.R * 1.5, L.R * 1.15, 0);
+    ctx.stroke();
+    // 吊杆
+    ctx.strokeStyle = 'rgba(140,130,110,0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -L.R * 1.12);
+    ctx.lineTo(0, -L.R * 1.7);
+    ctx.stroke();
+    ctx.restore();
+
+    // 点亮瞬间的全屏闪白
+    if (glow > 0.5) {
+      ctx.fillStyle = 'rgba(255,244,214,' + (glow - 0.5) * 0.5 + ')';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(180,172,150,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住灯泡，旋下来', L.cx, L.socketY + L.R * 3.1);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__bulb = {
+    phase: function () { return phase; },
+    twist: function () { return +twist.toFixed(3); },
+    rounds: function () { return rounds; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

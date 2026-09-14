@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拍蚊子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c1016;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4e54;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7c8894; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a626c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8a96a2;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565c62;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5a626c;
+    text-decoration: none;
+    border-bottom: 1px dotted #5a626c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a96a2; border-color: #8a96a2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>拍蚊子</h1>
+  <p>黑灯瞎火，嗡的一声在耳边起落。<br>听声辨位，一巴掌拍下去——今晚赢不赢，看手。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var m = null;          // 蚊子 {x,y,vx,vy,phase}
+  var swats = 0;         // 拍中数
+  var misses = 0;        // 拍空数
+  var claps = [];        // 掌印动画 {x,y,t,hit}
+  var squashed = 0;      // 击杀动画计时（>0 表示正显示战果）
+  var saidStart = false;
+  var respawnT = 0;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 4200);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function spawn() {
+    m = {
+      x: L.w * (0.2 + Math.random() * 0.6),
+      y: L.h * (0.25 + Math.random() * 0.5),
+      vx: 0, vy: 0,
+      phase: Math.random() * 10,
+      dartT: 0
+    };
+  }
+
+  // 共享拍击路径（QA 钩子与真实事件走同一函数）
+  function swat(x, y) {
+    claps.push({ x: x, y: y, t: 0, hit: false });
+    if (!m) return;
+    var dx = m.x - x, dy = m.y - y;
+    if (dx * dx + dy * dy < 64 * 64) {
+      claps[claps.length - 1].hit = true;
+      swats++;
+      squashed = 1;
+      m = null;
+      respawnT = 1.1 + Math.random() * 0.9;
+      if (swats === 1) say('拍中了！耳朵清净了。', true);
+      else if (swats === 3) say('三杀。这屋里的蚊子今晚学乖了。', true);
+      else say('又拿下一位。', true);
+    } else {
+      misses++;
+      if (misses === 2) say('它就在嗡嗡声附近，再听一听。');
+      else if (misses === 5) say('别灰心，它也飞不快。');
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (!saidStart) { saidStart = true; }
+    swat(ev.clientX, ev.clientY);
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (!m && !squashed) {
+      respawnT -= dt;
+      if (respawnT <= 0) spawn();
+    }
+    if (squashed > 0) squashed -= dt * 0.7;
+
+    if (m) {
+      m.phase += dt;
+      m.dartT -= dt;
+      if (m.dartT <= 0) {
+        // 短促的冲刺转向，像真蚊子
+        var a = Math.random() * Math.PI * 2;
+        var sp = 90 + Math.random() * 220;
+        m.vx = Math.cos(a) * sp;
+        m.vy = Math.sin(a) * sp * 0.7;
+        m.dartT = 0.12 + Math.random() * 0.3;
+      }
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.vx *= 0.96; m.vy *= 0.96;
+      if (m.x < 30) { m.x = 30; m.vx = Math.abs(m.vx); }
+      if (m.x > w - 30) { m.x = w - 30; m.vx = -Math.abs(m.vx); }
+      if (m.y < 90) { m.y = 90; m.vy = Math.abs(m.vy); }
+      if (m.y > h - 70) { m.y = h - 70; m.vy = -Math.abs(m.vy); }
+    }
+
+    for (var c = claps.length - 1; c >= 0; c--) {
+      claps[c].t += dt * 2.4;
+      if (claps[c].t >= 1) claps.splice(c, 1);
+    }
+
+    // ── 背景：暗房间（一点窗光）──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c1016');
+    bg.addColorStop(1, '#0e1218');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    var win = ctx.createRadialGradient(w * 0.82, h * 0.16, 8, w * 0.82, h * 0.16, w * 0.3);
+    win.addColorStop(0, 'rgba(120,150,190,0.10)');
+    win.addColorStop(1, 'rgba(120,150,190,0)');
+    ctx.fillStyle = win;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 掌印（拍击涟漪： hit 变金色星芒，miss 是灰圈）──
+    for (var i = 0; i < claps.length; i++) {
+      var cl = claps[i];
+      var k = cl.t;
+      var r = 30 + k * 46;
+      if (cl.hit) {
+        ctx.strokeStyle = 'rgba(240,200,120,' + (1 - k) * 0.9 + ')';
+        ctx.lineWidth = 3;
+        for (var ray = 0; ray < 7; ray++) {
+          var ang = ray * Math.PI * 2 / 7 + 0.3;
+          ctx.beginPath();
+          ctx.moveTo(cl.x + Math.cos(ang) * r * 0.5, cl.y + Math.sin(ang) * r * 0.5);
+          ctx.lineTo(cl.x + Math.cos(ang) * r, cl.y + Math.sin(ang) * r);
+          ctx.stroke();
+        }
+      } else {
+        ctx.strokeStyle = 'rgba(160,170,185,' + (1 - k) * 0.4 + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cl.x, cl.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cl.x, cl.y, r * 0.55, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // ── 蚊子：小黑点 + 嗡嗡声波纹 ──
+    if (m) {
+      var jx = Math.sin(m.phase * 9) * 2.4;
+      var jy = Math.cos(m.phase * 7.3) * 2.4;
+      // 声波纹（越靠近越密）
+      var pr = 26 + (Math.sin(m.phase * 4) * 0.5 + 0.5) * 22;
+      ctx.strokeStyle = 'rgba(150,165,180,' + (0.34 - pr / 200) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(m.x + jx, m.y + jy, pr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(150,165,180,0.16)';
+      ctx.beginPath();
+      ctx.arc(m.x + jx, m.y + jy, pr * 1.7, 0, Math.PI * 2);
+      ctx.stroke();
+      // 本体
+      ctx.fillStyle = '#20262c';
+      ctx.beginPath();
+      ctx.ellipse(m.x + jx, m.y + jy, 5.5, 3.2, m.vx ? Math.atan2(m.vy, m.vx) : 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 翅膀（高速扑棱）
+      var wa = Math.sin(m.phase * 46) * 0.9;
+      ctx.strokeStyle = 'rgba(190,200,210,0.55)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(m.x + jx, m.y + jy - 1);
+      ctx.lineTo(m.x + jx - 9 * wa - 3, m.y + jy - 8);
+      ctx.moveTo(m.x + jx, m.y + jy - 1);
+      ctx.lineTo(m.x + jx + 9 * wa + 3, m.y + jy - 8);
+      ctx.stroke();
+    }
+
+    // ── 战果浮字 ──
+    if (squashed > 0) {
+      ctx.fillStyle = 'rgba(240,200,120,' + Math.min(1, squashed * 2) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('啪。', claps.length ? claps[claps.length - 1].x : w / 2, (claps.length ? claps[claps.length - 1].y : h / 2) - 40);
+    }
+
+    // ── 战绩（等宽数字）──
+    ctx.fillStyle = 'rgba(190,198,206,0.55)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('拍中 ' + swats + ' · 拍空 ' + misses, w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(150,162,175,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('循着声波纹，拍下去', w / 2, h * 0.72);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 swat）
+  window.__swat = {
+    pos: function () { return m ? { x: Math.round(m.x), y: Math.round(m.y) } : null; },
+    hits: function () { return swats; },
+    misses: function () { return misses; },
+    swat: function (dx, dy) { var p = m || { x: L.w / 2, y: L.h / 2 }; swat(p.x + (dx || 0), p.y + (dy || 0)); },
+    swatMiss: function () { swat(L.w * 0.5, L.h * 0.85); }
+  };
+})();
+</script>
+</body>
+</html>

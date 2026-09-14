@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>缺一片的拼图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1117;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c4e56;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7e8492; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #585c64; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8e94a0;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #50545c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #585c64;
+    text-decoration: none;
+    border-bottom: 1px dotted #585c64;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8e94a0; border-color: #8e94a0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>缺一片的拼图</h1>
+  <p>凌晨的拼图，拼的是月亮和屋顶。<br>按一下，拼一片——拼到最后一格你就懂了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var COLS = 8, ROWS = 5;
+  var TOTAL = COLS * ROWS - 1;          // 最后一格永远空着
+  var placed = 0;                        // 已拼片数
+  var order = [];                        // 拼放顺序（格子索引）
+  var pops = [];                         // 落片动画 {i, t}
+  var saidStart = false;
+  var saidEnd = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.bw = Math.min(L.w * 0.8, L.h * 0.62, 760);
+    L.bh = L.bw * ROWS / COLS;
+    L.bx = (L.w - L.bw) / 2;
+    L.by = (L.h - L.bh) / 2 + L.h * 0.03;
+    L.cw = L.bw / COLS;
+    L.ch = L.bh / ROWS;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 打乱拼放顺序（月亮那格留到最后几片，制造期待）
+  function seedOrder() {
+    order = [];
+    for (var i = 0; i < COLS * ROWS; i++) order.push(i);
+    for (var j = order.length - 1; j > 0; j--) {
+      var k = Math.floor(Math.random() * (j + 1));
+      var tmp = order[j]; order[j] = order[k]; order[k] = tmp;
+    }
+    // 把月亮格（约第2行第5列）换到倒数第二位拼
+    var moonIdx = order.indexOf(2 * COLS + 4);
+    if (moonIdx >= 0) {
+      var t = order[TOTAL - 1]; order[TOTAL - 1] = order[moonIdx]; order[moonIdx] = t;
+    }
+  }
+  seedOrder();
+
+  function hitBoard(x, y) {
+    return x > L.bx - 20 && x < L.bx + L.bw + 20 && y > L.by - 20 && y < L.by + L.bh + 20;
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress(x, y) {
+    if (placed >= TOTAL) return;
+    if (!hitBoard(x, y)) return;
+    placed++;
+    pops.push({ i: order[placed - 1], t: 0 });
+    if (!saidStart) { saidStart = true; say('对，就这一片。'); }
+    else if (placed === TOTAL - 2) say('月亮出来了——还差一片。');
+    else if (placed === TOTAL) {
+      say('果然。缺的那片，永远在沙发底下。', true);
+      saidEnd = true;
+    } else if (placed % 7 === 0) {
+      say('继续，快齐了。');
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+
+  // ── 画面内容：凌晨屋顶上的一弯月（按格子画）──
+  function cellScene(ci, cj, x, y, w2, h2) {
+    // 天空基底
+    var sky = ctx.createLinearGradient(0, y, 0, y + h2 * ROWS);
+    sky.addColorStop(0, '#141d2e');
+    sky.addColorStop(0.62, '#1c2a40');
+    sky.addColorStop(1, '#242f42');
+    ctx.fillStyle = sky;
+    ctx.fillRect(x, y, w2, h2);
+    // 星（按格子伪随机）
+    var st = Math.abs(Math.sin(ci * 127.1 + cj * 311.7) * 43758.5) % 1;
+    if (st > 0.55) {
+      ctx.fillStyle = 'rgba(220,228,245,' + (0.25 + st * 0.5) + ')';
+      ctx.fillRect(x + w2 * (st * 0.8 + 0.1), y + h2 * ((st * 7) % 1 * 0.8 + 0.1), 2, 2);
+    }
+    // 月亮（第2行第5列附近格内画圆）
+    var mi = 2 * COLS + 4;
+    if (ci === mi % COLS && cj === Math.floor(mi / COLS)) {
+      ctx.fillStyle = 'rgba(250,240,205,0.95)';
+      ctx.beginPath();
+      ctx.arc(x + w2 * 0.52, y + h2 * 0.5, Math.min(w2, h2) * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(220,205,160,0.35)';
+      ctx.beginPath();
+      ctx.arc(x + w2 * 0.42, y + h2 * 0.42, Math.min(w2, h2) * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 月光洒在天空的柔光（月亮右下方几格）
+    var di = ci - (mi % COLS), dj = cj - Math.floor(mi / COLS);
+    if (di >= 0 && dj >= 0 && di + dj <= 3) {
+      ctx.fillStyle = 'rgba(250,240,205,' + (0.10 - (di + dj) * 0.028) + ')';
+      ctx.fillRect(x, y, w2, h2);
+    }
+    // 屋顶线（最下两行）
+    if (cj >= ROWS - 2) {
+      var roofY = y + h2 * (cj === ROWS - 2 ? 0.5 : -0.1);
+      ctx.fillStyle = cj === ROWS - 2 ? 'rgba(16,20,28,0.95)' : '#10141c';
+      if (cj === ROWS - 2) {
+        // 起伏的屋脊：按列奇偶给不同高度
+        var peak = (ci % 2 === 0) ? 0.28 : 0.62;
+        ctx.beginPath();
+        ctx.moveTo(x, y + h2);
+        ctx.lineTo(x, y + h2 * peak);
+        ctx.lineTo(x + w2, y + h2 * (peak + 0.16));
+        ctx.lineTo(x + w2, y + h2);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, y + h2 * 0.25, w2, h2 * 0.8);
+      }
+      // 亮灯的窗
+      var wi = Math.abs(Math.sin(ci * 91.3 + cj * 47.7) * 43758.5) % 1;
+      if (wi > 0.72 && cj === ROWS - 1) {
+        ctx.fillStyle = 'rgba(255,208,130,0.8)';
+        ctx.fillRect(x + w2 * 0.3, y + h2 * 0.45, w2 * 0.24, h2 * 0.3);
+      }
+    }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    for (var p = pops.length - 1; p >= 0; p--) {
+      pops[p].t += dt * 3.4;
+      if (pops[p].t >= 1) pops.splice(p, 1);
+    }
+
+    // ── 桌面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1117');
+    bg.addColorStop(1, '#11141a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 底板 ──
+    ctx.fillStyle = '#1a1e26';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(L.bx - 10, L.by - 10, L.bw + 20, L.bh + 20, 10);
+    else ctx.rect(L.bx - 10, L.by - 10, L.bw + 20, L.bh + 20);
+    ctx.fill();
+
+    // ── 已拼格子 ──
+    var placedSet = {};
+    for (var q = 0; q < placed && q < order.length; q++) placedSet[order[q]] = true;
+    var popMap = {};
+    for (var p2 = 0; p2 < pops.length; p2++) popMap[pops[p2].i] = pops[p2].t;
+
+    for (var cj = 0; cj < ROWS; cj++) {
+      for (var ci = 0; ci < COLS; ci++) {
+        var idx = cj * COLS + ci;
+        var x = L.bx + ci * L.cw, y = L.by + cj * L.ch;
+        var isLast = idx === COLS * ROWS - 1;
+        if (placedSet[idx]) {
+          var sc = 1;
+          if (popMap[idx] != null) {
+            var t = popMap[idx];
+            sc = 0.55 + 0.45 * (1 - Math.pow(1 - t, 3));
+          }
+          ctx.save();
+          ctx.translate(x + L.cw / 2, y + L.ch / 2);
+          ctx.scale(sc, sc);
+          cellScene(ci, cj, -L.cw / 2 - 0.5, -L.ch / 2 - 0.5, L.cw + 1, L.ch + 1);
+          ctx.restore();
+        } else {
+          // 未拼格：暗槽
+          ctx.fillStyle = isLast ? 'rgba(250,240,205,0.12)' : 'rgba(255,255,255,0.028)';
+          ctx.fillRect(x + 1, y + 1, L.cw - 2, L.ch - 2);
+          if (isLast && placed >= TOTAL) {
+            // 缺片虚线格（呼吸）
+            ctx.strokeStyle = 'rgba(250,240,205,' + (0.55 + 0.3 * Math.sin(now / 420)) + ')';
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 1.8;
+            ctx.strokeRect(x + 3, y + 3, L.cw - 6, L.ch - 6);
+            ctx.setLineDash([]);
+          }
+        }
+        // 网格缝
+        ctx.strokeStyle = 'rgba(10,12,16,0.55)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, L.cw - 1, L.ch - 1);
+      }
+    }
+
+    // ── 计数（等宽数字）──
+    ctx.fillStyle = 'rgba(190,196,206,0.55)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(placed + ' / ' + (TOTAL + 1) + ' 片', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(176,182,192,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按一下拼图板，拼一片', L.w / 2, L.by + L.bh + 46);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress）
+  window.__puzzle = {
+    placed: function () { return placed; },
+    total: function () { return TOTAL; },
+    press: function () { startPress(L.bx + L.bw * 0.5, L.by + L.bh * 0.5); }
+  };
+})();
+</script>
+</body>
+</html>

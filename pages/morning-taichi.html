@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太极</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #151c1a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c5450;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7e8a7e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5a625c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8e988e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e544e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5a625c;
+    text-decoration: none;
+    border-bottom: 1px dotted #5a625c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8e988e; border-color: #8e988e; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>太极</h1>
+  <p>晨光落在公园，动作要慢，呼吸要长。<br>按住跟练云手——一圈一式，气就顺了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var practicing = false;  // 按住练
+  var armT = 0;            // 云手相位
+  var forms = 0;           // 完成式数
+  var breath = 0;          // 呼吸圈 0-1 循环
+  var saidStart = false;
+  var saidDone = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.52;
+    L.R = Math.min(L.w * 0.26, L.h * 0.24, 170);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    practicing = true;
+    if (!saidStart) { saidStart = true; say('沉肩，坠肘，跟着圈走。'); }
+    else if (forms >= 4) say('再来一轮，今天状态不错。');
+  }
+  function endPress() {
+    practicing = false;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { practicing = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (practicing) {
+      var prev = armT;
+      armT += dt * 0.5;                     // 一圈约 12.6 秒，够慢
+      breath = (breath + dt * 0.22) % 1;
+      if (Math.floor(armT / (Math.PI * 2)) > Math.floor(prev / (Math.PI * 2))) {
+        forms++;
+        if (forms === 1) say('一式。肩松了，呼吸也长了。');
+        else if (forms === 2) { say('气沉丹田。这一上午都顺。', true); saidDone = true; }
+        else say('又一式。不用数，身体会记。');
+      }
+    }
+
+    // ── 背景：清晨公园 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#9db4a8');
+    bg.addColorStop(0.5, '#b8c8b4');
+    bg.addColorStop(1, '#a8b8a0');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 远树（低位小树，避开标题区与人物）
+    var treeX = [0.07, 0.25, 0.75, 0.93];
+    for (var t = 0; t < treeX.length; t++) {
+      var tx = w * treeX[t];
+      var tr = w * (0.028 + (t % 3) * 0.008);
+      var ty = L.h * 0.30;
+      ctx.beginPath();
+      ctx.arc(tx, ty, tr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(60,52,40,0.35)';
+      ctx.fillRect(tx - 2.5, ty + tr * 0.5, 5, L.h * 0.10);
+      ctx.fillStyle = 'rgba(70,96,74,0.28)';
+    }
+    // 地面
+    ctx.fillStyle = 'rgba(84,96,78,0.5)';
+    ctx.fillRect(0, L.h * 0.78, w, h - L.h * 0.78);
+
+    // ── 呼吸圈（引导可视化）──
+    var br = L.R * (1.02 + breath * 0.1);
+    ctx.strokeStyle = 'rgba(120,140,124,' + (practicing ? 0.3 : 0.16) + ')';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 9]);
+    ctx.beginPath();
+    ctx.arc(L.cx, L.cy, br, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── 练太极的人（剪影：站姿 + 双臂云手）──
+    ctx.save();
+    ctx.translate(L.cx, L.cy + L.R * 0.35);
+    var ink = 'rgba(38,46,42,0.92)';
+    // 双臂云手：两只手沿两个错相圆走
+    var armR = L.R * 0.52;
+    var a1 = armT * 1.0;
+    var a2 = armT * 1.0 + Math.PI;
+    var h1x = Math.cos(a1) * armR * 0.7;
+    var h1y = -L.R * 0.35 + Math.sin(a1) * armR * 0.42;
+    var h2x = Math.cos(a2) * armR * 0.7;
+    var h2y = -L.R * 0.35 + Math.sin(a2) * armR * 0.42;
+    // 肩点
+    var sL = [-L.R * 0.16, -L.R * 0.52];
+    var sR = [L.R * 0.16, -L.R * 0.52];
+    // 手的轨迹残影
+    ctx.strokeStyle = 'rgba(60,74,66,0.18)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(0, -L.R * 0.35, armR * 0.7, armR * 0.42, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 左臂
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sL[0], sL[1]);
+    ctx.quadraticCurveTo((sL[0] + h1x) / 2 - 8, (sL[1] + h1y) / 2 + 10, h1x, h1y);
+    ctx.stroke();
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.arc(h1x, h1y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // 右臂
+    ctx.beginPath();
+    ctx.moveTo(sR[0], sR[1]);
+    ctx.quadraticCurveTo((sR[0] + h2x) / 2 + 8, (sR[1] + h2y) / 2 + 10, h2x, h2y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(h2x, h2y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // 躯干
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.moveTo(-L.R * 0.14, -L.R * 0.56);
+    ctx.quadraticCurveTo(-L.R * 0.20, -L.R * 0.1, -L.R * 0.12, L.R * 0.14);
+    ctx.lineTo(L.R * 0.12, L.R * 0.14);
+    ctx.quadraticCurveTo(L.R * 0.20, -L.R * 0.1, L.R * 0.14, -L.R * 0.56);
+    ctx.closePath();
+    ctx.fill();
+    // 头
+    ctx.beginPath();
+    ctx.arc(0, -L.R * 0.68, L.R * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+    // 腿（弓步微曲）
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(-L.R * 0.08, L.R * 0.14);
+    ctx.lineTo(-L.R * 0.16, L.R * 0.52);
+    ctx.moveTo(L.R * 0.08, L.R * 0.14);
+    ctx.lineTo(L.R * 0.17, L.R * 0.52);
+    ctx.stroke();
+    ctx.restore();
+
+    // 练习中的气流纹（手走过的弧上）
+    if (practicing) {
+      for (var g = 0; g < 3; g++) {
+        var ga = a1 - 0.4 - g * 0.3;
+        var gx = L.cx + Math.cos(ga) * armR * 0.7;
+        var gy2 = L.cy + L.R * 0.35 - L.R * 0.35 + Math.sin(ga) * armR * 0.42;
+        ctx.fillStyle = 'rgba(120,150,124,' + (0.3 - g * 0.08) + ')';
+        ctx.beginPath();
+        ctx.arc(gx, gy2, 2.2 - g * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // ── 式数（等宽数字）──
+    ctx.fillStyle = 'rgba(80,92,82,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('第 ' + (forms + 1) + ' 式', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(96,108,98,' + (0.35 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住，跟着云手走一圈', L.cx, L.cy + L.R * 0.95 + 40);
+    } else if (!practicing && forms < 4) {
+      ctx.fillStyle = 'rgba(96,108,98,' + (0.3 + 0.16 * Math.sin(now / 460)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('接着来，圈不要断', L.cx, L.cy + L.R * 0.95 + 40);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__taichi = {
+    forms: function () { return forms; },
+    armT: function () { return +armT.toFixed(2); },
+    practicing: function () { return practicing; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

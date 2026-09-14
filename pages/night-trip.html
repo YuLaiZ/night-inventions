@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>起夜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #05070a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #46484e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #6e727a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #50525a; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #868a92;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4a4c50;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #50525a;
+    text-decoration: none;
+    border-bottom: 1px dotted #50525a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #868a92; border-color: #868a92; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>起夜</h1>
+  <p>三点十七分，眼睛还没睁开，路已经背下来了。<br>按住往门那边走——轻一点，谁也别吵醒。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 阶段：toDoor(走向门) → toBed(走回床) → done(完工)
+  var phase = 'toDoor';
+  var walking = false;     // 按住走
+  var px = 0;              // 归一化位置 0(床) - 1(门)
+  var steps = [];          // 脚印 {x,a,side}
+  var bobT = 0;
+  var saidStart = false;
+  var trips = 0;           // 完成次数
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.walkY = L.h * 0.66;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (phase === 'done') return;
+    walking = true;
+    if (!saidStart) { saidStart = true; say('贴着墙走，第七步有椅子。'); }
+    else if (phase === 'toBed' && px > 0.9) say('原路，摸回来。');
+  }
+  function endPress() {
+    walking = false;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { walking = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (walking) {
+      bobT += dt * 7;
+      var dir = phase === 'toDoor' ? 1 : -1;
+      var prev = px;
+      px = Math.min(1, Math.max(0, px + dir * dt * 0.14));
+      // 落脚印（每跨过一定间隔落一只，左右交替）
+      if (Math.abs(px - prev) > 0.0001) {
+        var lastStep = steps[steps.length - 1];
+        if (!lastStep || Math.abs(px - lastStep.x) > 0.035) {
+          steps.push({ x: px, a: 0.85, side: (steps.length % 2) });
+        }
+      }
+      if (phase === 'toDoor' && px >= 1) {
+        phase = 'toBed';
+        say('到了。回来的时候，记得原路。', true);
+      } else if (phase === 'toBed' && px <= 0) {
+        phase = 'done';
+        trips++;
+        say('钻回被窝。夜还长着呢。', true);
+      }
+    }
+    for (var s = steps.length - 1; s >= 0; s--) {
+      steps[s].a -= dt * 0.045;   // 脚印慢慢淡去
+      if (steps[s].a <= 0) steps.splice(s, 1);
+    }
+
+    // ── 背景：漆黑的走廊，只有门缝透光 ──
+    ctx.fillStyle = '#05070a';
+    ctx.fillRect(0, 0, w, h);
+
+    // 门（右侧，冷白光缝）
+    var doorX = w * 0.94;
+    var doorGlow = ctx.createRadialGradient(doorX, L.walkY - 40, 4, doorX, L.walkY - 40, w * 0.16);
+    doorGlow.addColorStop(0, 'rgba(180,200,230,0.16)');
+    doorGlow.addColorStop(1, 'rgba(180,200,230,0)');
+    ctx.fillStyle = doorGlow;
+    ctx.fillRect(doorX - w * 0.16, L.walkY - h * 0.3, w * 0.32, h * 0.5);
+    ctx.fillStyle = 'rgba(190,208,232,0.5)';
+    ctx.fillRect(doorX - 2, L.walkY - 90, 3, 90);
+    ctx.fillStyle = 'rgba(190,208,232,0.22)';
+    ctx.fillRect(doorX - 14, L.walkY - 96, 26, 4);
+    ctx.beginPath();
+    ctx.arc(doorX + 11, L.walkY - 52, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 床的轮廓（左侧，暗色隆起）
+    ctx.fillStyle = '#0c0f14';
+    ctx.beginPath();
+    ctx.moveTo(0, L.walkY + 40);
+    ctx.quadraticCurveTo(w * 0.07, L.walkY - 10, w * 0.14, L.walkY + 6);
+    ctx.lineTo(w * 0.14, L.walkY + 60);
+    ctx.lineTo(0, L.walkY + 60);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── 脚印 ──
+    for (var i = 0; i < steps.length; i++) {
+      var st = steps[i];
+      var sx = w * 0.06 + st.x * (w * 0.86);
+      var sy = L.walkY + (st.side === 0 ? -3 : 5);
+      ctx.fillStyle = 'rgba(150,158,170,' + st.a * 0.5 + ')';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 5.5, 3, st.side === 0 ? -0.08 : 0.08, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 自己（小小的身影，走路时轻微起伏）──
+    var meX = w * 0.06 + px * (w * 0.86);
+    var bob = walking ? Math.sin(bobT) * 2.4 : 0;
+    var meY = L.walkY + bob - 14;
+    // 头
+    ctx.fillStyle = '#11151b';
+    ctx.beginPath();
+    ctx.arc(meX, meY - 12, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    // 身
+    ctx.fillStyle = '#151a22';
+    ctx.beginPath();
+    ctx.moveTo(meX - 5, meY - 6);
+    ctx.quadraticCurveTo(meX - 6, meY + 4, meX - 4, meY + 10);
+    ctx.lineTo(meX + 4, meY + 10);
+    ctx.quadraticCurveTo(meX + 6, meY + 4, meX + 5, meY - 6);
+    ctx.closePath();
+    ctx.fill();
+
+    // 进度（等宽数字：第几趟）
+    ctx.fillStyle = 'rgba(170,174,182,0.4)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('第 ' + (trips + 1) + ' 趟', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(150,154,162,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住，往门那边走', w * 0.3, L.walkY + 70);
+    } else if (phase === 'toDoor') {
+      ctx.fillStyle = 'rgba(150,154,162,' + (0.26 + 0.16 * Math.sin(now / 460)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('快到了，光在那边', w * 0.7, L.walkY + 70);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__trip = {
+    px: function () { return +px.toFixed(3); },
+    phase: function () { return phase; },
+    walking: function () { return walking; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>停电的夜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #06080c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #46484e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7a7466; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #55565a; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #98917e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e5054;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #55565a;
+    text-decoration: none;
+    border-bottom: 1px dotted #55565a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #98917e; border-color: #98917e; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>停电的夜</h1>
+  <p>跳闸了，整个屋子沉进墨里。<br>按住火柴在盒边划一下——就这一小朵光，够把夜点亮。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 阶段：dark → striking(擦划中) → litMatch(火柴燃) → candleLit(蜡烛燃)
+  var phase = 'dark';
+  var matchPos = null;     // 手中火柴位置 {x,y}
+  var matchAngle = 0;
+  var strikeT = 0;         // 擦划进度 0-1
+  var sparks = [];         // 摩擦火星 {x,y,vx,vy,a}
+  var smoke = [];          // 熄火柴的烟 {x,y,a,dx}
+  var candleGlow = 0;      // 蜡烛点燃渐亮 0-1
+  var saidStart = false;
+  var litCount = 0;        // 点过蜡烛次数（重复玩）
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.tableY = L.h * 0.72;
+    L.cx = L.w * 0.42;                       // 蜡烛位置
+    L.candleH = Math.min(L.h * 0.13, 96);
+    L.candleW = 26;
+    L.boxX = L.w * 0.72;                     // 火柴盒位置
+    L.boxY = L.tableY - 16;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function hitMatchStart(x, y) {
+    // 火柴与火柴盒区域（ generous）
+    var dx = x - (L.boxX - 60), dy = y - (L.boxY - 20);
+    return x > L.boxX - 150 && x < L.boxX + 90 && y > L.boxY - 60 && y < L.boxY + 40;
+  }
+  function nearWick(x, y) {
+    var wx = L.cx, wy = L.tableY - L.candleH - 6;
+    var dx = x - wx, dy = y - wy;
+    return dx * dx + dy * dy < 70 * 70;
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress(x, y) {
+    if (phase === 'candleLit') {
+      // 再玩一根：举着烧（不影响已点燃的蜡烛）
+      if (hitMatchStart(x, y)) {
+        phase = 'striking'; strikeT = 0;
+        matchPos = { x: x, y: y };
+      }
+      return;
+    }
+    if (phase !== 'dark') return;
+    if (hitMatchStart(x, y)) {
+      phase = 'striking'; strikeT = 0;
+      matchPos = { x: x, y: y };
+      if (!saidStart) { saidStart = true; say('擦——斜一点，用力。'); }
+    }
+  }
+  function movePress(x, y) {
+    if (phase === 'striking' || phase === 'litMatch') {
+      matchPos.x = x; matchPos.y = y;
+      if (phase === 'litMatch') {
+        matchAngle = Math.atan2(y - L.tableY, x - L.boxX) * 0.2;
+      }
+    }
+  }
+  function endPress() {
+    if (phase === 'striking' && strikeT < 0.55) {
+      // 划得太轻，火柴没着
+      phase = 'dark';
+      matchPos = null;
+      say('没着。再来，擦长一点。');
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointermove', function (ev) { movePress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (phase === 'striking') {
+      strikeT = Math.min(0.75, strikeT + dt * 1.7);
+      // 擦划途中随机迸火星
+      if (Math.random() < dt * 30 && strikeT < 0.7) {
+        sparks.push({
+          x: matchPos.x + (Math.random() - 0.5) * 8,
+          y: matchPos.y + (Math.random() - 0.5) * 6,
+          vx: (Math.random() - 0.5) * 130 - 40,
+          vy: -30 - Math.random() * 90,
+          a: 0.8
+        });
+      }
+      // 擦够长自动燃着（按住不放也一样）
+      if (strikeT >= 0.55) {
+        phase = 'litMatch';
+        say('着了。把火苗送到烛芯上去。');
+      }
+    }
+    if (phase === 'litMatch' && matchPos && nearWick(matchPos.x, matchPos.y)) {
+      // 火苗驻留烛芯 → 点燃
+      phase = 'candleLit';
+      candleGlow = 0;
+      litCount++;
+      smoke.push({ x: matchPos.x, y: matchPos.y, a: 0.7, dx: (Math.random() - 0.5) * 10 });
+      if (litCount === 1) say('一根火柴的亮度，刚好把夜翻到有光的一页。', true);
+      else say('烛火又亮了。电算什么。', true);
+    }
+    if (phase === 'candleLit') {
+      candleGlow = Math.min(1, candleGlow + dt * 0.5);
+    }
+    for (var s = sparks.length - 1; s >= 0; s--) {
+      var sp = sparks[s];
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vy += 300 * dt; sp.a -= dt * 2.2;
+      if (sp.a <= 0) sparks.splice(s, 1);
+    }
+    for (var sm = smoke.length - 1; sm >= 0; sm--) {
+      var sk = smoke[sm];
+      sk.y -= 26 * dt; sk.x += sk.dx * dt; sk.a -= dt * 0.35;
+      if (sk.a <= 0) smoke.splice(sm, 1);
+    }
+
+    // ── 环境：全黑房间，光源决定可见度 ──
+    var flameX, flameY, flameR, flick;
+    if (phase === 'candleLit' || candleGlow > 0) {
+      flameX = L.cx; flameY = L.tableY - L.candleH - 10;
+      flameR = 300 * candleGlow + 40;
+      flick = 1 + Math.sin(now / 90) * 0.04 + Math.sin(now / 37) * 0.03;
+      flameR *= flick;
+    } else if (phase === 'litMatch' && matchPos) {
+      flameX = matchPos.x; flameY = matchPos.y - 14;
+      flameR = 130;
+      flick = 1 + Math.sin(now / 80) * 0.05;
+      flameR *= flick;
+    } else if (phase === 'striking' && matchPos) {
+      flameX = matchPos.x; flameY = matchPos.y;
+      flameR = 60 + strikeT * 90;
+      flick = 1;
+    } else {
+      flameX = -999; flameY = -999; flameR = 0; flick = 1;
+    }
+
+    // 底层：极暗的房间轮廓
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#06080c');
+    bg.addColorStop(1, '#0a0c10');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 烛光晕（叠加光）
+    if (flameR > 0) {
+      var glow = ctx.createRadialGradient(flameX, flameY, 4, flameX, flameY, flameR);
+      var gA = phase === 'candleLit' ? 0.42 * candleGlow + 0.06 : 0.3;
+      glow.addColorStop(0, 'rgba(255,214,140,' + gA * 1.4 + ')');
+      glow.addColorStop(0.4, 'rgba(230,168,90,' + gA * 0.55 + ')');
+      glow.addColorStop(1, 'rgba(230,168,90,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(flameX - flameR, flameY - flameR, flameR * 2, flameR * 2);
+    }
+
+    // 桌面（光内可见）
+    var vis = Math.max(0.12, Math.min(1, flameR / 260));
+    ctx.fillStyle = 'rgba(64,52,38,' + 0.55 * vis + ')';
+    ctx.fillRect(0, L.tableY, w, h - L.tableY);
+    ctx.fillStyle = 'rgba(200,170,120,' + 0.12 * vis + ')';
+    ctx.fillRect(0, L.tableY, w, 2);
+
+    // 窗（左上角，冷色微光——停电时唯一的天光）
+    ctx.fillStyle = 'rgba(90,110,150,0.06)';
+    ctx.fillRect(w * 0.06, h * 0.12, w * 0.16, h * 0.2);
+    ctx.strokeStyle = 'rgba(140,155,185,0.10)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(w * 0.06, h * 0.12, w * 0.16, h * 0.2);
+
+    // ── 蜡烛 ──
+    ctx.save();
+    ctx.translate(L.cx, L.tableY);
+    var cVis = phase === 'candleLit' ? 0.4 + 0.6 * candleGlow : vis * 0.9;
+    // 烛身
+    var body = ctx.createLinearGradient(-L.candleW / 2, 0, L.candleW / 2, 0);
+    body.addColorStop(0, 'rgba(196,182,150,' + 0.75 * cVis + ')');
+    body.addColorStop(0.5, 'rgba(232,220,188,' + 0.9 * cVis + ')');
+    body.addColorStop(1, 'rgba(150,138,110,' + 0.75 * cVis + ')');
+    ctx.fillStyle = body;
+    ctx.fillRect(-L.candleW / 2, -L.candleH, L.candleW, L.candleH);
+    // 烛泪
+    ctx.fillStyle = 'rgba(238,226,196,' + 0.8 * cVis + ')';
+    ctx.beginPath();
+    ctx.ellipse(-L.candleW * 0.2, -L.candleH + 3, 7, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-L.candleW * 0.2 - 3, -L.candleH, 4, 16 + Math.sin(now / 700) * 2);
+    // 烛芯
+    ctx.strokeStyle = 'rgba(40,34,26,' + cVis + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -L.candleH);
+    ctx.lineTo(0, -L.candleH - 7);
+    ctx.stroke();
+    ctx.restore();
+
+    // ── 蜡烛火苗 ──
+    if (phase === 'candleLit') {
+      drawFlame(L.cx, L.tableY - L.candleH - 12, 1 + Math.sin(now / 110) * 0.06, now);
+    }
+
+    // ── 火柴盒 ──
+    var boxVis = Math.max(vis, phase === 'dark' || phase === 'striking' ? 0.5 : vis);
+    ctx.save();
+    ctx.translate(L.boxX, L.boxY);
+    ctx.fillStyle = 'rgba(84,60,44,' + 0.85 * Math.min(1, boxVis + 0.15) + ')';
+    ctx.fillRect(-52, -16, 104, 30);
+    ctx.fillStyle = 'rgba(120,88,60,' + 0.9 * Math.min(1, boxVis + 0.15) + ')';
+    ctx.fillRect(-48, -13, 96, 24);
+    // 盒侧擦条
+    ctx.fillStyle = 'rgba(46,36,30,0.95)';
+    ctx.fillRect(-48, 7, 96, 4);
+    // 盒面字
+    ctx.fillStyle = 'rgba(230,210,170,' + 0.5 * Math.min(1, boxVis + 0.2) + ')';
+    ctx.font = '10px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('安  夜  火  柴', 0, -1);
+    ctx.restore();
+
+    // ── 手中火柴 ──
+    if (matchPos && (phase === 'striking' || phase === 'litMatch')) {
+      ctx.save();
+      ctx.translate(matchPos.x, matchPos.y);
+      ctx.rotate(phase === 'striking' ? -0.5 : -0.25 + matchAngle * 0);
+      // 梗
+      ctx.strokeStyle = 'rgba(190,164,120,0.95)';
+      ctx.lineWidth = 3.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-34, 6);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+      // 头
+      ctx.fillStyle = phase === 'litMatch' ? '#2a2320' : '#8c3a30';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 火苗
+      if (phase === 'litMatch') {
+        drawFlame(matchPos.x, matchPos.y - 12, 0.55 + Math.sin(now / 95) * 0.05, now);
+      } else if (strikeT > 0.5) {
+        drawFlame(matchPos.x, matchPos.y - 8, (strikeT - 0.5) * 1.2, now);
+      }
+    }
+
+    // ── 火星 ──
+    for (var p = 0; p < sparks.length; p++) {
+      var pk = sparks[p];
+      ctx.fillStyle = 'rgba(255,196,110,' + pk.a + ')';
+      ctx.fillRect(pk.x, pk.y, 2.2, 2.2);
+    }
+    // ── 烟 ──
+    for (var q = 0; q < smoke.length; q++) {
+      var sk2 = smoke[q];
+      ctx.strokeStyle = 'rgba(180,178,172,' + sk2.a * 0.5 + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sk2.x, sk2.y);
+      ctx.quadraticCurveTo(sk2.x + sk2.dx, sk2.y - 10, sk2.x + sk2.dx * 2.4, sk2.y - 20);
+      ctx.stroke();
+    }
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(180,170,146,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住火柴盒，划一下', L.boxX, L.boxY + 48);
+    } else if (phase === 'dark') {
+      ctx.fillStyle = 'rgba(180,170,146,' + (0.28 + 0.18 * Math.sin(now / 420)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('擦长一点，再划', L.boxX, L.boxY + 48);
+    }
+  }
+
+  function drawFlame(x, y, scale, now) {
+    var s = scale;
+    var sway = Math.sin(now / 120) * 2.2 * s;
+    ctx.save();
+    ctx.translate(x + sway * 0.4, y);
+    // 外焰
+    var fg = ctx.createRadialGradient(0, -6 * s, 1, 0, -6 * s, 20 * s);
+    fg.addColorStop(0, 'rgba(255,244,214,0.95)');
+    fg.addColorStop(0.35, 'rgba(255,196,110,0.85)');
+    fg.addColorStop(1, 'rgba(255,150,60,0)');
+    ctx.fillStyle = fg;
+    ctx.beginPath();
+    ctx.moveTo(0, 4 * s);
+    ctx.bezierCurveTo(-8 * s + sway * 0.5, -2 * s, -5 * s + sway, -16 * s, 0, -22 * s);
+    ctx.bezierCurveTo(5 * s + sway, -16 * s, 8 * s + sway * 0.5, -2 * s, 0, 4 * s);
+    ctx.fill();
+    // 内芯
+    ctx.fillStyle = 'rgba(255,252,240,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(0, 3 * s);
+    ctx.bezierCurveTo(-3.4 * s, -2 * s, -2 * s + sway * 0.4, -9 * s, 0, -12 * s);
+    ctx.bezierCurveTo(2 * s + sway * 0.4, -9 * s, 3.4 * s, -2 * s, 0, 3 * s);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/movePress/endPress）
+  window.__match = {
+    phase: function () { return phase; },
+    strike: function () { return +strikeT.toFixed(2); },
+    pos: function () { return matchPos ? { x: Math.round(matchPos.x), y: Math.round(matchPos.y) } : null; },
+    press: function (xr, yr) { startPress(L.boxX + (xr || 0), L.boxY + (yr || 0)); },
+    move: function (x, y) { movePress(x, y); },
+    release: function () { endPress(); },
+    candleLit: function () { return phase === 'candleLit'; }
+  };
+})();
+</script>
+</body>
+</html>

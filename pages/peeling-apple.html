@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>削苹果</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7a8a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c665c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8a9678;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c665c;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c665c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a9678; border-color: #8a9678; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>削苹果</h1>
+  <p>夜里有饿，也有刀工。<br>按住苹果，慢慢削——皮要一整条。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var peeling = false;   // 按住削皮中
+  var progress = 0;      // 0-1 削皮进度
+  var doneCount = 0;     // 削完的苹果数
+  var hueSet = 0;        // 当前苹果配色组（0 红 / 1 绿 / 2 黄）
+  var peelSway = 0;      // 皮条摆动相位
+  var resting = false;   // 削完后皮已落盘
+  var saidStart = false;
+
+  var HUES = [
+    { skin: [156, 62, 48],  hi: [204, 106, 78],  flesh: [232, 208, 156] },
+    { skin: [110, 138, 62], hi: [162, 186, 106], flesh: [226, 222, 160] },
+    { skin: [188, 148, 56], hi: [228, 194, 108], flesh: [234, 210, 150] }
+  ];
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.55;
+    L.R = Math.min(L.w * 0.19, L.h * 0.21, 130);
+    L.counterY = L.cy + L.R * 2.1;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function hitApple(x, y) {
+    var dx = x - L.cx, dy = y - L.cy;
+    return dx * dx + dy * dy < (L.R + 34) * (L.R + 34);
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress(x, y) {
+    if (resting) { // 削完再按 = 换一只
+      progress = 0; resting = false;
+      hueSet = (hueSet + 1) % HUES.length;
+      say('再削一只，换个颜色。');
+      return;
+    }
+    if (peeling || progress >= 1) return;
+    if (hitApple(x, y)) {
+      peeling = true;
+      if (!saidStart) { saidStart = true; say('刀尖贴着皮走，别急。'); }
+    }
+  }
+  function endPress() {
+    peeling = false;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { peeling = false; });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (peeling && progress < 1) {
+      progress = Math.min(1, progress + dt * 0.14);
+      peelSway += dt * (5 + progress * 4);
+      if (progress >= 1) {
+        peeling = false; resting = true; doneCount++;
+        if (doneCount === 1) say('一整条，没断。果肉是凉的。', true);
+        else say('又一条完整的。今晚手很稳。', true);
+      }
+    }
+
+    // ── 背景：深夜厨房台面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#131a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    var C = HUES[hueSet];
+    var squash = 0.92; // 苹果略扁
+
+    // ── 苹果身 ──
+    var body = ctx.createRadialGradient(L.cx - L.R * 0.35, L.cy - L.R * 0.4, L.R * 0.1, L.cx, L.cy, L.R * 1.25);
+    var skin = C.skin, hi = C.hi;
+    // 削过的区域露果肉：progress 决定果肉占比，从顶部顺时针扩散
+    var peeledCol = C.flesh;
+    body.addColorStop(0, 'rgb(' + hi.join(',') + ')');
+    body.addColorStop(1, 'rgb(' + Math.round(skin[0] * 0.72) + ',' + Math.round(skin[1] * 0.72) + ',' + Math.round(skin[2] * 0.72) + ')');
+    ctx.save();
+    ctx.beginPath();
+    applePath(L.cx, L.cy, L.R, squash);
+    ctx.fillStyle = body;
+    ctx.fill();
+
+    // 已削区域：削线以上露果肉（帽形推进），交界一圈螺旋棱
+    var topY = L.cy - L.R * squash;
+    var yCut = topY + progress * 2 * L.R * squash;
+    if (progress > 0.005) {
+      ctx.save();
+      ctx.clip();
+      var fl = ctx.createLinearGradient(0, topY, 0, yCut);
+      fl.addColorStop(0, 'rgb(' + C.flesh.join(',') + ')');
+      fl.addColorStop(1, 'rgb(' + Math.round(C.flesh[0] * 0.84) + ',' + Math.round(C.flesh[1] * 0.84) + ',' + Math.round(C.flesh[2] * 0.84) + ')');
+      ctx.fillStyle = fl;
+      ctx.fillRect(L.cx - L.R * 1.4, topY - 8, L.R * 2.8, yCut - topY + 8);
+      if (yCut > L.cy + L.R * 0.05) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(L.cx - L.R * 1.4, topY - 8, L.R * 2.8, yCut - topY + 8);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(120,100,60,0.14)';
+        ctx.beginPath();
+        ctx.ellipse(L.cx, L.cy + L.R * 0.12, L.R * 0.3, L.R * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      // 螺旋棱
+      ctx.strokeStyle = 'rgba(130,104,64,0.38)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(L.cx, yCut, L.R * 0.96, L.R * 0.15, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,240,' + (0.16 * (1 - progress)) + ')';
+    ctx.beginPath();
+    ctx.ellipse(L.cx - L.R * 0.38, L.cy - L.R * 0.45, L.R * 0.22, L.R * 0.13, -0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 果柄
+    ctx.strokeStyle = '#4a3a28';
+    ctx.lineWidth = 3.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(L.cx, L.cy - L.R * squash);
+    ctx.quadraticCurveTo(L.cx + 6, L.cy - L.R * squash - 12, L.cx + 12, L.cy - L.R * squash - 18);
+    ctx.stroke();
+
+    // ── 小刀贴削线水平走 + 皮条垂在刀口 ──
+    if (!resting && progress > 0) {
+      var kx = L.cx + L.R * 0.76;
+      var ky = yCut;
+      var peelLen = 22 + progress * 128;
+      var segs = 16;
+      var skinC = C.skin;
+      ctx.strokeStyle = 'rgb(' + Math.round(skinC[0] * 0.9) + ',' + Math.round(skinC[1] * 0.9) + ',' + Math.round(skinC[2] * 0.9) + ')';
+      ctx.lineWidth = 4.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(kx, ky);
+      var px = kx, py = ky;
+      for (var i = 1; i <= segs; i++) {
+        var t = i / segs;
+        var sway = Math.sin(peelSway - t * 2.6) * (2 + t * 8);
+        var nx = kx + sway;
+        var ny = ky + peelLen * t;
+        ctx.quadraticCurveTo((px + nx) / 2, (py + ny) / 2, nx, ny);
+        px = nx; py = ny;
+      }
+      ctx.stroke();
+      // 水果刀：刃朝左贴果面，柄朝右
+      ctx.save();
+      ctx.translate(kx, ky);
+      ctx.rotate(Math.sin(now / 300) * 0.04);
+      ctx.fillStyle = '#b8bcc2';
+      ctx.beginPath();
+      ctx.moveTo(-L.R * 0.34, 0);
+      ctx.quadraticCurveTo(-L.R * 0.1, -4.5, L.R * 0.1, -3.5);
+      ctx.lineTo(L.R * 0.12, 4.5);
+      ctx.quadraticCurveTo(-L.R * 0.12, 5, -L.R * 0.3, 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#3c3128';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(L.R * 0.08, -4.5, L.R * 0.46, 9, 4.5);
+      else ctx.rect(L.R * 0.08, -4.5, L.R * 0.46, 9);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── 落盘的皮（削完盘成一圈）──
+    if (resting) {
+      var coil = ctx.createLinearGradient(L.cx - L.R, L.counterY - 8, L.cx + L.R, L.counterY + 4);
+      coil.addColorStop(0, 'rgb(' + C.skin.join(',') + ')');
+      coil.addColorStop(1, 'rgb(' + Math.round(C.skin[0] * 0.7) + ',' + Math.round(C.skin[1] * 0.7) + ',' + Math.round(C.skin[2] * 0.7) + ')');
+      ctx.strokeStyle = coil;
+      ctx.lineWidth = 5.5;
+      ctx.beginPath();
+      for (var c2 = 0; c2 <= 40; c2++) {
+        var t2 = c2 / 40;
+        var a2 = t2 * Math.PI * 6;
+        var rr = L.R * 0.62 * (1 - t2 * 0.72);
+        var x2 = L.cx + Math.cos(a2) * rr;
+        var y2 = L.counterY + 2 + Math.sin(a2) * rr * 0.3;
+        if (c2 === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2);
+      }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.3 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，换一只', L.cx, L.counterY + 34);
+    }
+
+    // ── 长度刻度（等宽数字）──
+    var cm = Math.round(progress * 54);
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText((cm < 10 ? ' ' : '') + cm + ' cm', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导提示
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(150,164,140,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住苹果', L.cx, L.cy + L.R * squash + 44);
+    }
+  }
+
+  function applePath(x, y, r, sq) {
+    ctx.moveTo(x, y - r * sq);
+    ctx.bezierCurveTo(x + r * 0.9, y - r * sq * 1.06, x + r * 1.08, y + r * sq * 0.42, x + r * 0.62, y + r * sq * 0.88);
+    ctx.bezierCurveTo(x + r * 0.34, y + r * sq * 1.16, x - r * 0.34, y + r * sq * 1.16, x - r * 0.62, y + r * sq * 0.88);
+    ctx.bezierCurveTo(x - r * 1.08, y + r * sq * 0.42, x - r * 0.9, y - r * sq * 1.06, x, y - r * sq);
+    ctx.closePath();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__peeler = {
+    progress: function () { return progress; },
+    done: function () { return doneCount; },
+    resting: function () { return resting; },
+    hue: function () { return hueSet; },
+    press: function () { startPress(L.cx, L.cy); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

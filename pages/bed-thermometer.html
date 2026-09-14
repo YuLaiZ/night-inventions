@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>被窝温度计</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1016;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4e54;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7e828a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #585c62; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #9298a0;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e5258;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #585c62;
+    text-decoration: none;
+    border-bottom: 1px dotted #585c62;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9298a0; border-color: #9298a0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>被窝温度计</h1>
+  <p>睡前例行公事：伸一只脚进去探探深浅。<br>按住测量——被窝今晚什么脾气，一看便知。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 目标温度每轮随机：14–37℃
+  var target = 14 + Math.random() * 23;
+  var reading = 0;         // 当前读数（测量中向 target 爬）
+  var measuring = false;
+  var measured = 0;        // 本次锁定的读数（0=未测）
+  var rounds = 0;
+  var wobble = 0;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  function verdict(t) {
+    if (t < 18) return '凉得像冰窖。先用自己的体温交个朋友。';
+    if (t < 24) return '还带着点夜里的脾气，焐一焐就好了。';
+    if (t < 29) return '正合适。今晚这觉，稳了。';
+    if (t < 33) return '偏暖。翻个身，把凉的那面让给背。';
+    if (t < 36) return '很烫了。是不是忘了谁在这儿睡过午觉。';
+    return '高温警报——你这不是被窝，是刚出炉的烤红薯。';
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.thermoX = L.w * 0.5;
+    L.top = L.h * 0.26;
+    L.bot = L.h * 0.68;
+    L.tubeW = Math.min(L.w * 0.055, 26);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  var T_MIN = 12, T_MAX = 38;
+  function tempToY(t) {
+    var k = (Math.min(T_MAX, Math.max(T_MIN, t)) - T_MIN) / (T_MAX - T_MIN);
+    return L.bot - k * (L.bot - L.top);
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (measured > 0) {
+      // 重新测量：被窝脾气也换一换
+      target = 14 + Math.random() * 23;
+      reading = 0; measured = 0;
+      measuring = true;
+      say('新的一轮。被窝翻了个面。');
+      return;
+    }
+    measuring = true;
+  }
+  function endPress() {
+    if (!measuring) return;
+    measuring = false;
+    measured = reading;
+    rounds++;
+    say(verdict(measured), true);
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (measuring) {
+      reading = Math.min(target, reading + dt * 14);
+      wobble = 1;
+    } else {
+      wobble = Math.max(0, wobble - dt * 3);
+    }
+
+    // ── 背景：卧室一角 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1016');
+    bg.addColorStop(1, '#12151c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 床沿（底部被子隆起）
+    ctx.fillStyle = '#1d2129';
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    ctx.lineTo(0, h * 0.86);
+    ctx.quadraticCurveTo(w * 0.5, h * 0.78, w, h * 0.88);
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,180,150,0.07)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.86);
+    ctx.quadraticCurveTo(w * 0.5, h * 0.78, w, h * 0.88);
+    ctx.stroke();
+
+    // ── 温度计 ──
+    var tx = L.thermoX;
+    var tw = L.tubeW;
+    // 管
+    ctx.fillStyle = 'rgba(226,232,238,0.10)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(tx - tw / 2, L.top, tw, L.bot - L.top, tw / 2);
+    else ctx.rect(tx - tw / 2, L.top, tw, L.bot - L.top);
+    ctx.fill();
+    // 刻度
+    ctx.strokeStyle = 'rgba(200,206,214,0.25)';
+    ctx.lineWidth = 1.4;
+    ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'left';
+    for (var tt = T_MIN; tt <= T_MAX; tt += 2) {
+      var ty = tempToY(tt);
+      var major = tt % 4 === 0;
+      ctx.beginPath();
+      ctx.moveTo(tx + tw / 2 + 4, ty);
+      ctx.lineTo(tx + tw / 2 + (major ? 16 : 9), ty);
+      ctx.stroke();
+      if (major) {
+        ctx.fillStyle = 'rgba(190,196,204,0.4)';
+        ctx.fillText(tt + '°', tx + tw / 2 + 20, ty + 3);
+      }
+    }
+    // 温区注释（右侧远端）
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(150,158,168,0.30)';
+    ctx.font = '11px system-ui, "PingFang SC", sans-serif';
+    ctx.fillText('冰窖', w - 24, tempToY(15) + 4);
+    ctx.fillText('正合适', w - 24, tempToY(27) + 4);
+    ctx.fillText('烤红薯', w - 24, tempToY(36) + 4);
+
+    // 水银柱（暖色渐变）
+    var shown = measured > 0 && !measuring ? measured : reading;
+    if (shown > T_MIN) {
+      var colTop = tempToY(shown) + (measuring ? Math.sin(now / 60) * wobble * 1.2 : 0);
+      var col = ctx.createLinearGradient(0, colTop, 0, L.bot);
+      col.addColorStop(0, '#ff9a5c');
+      col.addColorStop(1, '#d84b38');
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(tx - tw / 2 + 3, colTop, tw - 6, L.bot - colTop, (tw - 6) / 2);
+      else ctx.rect(tx - tw / 2 + 3, colTop, tw - 6, L.bot - colTop);
+      ctx.fill();
+      // 底泡
+      ctx.fillStyle = '#d84b38';
+      ctx.beginPath();
+      ctx.arc(tx, L.bot + 12, tw * 0.78, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.arc(tx - tw * 0.22, L.bot + 6, tw * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      // 读数（等宽数字）
+      ctx.fillStyle = 'rgba(255,180,130,0.85)';
+      ctx.font = '13px ui-monospace, "SF Mono", Menlo, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(shown.toFixed(1) + '℃', tx, colTop - 12);
+    }
+
+    // 引导提示
+    if (rounds === 0 && !measuring) {
+      ctx.fillStyle = 'rgba(176,182,190,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住温度计，开始测量', tx, L.bot + 52);
+    } else if (measured > 0 && !measuring) {
+      ctx.fillStyle = 'rgba(176,182,190,' + (0.28 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一次，换个被窝再测', tx, L.bot + 52);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__thermo = {
+    reading: function () { return +reading.toFixed(1); },
+    measured: function () { return +measured.toFixed(1); },
+    target: function () { return +target.toFixed(1); },
+    measuring: function () { return measuring; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

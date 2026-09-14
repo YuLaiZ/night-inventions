@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>包书皮</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #101014;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c4a50;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8c8478; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c5a5e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a09a8c;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #54524e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c5a5e;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c5a5e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a09a8c; border-color: #a09a8c; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>包书皮</h1>
+  <p>新学期的书，先给穿件牛皮纸外衣。<br>按一下折一边——四边折完，书就体面了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 步骤：0 折上边 → 1 折下边 → 2 折左边 → 3 折右边 → done
+  var step = 0;
+  var animT = 1;           // 当前折边动画进度（1=完成）
+  var animEdge = -1;       // 正在折的边
+  var covered = 0;         // 包好的本数
+  var saidStart = false;
+  var titleAlpha = 0;      // 手写书名浮现
+
+  var EDGES = [
+    { name: '上边', dir: [0, -1] },
+    { name: '下边', dir: [0, 1] },
+    { name: '左边', dir: [-1, 0] },
+    { name: '右边', dir: [1, 0] }
+  ];
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5200);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.bw = Math.min(L.w * 0.42, L.h * 0.5, 300);
+    L.bh = L.bw * 1.38;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.55;
+    L.fold = Math.min(L.bw, L.bh) * 0.16;   // 折边宽
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (animT < 1) return;              // 上一折还没折完
+    if (step >= 4) return;              // 已完工
+    animEdge = step;
+    animT = 0;
+    if (!saidStart) { saidStart = true; say('纸比书大一圈，先压出折痕。'); }
+    else if (step === 1) say('另一边，对齐。');
+    else if (step === 2) say('四个角，按实一点。');
+    else if (step === 3) say('最后一折——');
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (animEdge >= 0 && animT < 1) {
+      animT = Math.min(1, animT + dt * 2.2);
+      if (animT >= 1) {
+        step = animEdge + 1;
+        if (step >= 4) {
+          covered++;
+          say('包好了。开学那天，它是全班最新的书。', true);
+        }
+      }
+    }
+    if (step >= 4) {
+      titleAlpha = Math.min(1, titleAlpha + dt * 0.8);
+    }
+
+    // ── 桌面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#101014');
+    bg.addColorStop(1, '#14120f');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 台面木纹线
+    ctx.strokeStyle = 'rgba(160,130,90,0.05)';
+    ctx.lineWidth = 1;
+    for (var g = 0; g < 5; g++) {
+      var gy = L.cy + L.bh / 2 + 30 + g * 16;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.1, gy);
+      ctx.lineTo(w * 0.9, gy);
+      ctx.stroke();
+    }
+
+    var bx = L.cx - L.bw / 2, by = L.cy - L.bh / 2;
+
+    // ── 牛皮纸（铺在书下，四边露出）──
+    ctx.fillStyle = '#a8895c';
+    ctx.fillRect(bx - L.fold, by - L.fold, L.bw + L.fold * 2, L.bh + L.fold * 2);
+    ctx.strokeStyle = 'rgba(90,66,40,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx - L.fold, by - L.fold, L.bw + L.fold * 2, L.bh + L.fold * 2);
+
+    // ── 书本（灰蓝封面）──
+    ctx.fillStyle = '#3d4a5c';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, L.bw, L.bh, 4);
+    else ctx.rect(bx, by, L.bw, L.bh);
+    ctx.fill();
+    // 书脊
+    ctx.fillStyle = 'rgba(20,26,36,0.55)';
+    ctx.fillRect(bx, by, 12, L.bh);
+    // 封面旧痕
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 20, by + 18, L.bw - 40, L.bh - 36);
+
+    // ── 已折的边（牛皮纸盖上来）──
+    var eased = 1 - Math.pow(1 - Math.min(1, animT), 3);
+    for (var e = 0; e < 4; e++) {
+      var done = e < step;
+      var inAnim = (e === animEdge && animT < 1);
+      if (!done && !inAnim) continue;
+      var t = inAnim ? eased : 1;
+      var d = EDGES[e].dir;
+      var fl = L.fold * t;
+      ctx.save();
+      // 折边的梯形（从纸边盖向书边）
+      ctx.beginPath();
+      if (d[1] === -1) { // 上
+        ctx.moveTo(bx - L.fold, by - L.fold);
+        ctx.lineTo(bx + L.bw + L.fold, by - L.fold);
+        ctx.lineTo(bx + L.bw + L.fold * (1 - t * 0.15), by - L.fold + fl);
+        ctx.lineTo(bx - L.fold * (1 - t * 0.15), by - L.fold + fl);
+      } else if (d[1] === 1) { // 下
+        ctx.moveTo(bx - L.fold, by + L.bh + L.fold);
+        ctx.lineTo(bx + L.bw + L.fold, by + L.bh + L.fold);
+        ctx.lineTo(bx + L.bw + L.fold * (1 - t * 0.15), by + L.bh + L.fold - fl);
+        ctx.lineTo(bx - L.fold * (1 - t * 0.15), by + L.bh + L.fold - fl);
+      } else if (d[0] === -1) { // 左
+        ctx.moveTo(bx - L.fold, by - L.fold * 0.4);
+        ctx.lineTo(bx - L.fold + fl, by - L.fold * 0.1);
+        ctx.lineTo(bx - L.fold + fl, by + L.bh + L.fold * 0.1);
+        ctx.lineTo(bx - L.fold, by + L.bh + L.fold * 0.4);
+      } else { // 右
+        ctx.moveTo(bx + L.bw + L.fold, by - L.fold * 0.4);
+        ctx.lineTo(bx + L.bw + L.fold - fl, by - L.fold * 0.1);
+        ctx.lineTo(bx + L.bw + L.fold - fl, by + L.bh + L.fold * 0.1);
+        ctx.lineTo(bx + L.bw + L.fold, by + L.bh + L.fold * 0.4);
+      }
+      ctx.closePath();
+      var pg = ctx.createLinearGradient(bx, by, bx + L.bw, by + L.bh);
+      pg.addColorStop(0, '#b8945f');
+      pg.addColorStop(1, '#9a7a4c');
+      ctx.fillStyle = pg;
+      ctx.fill();
+      // 折痕高光
+      ctx.strokeStyle = 'rgba(70,50,28,0.55)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 手写书名（完工浮现）──
+    if (titleAlpha > 0.02) {
+      ctx.save();
+      ctx.translate(L.cx, L.cy);
+      ctx.rotate(-0.06);
+      ctx.fillStyle = 'rgba(58,48,40,' + titleAlpha * 0.9 + ')';
+      ctx.font = '600 ' + Math.round(L.bw * 0.13) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('夜 班 手 册', 0, -L.bh * 0.12);
+      ctx.font = Math.round(L.bw * 0.062) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.fillStyle = 'rgba(58,48,40,' + titleAlpha * 0.62 + ')';
+      ctx.fillText('—— 凌晨篇 ——', 0, -L.bh * 0.02);
+      // 手绘下划线
+      ctx.strokeStyle = 'rgba(58,48,40,' + titleAlpha * 0.5 + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-L.bw * 0.3, L.bh * 0.06);
+      ctx.quadraticCurveTo(0, L.bh * 0.085, L.bw * 0.3, L.bh * 0.05);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 下一步提示（完工后交给底部 caption，避免叠字）──
+    if (step < 4) {
+      ctx.fillStyle = 'rgba(190,180,160,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按一下，折' + EDGES[step].name, L.cx, by + L.bh + L.fold + 46);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress）
+  window.__cover = {
+    step: function () { return step; },
+    anim: function () { return +animT.toFixed(2); },
+    covered: function () { return covered; },
+    press: function () { startPress(); }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>玻璃弹珠</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e1216;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4e54;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #76808a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #585e64; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8e98a2;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e545a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #585e64;
+    text-decoration: none;
+    border-bottom: 1px dotted #585e64;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8e98a2; border-color: #8e98a2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>玻璃弹珠</h1>
+  <p>输掉的弹珠一颗颗收回来，放进铁皮罐里。<br>按一下投一颗——攒到十二颗，等太阳出来摆上窗台。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 12;
+  var marbles = [];        // 已入罐 {slot, x, y, r, hue1, hue2, settle}
+  var falling = [];        // 下落中 {x,y,vy,targetX,targetY,hue1,hue2,r}
+  var ripples = [];        // 落底小涟漪
+  var saidStart = false;
+  var saidDone = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.groundY = L.h * 0.80;
+    L.jarX = L.w * 0.5;
+    L.jarW = Math.min(L.w * 0.34, 250);
+    L.jarH = Math.min(L.h * 0.36, 300);
+    L.jarBot = L.groundY - 6;
+    L.mr = Math.min(L.jarW / 6.4, 17);
+    L.dropY = L.jarBot - L.jarH - L.h * 0.10;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 槽位：罐底自下而上 4 列 × 3 行
+  function slotPos(slot) {
+    var col = slot % 4, row = Math.floor(slot / 4);
+    return {
+      x: L.jarX - L.jarW * 0.30 + col * L.jarW * 0.20,
+      y: L.jarBot - L.mr - 4 - row * L.mr * 1.85
+    };
+  }
+
+  function spawn() {
+    var slot = marbles.length + falling.length;
+    if (slot >= TOTAL) return;
+    var palettes = [
+      ['#e8a34c', '#3f7fb5'], ['#d8543c', '#e8d05a'],
+      ['#5cb587', '#c46ba8'], ['#7a6bd8', '#e89a4c'],
+      ['#4cb5c9', '#d86b6b']
+    ];
+    var pal = palettes[Math.floor(Math.random() * palettes.length)];
+    falling.push({
+      x: L.jarX + (Math.random() - 0.5) * 10,
+      y: L.dropY,
+      vy: 0,
+      tx: slotPos(slot).x,
+      ty: slotPos(slot).y,
+      hue1: pal[0],
+      hue2: pal[1],
+      r: L.mr
+    });
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (marbles.length + falling.length >= TOTAL) return;
+    spawn();
+    if (!saidStart) { saidStart = true; say('一颗。它滚动的声音也是圆的。'); }
+    else if (marbles.length + falling.length === TOTAL - 1) say('最后一颗，稳稳的。');
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    for (var f = falling.length - 1; f >= 0; f--) {
+      var p = falling[f];
+      p.vy += 900 * dt;
+      p.y += p.vy * dt;
+      p.x += (p.tx - p.x) * Math.min(1, dt * 6);
+      if (p.y >= p.ty) {
+        p.y = p.ty;
+        marbles.push({ x: p.tx, y: p.ty, hue1: p.hue1, hue2: p.hue2, r: p.r });
+        ripples.push({ x: p.tx, y: p.ty + p.r * 0.6, a: 0.5 });
+        falling.splice(f, 1);
+      }
+    }
+    for (var r = ripples.length - 1; r >= 0; r--) {
+      ripples[r].a -= dt * 1.8;
+      if (ripples[r].a <= 0) ripples.splice(r, 1);
+    }
+    // 收满一罐
+    if (marbles.length >= TOTAL && !saidDone) {
+      saidDone = true;
+      say('收工。明天太阳出来，把它们摆上窗台。', true);
+    }
+
+    // ── 背景：窗台一角（夜里）──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0e1216');
+    bg.addColorStop(1, '#12171c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 窗外微光
+    var win = ctx.createRadialGradient(w * 0.8, h * 0.14, 6, w * 0.8, h * 0.14, w * 0.32);
+    win.addColorStop(0, 'rgba(130,160,200,0.08)');
+    win.addColorStop(1, 'rgba(130,160,200,0)');
+    ctx.fillStyle = win;
+    ctx.fillRect(0, 0, w, h);
+    // 台面
+    ctx.fillStyle = '#1a1712';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(200,170,120,0.10)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    // ── 铁皮罐 ──
+    var jx = L.jarX - L.jarW / 2, jy = L.jarBot - L.jarH;
+    // 罐后壁
+    ctx.fillStyle = 'rgba(120,120,128,0.16)';
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(jx, jy, L.jarW, L.jarH, [8, 8, 16, 16]) : ctx.rect(jx, jy, L.jarW, L.jarH);
+    ctx.fill();
+    // 罐内已收的弹珠（先画，被前壁半透明玻璃罩住）
+    function drawMarble(mx, my, mr, h1, h2) {
+      var g = ctx.createRadialGradient(mx - mr * 0.3, my - mr * 0.35, mr * 0.1, mx, my, mr);
+      g.addColorStop(0, 'rgba(255,255,255,0.55)');
+      g.addColorStop(0.35, 'rgba(210,225,235,0.30)');
+      g.addColorStop(1, 'rgba(180,195,205,0.18)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(mx, my, mr, 0, Math.PI * 2);
+      ctx.fill();
+      // 猫眼旋纹
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(mx, my, mr * 0.92, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.strokeStyle = h1;
+      ctx.lineWidth = mr * 0.34;
+      ctx.beginPath();
+      ctx.moveTo(mx - mr * 0.7, my + mr * 0.15);
+      ctx.quadraticCurveTo(mx, my - mr * 0.75, mx + mr * 0.7, my + mr * 0.1);
+      ctx.stroke();
+      ctx.strokeStyle = h2;
+      ctx.lineWidth = mr * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(mx - mr * 0.6, my - mr * 0.1);
+      ctx.quadraticCurveTo(mx + mr * 0.1, my + mr * 0.55, mx + mr * 0.66, my - mr * 0.3);
+      ctx.stroke();
+      ctx.restore();
+      // 高光
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.beginPath();
+      ctx.ellipse(mx - mr * 0.32, my - mr * 0.38, mr * 0.2, mr * 0.11, -0.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (var m = 0; m < marbles.length; m++) {
+      drawMarble(marbles[m].x, marbles[m].y, marbles[m].r, marbles[m].hue1, marbles[m].hue2);
+    }
+    // 下落中的弹珠
+    for (var f = 0; f < falling.length; f++) {
+      drawMarble(falling[f].x, falling[f].y, falling[f].r, falling[f].hue1, falling[f].hue2);
+    }
+    // 罐前壁（半透明玻璃感）
+    var glass = ctx.createLinearGradient(jx, 0, jx + L.jarW, 0);
+    glass.addColorStop(0, 'rgba(190,210,225,0.10)');
+    glass.addColorStop(0.25, 'rgba(190,210,225,0.03)');
+    glass.addColorStop(0.8, 'rgba(190,210,225,0.10)');
+    glass.addColorStop(1, 'rgba(190,210,225,0.16)');
+    ctx.fillStyle = glass;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(jx, jy, L.jarW, L.jarH, [8, 8, 16, 16]) : ctx.rect(jx, jy, L.jarW, L.jarH);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,215,228,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // 罐口
+    ctx.fillStyle = 'rgba(160,150,120,0.5)';
+    ctx.fillRect(jx - 6, jy - 7, L.jarW + 12, 8);
+    // 落底涟漪
+    for (var q = 0; q < ripples.length; q++) {
+      var rp = ripples[q];
+      ctx.strokeStyle = 'rgba(220,230,240,' + rp.a * 0.6 + ')';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(rp.x, rp.y, (0.5 - rp.a) * 60 + 6, (0.5 - rp.a) * 14 + 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ── 计数（等宽数字）──
+    var cnt = marbles.length + falling.length;
+    ctx.fillStyle = 'rgba(190,196,204,0.55)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(cnt + ' / ' + TOTAL + ' 颗', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (cnt < TOTAL) {
+      ctx.fillStyle = 'rgba(176,182,190,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按一下，投一颗', L.jarX, L.groundY + 44);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress）
+  window.__marbles = {
+    count: function () { return marbles.length + falling.length; },
+    settled: function () { return marbles.length; },
+    press: function () { startPress(); }
+  };
+})();
+</script>
+</body>
+</html>

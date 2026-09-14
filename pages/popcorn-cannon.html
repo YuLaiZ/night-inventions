@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>老式爆米花</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c0e12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c4a46;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8e8474; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c5a52; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a29a86;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #54524a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c5a52;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c5a52;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a29a86; border-color: #a29a86; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>老式爆米花</h1>
+  <p>黑葫芦炉子往火上一架，整条街的耳朵都竖起来了。<br>按住摇锅加压——松手开炮，金黄还是焦了，全看火候。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  // 状态：ready(待摇) → shaken(摇过了，松手开炮) → opened(开完) → 装新玉米回 ready
+  var phase = 'ready';
+  var pressure = 0;        // 压力 0-10（摇的时候涨）
+  var shaking = false;     // 按住摇
+  var shakeT = 0;          // 摇动相位
+  var potRot = 0;          // 锅体旋转
+  var pops = [];           // 爆米花 {x,y,vx,vy,rot,vr,tone,landed}
+  var smokes = [];         // 白烟 {x,y,r,a,vx,vy}
+  var bang = 0;            // 开炮闪光
+  var bagCount = 0;        // 落进袋里的颗数
+  var grade = '';          // 本次评级
+  var batches = 0;         // 开炮次数
+  var saidStart = false;
+  var jitter = 0;          // 高压抖动
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.groundY = L.h * 0.78;
+    L.potX = L.w * 0.38;
+    L.potY = L.groundY - L.h * 0.10;
+    L.potR = Math.min(L.w * 0.13, L.h * 0.16, 92);
+    L.bagX = L.w * 0.76;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function gradeOf(p) {
+    if (p < 5) return 'raw';
+    if (p < 6.5) return 'half';
+    if (p < 8.3) return 'golden';
+    if (p < 9.6) return 'burnt';
+    return 'disaster';
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (phase === 'opened') {
+      // 装新一锅
+      phase = 'ready'; pressure = 0; bagCount = 0; grade = '';
+      pops = []; smokes = [];
+      say('新玉米下锅。这锅看准了再放。');
+      return;
+    }
+    if (phase !== 'ready' || shaking) return;
+    shaking = true;
+    if (!saidStart) { saidStart = true; say('匀速摇，别偷懒——耳朵听压力。'); }
+    else if (pressure < 4) say('火再旺点，摇起来。');
+  }
+  function endPress() {
+    if (!shaking) return;
+    shaking = false;
+    if (phase === 'ready') {
+      phase = 'opened';
+      openCannon();
+    }
+  }
+
+  function openCannon() {
+    grade = gradeOf(pressure);
+    batches++;
+    bang = 1;
+    var n, tone;
+    if (grade === 'raw') { n = 4 + Math.floor(Math.random() * 4); tone = 'pale'; }
+    else if (grade === 'half') { n = 14 + Math.floor(Math.random() * 8); tone = 'pale'; }
+    else if (grade === 'golden') { n = 42 + Math.floor(Math.random() * 14); tone = 'golden'; }
+    else if (grade === 'burnt') { n = 26 + Math.floor(Math.random() * 10); tone = 'burnt'; }
+    else { n = 0; tone = 'burnt'; }
+    bagCount = n;
+    for (var i = 0; i < n; i++) {
+      var a = -Math.PI / 2 + (Math.random() - 0.5) * 1.9;
+      var sp = 260 + Math.random() * 420;
+      pops.push({
+        x: L.potX + L.potR * 0.9,
+        y: L.potY - L.potR * 0.4,
+        vx: Math.max(60, Math.cos(a) * sp + 120),
+        vy: Math.sin(a) * sp,
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 10,
+        tone: tone,
+        landed: false
+      });
+    }
+    for (var s = 0; s < 14; s++) {
+      smokes.push({
+        x: L.potX + L.potR * 0.9 + (Math.random() - 0.5) * 30,
+        y: L.potY - L.potR * 0.4 + (Math.random() - 0.5) * 20,
+        r: 12 + Math.random() * 26,
+        a: 0.55,
+        vx: 60 + Math.random() * 160,
+        vy: -20 - Math.random() * 60
+      });
+    }
+    if (grade === 'golden') say('砰——！整条街都被香醒了。', true);
+    else if (grade === 'half') say('半锅开花半锅闷。火候还差半口气。', true);
+    else if (grade === 'burnt') say('焦了。焦香也是香的一种……吧。', true);
+    else if (grade === 'raw') say('哑炮。玉米还是玉米。', true);
+    else say('糊穿锅底了。这是一锅行为艺术。', true);
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (shaking && phase === 'ready') {
+      pressure = Math.min(10, pressure + dt * 1.15);
+      shakeT += dt * 10;
+      potRot = Math.sin(shakeT) * 0.55;
+      jitter = Math.min(1, pressure / 8);
+    } else {
+      jitter = Math.max(0, jitter - dt * 2);
+    }
+    bang = Math.max(0, bang - dt * 1.4);
+
+    // 爆米花飞行
+    for (var i = pops.length - 1; i >= 0; i--) {
+      var p = pops[i];
+      if (p.landed) continue;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 640 * dt;
+      p.rot += p.vr * dt;
+      if (p.y > L.groundY + 8) {
+        p.y = L.groundY + 8;
+        p.landed = true;
+      }
+    }
+    // 烟
+    for (var s = smokes.length - 1; s >= 0; s--) {
+      var sm = smokes[s];
+      sm.x += sm.vx * dt; sm.y += sm.vy * dt;
+      sm.r += dt * 30; sm.a -= dt * 0.4;
+      if (sm.a <= 0) smokes.splice(s, 1);
+    }
+
+    // ── 背景：深夜街角 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c0e12');
+    bg.addColorStop(1, '#12100e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#151310';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(200,170,120,0.07)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    // ── 炭火（摇时更亮）──
+    var fireA = 0.16 + (shaking ? 0.14 + pressure * 0.02 : 0) + pressure * 0.008;
+    var fire = ctx.createRadialGradient(L.potX, L.groundY - 6, 4, L.potX, L.groundY - 6, L.potR * 1.5);
+    fire.addColorStop(0, 'rgba(255,140,60,' + fireA + ')');
+    fire.addColorStop(1, 'rgba(255,140,60,0)');
+    ctx.fillStyle = fire;
+    ctx.fillRect(L.potX - L.potR * 1.5, L.groundY - L.potR * 1.5, L.potR * 3, L.potR * 1.5 + 8);
+    // 三脚架
+    ctx.strokeStyle = '#2c2620';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(L.potX - L.potR * 0.8, L.groundY);
+    ctx.lineTo(L.potX, L.potY);
+    ctx.moveTo(L.potX + L.potR * 0.8, L.groundY);
+    ctx.lineTo(L.potX, L.potY);
+    ctx.stroke();
+
+    // ── 黑葫芦锅 ──
+    ctx.save();
+    ctx.translate(L.potX + Math.sin(shakeT * 2) * jitter * 2, L.potY + Math.sin(shakeT * 3) * jitter * 1.5);
+    ctx.rotate(potRot);
+    var pg = ctx.createRadialGradient(-L.potR * 0.3, -L.potR * 0.35, L.potR * 0.1, 0, 0, L.potR * 1.25);
+    pg.addColorStop(0, '#3a3a3e');
+    pg.addColorStop(0.7, '#1c1c20');
+    pg.addColorStop(1, '#101013');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, L.potR * 1.05, L.potR * 0.82, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // 锅口（朝右上的盖）
+    ctx.fillStyle = '#0d0d10';
+    ctx.beginPath();
+    ctx.ellipse(L.potR * 0.88, -L.potR * 0.42, L.potR * 0.3, L.potR * 0.2, -0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,110,90,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // 摇柄
+    ctx.strokeStyle = '#5a4c38';
+    ctx.lineWidth = 4.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-L.potR * 0.1, L.potR * 0.8);
+    ctx.lineTo(-L.potR * 0.55, L.potR * 1.2);
+    ctx.stroke();
+    ctx.fillStyle = '#6b5a3e';
+    ctx.beginPath();
+    ctx.arc(-L.potR * 0.6, L.potR * 1.25, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── 压力表（锅上方）──
+    var gx = L.potX - L.potR * 0.2, gy = L.potY - L.potR * 1.15, gr = L.potR * 0.42;
+    ctx.strokeStyle = 'rgba(120,110,90,0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy + gr);
+    ctx.lineTo(gx, gy + gr * 0.4);
+    ctx.stroke();
+    ctx.fillStyle = '#26221c';
+    ctx.beginPath();
+    ctx.arc(gx, gy, gr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6b5a3e';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // 表盘刻度与金区
+    for (var t2 = 0; t2 <= 10; t2 += 2) {
+      var a2 = Math.PI * 1.25 + (t2 / 10) * Math.PI * 1.5;
+      ctx.strokeStyle = 'rgba(200,190,160,0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(gx + Math.cos(a2) * gr * 0.68, gy + Math.sin(a2) * gr * 0.68);
+      ctx.lineTo(gx + Math.cos(a2) * gr * 0.85, gy + Math.sin(a2) * gr * 0.85);
+      ctx.stroke();
+    }
+    // 金区弧（6.5–8.3）
+    var a1 = Math.PI * 1.25 + 0.65 * Math.PI * 1.5;
+    var a3 = Math.PI * 1.25 + 0.83 * Math.PI * 1.5;
+    ctx.strokeStyle = 'rgba(255,190,90,0.55)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(gx, gy, gr * 0.76, a1, a3);
+    ctx.stroke();
+    // 指针
+    var pa = Math.PI * 1.25 + Math.min(1, pressure / 10) * Math.PI * 1.5;
+    ctx.strokeStyle = '#d8543c';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy);
+    ctx.lineTo(gx + Math.cos(pa) * gr * 0.62, gy + Math.sin(pa) * gr * 0.62);
+    ctx.stroke();
+
+    // ── 麻袋 ──
+    ctx.save();
+    ctx.translate(L.bagX, L.groundY);
+    var bag = ctx.createLinearGradient(-40, -70, 40, 0);
+    bag.addColorStop(0, '#8a7048');
+    bag.addColorStop(1, '#6a5536');
+    ctx.fillStyle = bag;
+    ctx.beginPath();
+    ctx.moveTo(-30, 0);
+    ctx.quadraticCurveTo(-44, -52, -22, -66);
+    ctx.lineTo(22, -66);
+    ctx.quadraticCurveTo(44, -52, 30, 0);
+    ctx.closePath();
+    ctx.fill();
+    // 袋口卷边
+    ctx.fillStyle = '#54431f';
+    ctx.fillRect(-26, -74, 52, 10);
+    // 袋里已收的爆米花
+    if (bagCount > 0) {
+      var tone = grade === 'golden' ? '250,238,205' : grade === 'burnt' ? '150,118,80' : '226,216,196';
+      ctx.fillStyle = 'rgba(' + tone + ',0.95)';
+      ctx.beginPath();
+      ctx.ellipse(0, -66, 20 + Math.min(14, bagCount * 0.5), 7 + Math.min(6, bagCount * 0.18), 0, Math.PI, 0);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // ── 爆米花 ──
+    for (var k = 0; k < pops.length; k++) {
+      var pc = pops[k];
+      var col = pc.tone === 'golden' ? '250,238,205' : pc.tone === 'burnt' ? '120,96,66' : '226,216,196';
+      ctx.save();
+      ctx.translate(pc.x, pc.y);
+      ctx.rotate(pc.rot);
+      ctx.fillStyle = 'rgba(' + col + ',0.96)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 5.4, 0, Math.PI * 2);
+      ctx.arc(4.2, 1.6, 4.2, 0, Math.PI * 2);
+      ctx.arc(-4, 1.8, 3.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(-1.2, -1.4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // ── 白烟 ──
+    for (var m = 0; m < smokes.length; m++) {
+      var sk = smokes[m];
+      ctx.fillStyle = 'rgba(232,228,220,' + sk.a * 0.5 + ')';
+      ctx.beginPath();
+      ctx.arc(sk.x, sk.y, sk.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 开炮闪光
+    if (bang > 0.6) {
+      ctx.fillStyle = 'rgba(255,240,205,' + (bang - 0.6) * 1.8 + ')';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // ── 压力读数（等宽数字）──
+    ctx.fillStyle = 'rgba(190,186,172,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('压力 ' + pressure.toFixed(1), w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(190,178,152,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住锅，摇到金区再松手', L.potX, L.groundY + 44);
+    } else if (phase === 'ready' && batches === 0 && !shaking) {
+      ctx.fillStyle = 'rgba(190,178,152,' + (0.28 + 0.18 * Math.sin(now / 420)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住，接着摇', L.potX, L.groundY + 44);
+    } else if (phase === 'opened') {
+      ctx.fillStyle = 'rgba(190,178,152,' + (0.3 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按一下，装新玉米', L.potX, L.groundY + 44);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__pop = {
+    pressure: function () { return +pressure.toFixed(2); },
+    phase: function () { return phase; },
+    grade: function () { return grade; },
+    bag: function () { return bagCount; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>糖画</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0f0d10;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4c4a50;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #96876e; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #605a52; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b0a288;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #54524e;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #605a52;
+    text-decoration: none;
+    border-bottom: 1px dotted #605a52;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b0a288; border-color: #b0a288; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>糖画</h1>
+  <p>一勺糖稀，一块青石板，手腕稳住就是画。<br>按住浇糖——走完一笔，举起来对着光看。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var SHAPES = ['星星', '蝴蝶'];
+  var shapeIdx = 0;
+  var pourT = 0;           // 浇糖进度 0-1
+  var pouring = false;     // 按住浇
+  var doneShapes = 0;      // 完成幅数
+  var drips = [];          // 滴落的糖珠 {x,y,a}
+  var spark = 0;           // 完成闪光
+  var saidStart = false;
+  var saidDone = false;
+
+  function say(text, hold) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!hold) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.56;
+    L.R = Math.min(L.w * 0.26, L.h * 0.30, 190);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 形状路径点（相对中心，单位=L.R）
+  function shapePoints(name) {
+    var pts = [];
+    if (name === '星星') {
+      for (var i = 0; i <= 10; i++) {
+        var k = i % 10;
+        var ang = -Math.PI / 2 + k * Math.PI / 5;
+        var r = k % 2 === 0 ? 1 : 0.45;
+        pts.push([Math.cos(ang) * r, Math.sin(ang) * r]);
+      }
+    } else {
+      // 蝴蝶：两对翅膀 + 身体，折线近似
+      var b = [
+        [0, -0.75], [0.32, -1.0], [0.62, -0.78], [0.72, -0.4], [0.5, -0.1],
+        [0.68, 0.18], [0.55, 0.52], [0.22, 0.6], [0, 0.42],
+        [-0.22, 0.6], [-0.55, 0.52], [-0.68, 0.18], [-0.5, -0.1],
+        [-0.72, -0.4], [-0.62, -0.78], [-0.32, -1.0], [0, -0.75]
+      ];
+      for (var j = 0; j < b.length; j++) pts.push(b[j]);
+    }
+    return pts;
+  }
+
+  function pathPoint(t) {
+    var pts = shapePoints(SHAPES[shapeIdx]);
+    var segs = pts.length - 1;
+    var f = Math.min(0.9999, Math.max(0, t)) * segs;
+    var i = Math.floor(f);
+    var k = f - i;
+    var ax = pts[i][0], ay = pts[i][1];
+    var bx = pts[i + 1][0], by = pts[i + 1][1];
+    return [L.cx + (ax + (bx - ax) * k) * L.R, L.cy + (ay + (by - ay) * k) * L.R];
+  }
+
+  // 共享按压路径（QA 钩子与真实事件走同一函数）
+  function startPress() {
+    if (pourT >= 1) {
+      // 换下一个图案
+      shapeIdx = (shapeIdx + 1) % SHAPES.length;
+      pourT = 0;
+      saidDone = false;
+      spark = 0;
+      say('石板擦干净了，换个' + SHAPES[shapeIdx] + '。');
+      return;
+    }
+    pouring = true;
+    if (!saidStart) { saidStart = true; say('糖稀要趁热走线，手别抖。'); }
+  }
+  function endPress() {
+    pouring = false;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (pouring && pourT < 1) {
+      pourT = Math.min(1, pourT + dt * 0.22);
+      // 偶尔滴落糖珠
+      if (Math.random() < dt * 4) {
+        var pt = pathPoint(pourT);
+        drips.push({ x: pt[0] + (Math.random() - 0.5) * 14, y: pt[1] + 4, a: 0.7 });
+      }
+      if (pourT >= 1) {
+        pouring = false;
+        doneShapes++;
+        spark = 1;
+        saidDone = true;
+        if (doneShapes === 1) say('成了。举起来，对着光看。', true);
+        else say('这一只，比上一只更甜。', true);
+      }
+    }
+    spark = Math.max(0, spark - dt * 0.8);
+    for (var d = drips.length - 1; d >= 0; d--) {
+      drips[d].y += 60 * dt; drips[d].a -= dt * 0.8;
+      if (drips[d].a <= 0) drips.splice(d, 1);
+    }
+
+    // ── 背景：夜市一角 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0f0d10');
+    bg.addColorStop(1, '#141110');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 一盏摊灯的暖光
+    var lamp = ctx.createRadialGradient(L.cx, L.cy - L.R * 0.9, 8, L.cx, L.cy, L.R * 2.6);
+    lamp.addColorStop(0, 'rgba(255,190,110,0.10)');
+    lamp.addColorStop(1, 'rgba(255,190,110,0)');
+    ctx.fillStyle = lamp;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 青石板 ──
+    ctx.save();
+    ctx.translate(L.cx, L.cy);
+    ctx.rotate(-0.015);
+    var stone = ctx.createLinearGradient(-L.R * 1.35, -L.R * 1.2, L.R * 1.35, L.R * 1.2);
+    stone.addColorStop(0, '#2a2f30');
+    stone.addColorStop(0.5, '#333a3b');
+    stone.addColorStop(1, '#262b2c');
+    ctx.fillStyle = stone;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-L.R * 1.35, -L.R * 1.2, L.R * 2.7, L.R * 2.4, 10);
+    else ctx.rect(-L.R * 1.35, -L.R * 1.2, L.R * 2.7, L.R * 2.4);
+    ctx.fill();
+    // 石板纹理
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1;
+    for (var g = -2; g <= 2; g++) {
+      ctx.beginPath();
+      ctx.moveTo(-L.R * 1.3, g * L.R * 0.5);
+      ctx.lineTo(L.R * 1.3, g * L.R * 0.5 + 6);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ── 糖稀线（画到 pourT）──
+    if (pourT > 0.001) {
+      var pts = shapePoints(SHAPES[shapeIdx]);
+      var segs = pts.length - 1;
+      var fAll = Math.min(1, pourT) * segs;
+      var full = Math.floor(fAll);
+      ctx.save();
+      ctx.translate(L.cx, L.cy);
+      ctx.scale(L.R, L.R);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      // 底层宽线（琥珀）
+      ctx.strokeStyle = 'rgba(216,150,60,0.88)';
+      ctx.lineWidth = 0.075;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (var s2 = 1; s2 <= full; s2++) ctx.lineTo(pts[s2][0], pts[s2][1]);
+      var fr = fAll - full;
+      if (full < segs) {
+        var hx = pts[full][0] + (pts[full + 1][0] - pts[full][0]) * fr;
+        var hy = pts[full][1] + (pts[full + 1][1] - pts[full][1]) * fr;
+        ctx.lineTo(hx, hy);
+      }
+      ctx.stroke();
+      // 上层高光细线
+      ctx.strokeStyle = 'rgba(255,222,150,0.9)';
+      ctx.lineWidth = 0.028;
+      ctx.stroke();
+      ctx.restore();
+      // 浇糖的勺（停在当前点）
+      var cur = pathPoint(pourT);
+      ctx.save();
+      ctx.translate(cur[0], cur[1]);
+      ctx.rotate(-0.5 + Math.sin(now / 300) * 0.04);
+      ctx.strokeStyle = '#8a7a5c';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(26, -34);
+      ctx.stroke();
+      ctx.fillStyle = '#a89468';
+      ctx.beginPath();
+      ctx.ellipse(2, 4, 9, 6, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 完成闪光（沿路径撒光点）
+    if (spark > 0) {
+      var pts2 = shapePoints(SHAPES[shapeIdx]);
+      for (var sp = 0; sp < 16; sp++) {
+        var t3 = (sp * 0.618 + (1 - spark)) % 1;
+        var seg2 = Math.min(pts2.length - 2, Math.floor(t3 * (pts2.length - 1)));
+        var k2 = t3 * (pts2.length - 1) - seg2;
+        var sx = L.cx + (pts2[seg2][0] + (pts2[seg2 + 1][0] - pts2[seg2][0]) * k2) * L.R;
+        var sy = L.cy + (pts2[seg2][1] + (pts2[seg2 + 1][1] - pts2[seg2][1]) * k2) * L.R;
+        ctx.fillStyle = 'rgba(255,230,160,' + spark * (0.4 + 0.5 * Math.sin(now / 90 + sp)) + ')';
+        ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+      }
+    }
+    // 糖珠
+    for (var d2 = 0; d2 < drips.length; d2++) {
+      ctx.fillStyle = 'rgba(216,150,60,' + drips[d2].a + ')';
+      ctx.beginPath();
+      ctx.arc(drips[d2].x, drips[d2].y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 进度（等宽数字）──
+    ctx.fillStyle = 'rgba(190,186,172,0.55)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(pourT * 100) + '%', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(190,178,152,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住石板，浇一个' + SHAPES[shapeIdx], L.cx, L.cy + L.R * 1.2 + 44);
+    } else if (pourT >= 1) {
+      ctx.fillStyle = 'rgba(190,178,152,' + (0.3 + 0.14 * Math.sin(now / 600)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按一下，画个' + SHAPES[(shapeIdx + 1) % SHAPES.length], L.cx, L.cy + L.R * 1.2 + 44);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__sugar = {
+    progress: function () { return pourT; },
+    doneShapes: function () { return doneShapes; },
+    shape: function () { return SHAPES[shapeIdx]; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>
