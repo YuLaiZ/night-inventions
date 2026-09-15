@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>剥柚子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89a58; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6c6a55; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b0a878;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c6a55;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c6a55;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b0a878; border-color: #b0a878; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>剥柚子</h1>
+  <p>夜里有闲，柚子有厚皮。<br>按住它，一层一层请它开门。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var N = 12;            // 一颗柚子十二瓣
+  var stage = 0;         // 0 切盖 1 退瓤 2 撕棉 3 掰瓣 4 满盘
+  var prog = 0;          // 当前阶段进度
+  var hold = false;
+  var hueSet = 0;
+  var doneCount = 0;
+  var lidT = -1;         // 盖子飞落动画 0-1，-1 还在顶部
+  var flying = [];       // 飞向盘子的瓣 {i, t, sx, sy, sa}
+  var flops = [];        // 撕下来的棉絮 {x, y, vx, vy, life, r, rot}
+  var resting = false;
+  var saidStart = false, saidBowl = false, saidHalf = false;
+
+  function resetPomelo() {
+    petals = [];
+    for (var i = 0; i < N; i++) petals.push({ gone: false, placed: false, slot: -1 });
+    placedCount = 0;
+  }
+  var petals = [], placedCount = 0;
+  resetPomelo();
+
+  // 三个品种：白肉蜜柚 / 红肉柚 / 黄金葡萄柚
+  var HUES = [
+    { skin: [166, 160, 66], hi: [202, 196, 110], flesh: [245, 239, 216], deep: [222, 214, 178] },
+    { skin: [116, 140, 60], hi: [166, 186, 106], flesh: [242, 200, 192], deep: [214, 164, 155] },
+    { skin: [192, 150, 60], hi: [226, 192, 112], flesh: [248, 219, 154], deep: [224, 190, 120] }
+  ];
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // 皮面油胞与果粒排布预生成（相对坐标，resize 不跳动）
+  var pores = [];
+  (function () {
+    var rng = mulberry(20260914);
+    for (var i = 0; i < 130; i++) pores.push({ x: rng() * 2 - 1, y: rng() * 2 - 1, r: 0.7 + rng() * 1.1, a: 0.1 + rng() * 0.12 });
+  })();
+  var grains = [];
+  (function () {
+    var rng = mulberry(77);
+    for (var p = 0; p < N; p++) {
+      var arr = [];
+      for (var k = 0; k < 15; k++) arr.push({ u: 0.4 + rng() * 0.5, v: 0.14 + rng() * 0.72, rot: (rng() - 0.5) * 0.9, s: 0.8 + rng() * 0.5 });
+      grains.push(arr);
+    }
+  })();
+  var slotJit = [];
+  (function () {
+    var rng = mulberry(4);
+    for (var k = 0; k < N; k++) slotJit.push({ dx: (rng() - 0.5) * 3, dy: (rng() - 0.5) * 2.4, dr: (rng() - 0.5) * 0.1 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.48;
+    L.R = Math.min(L.w * 0.225, L.h * 0.225, 148);
+    L.rx = L.R;
+    L.ry = L.R * 0.9;
+    L.counterY = L.cy + L.ry * 1.12;
+    L.px = L.cx;
+    L.py = L.cy - L.R * 0.7;                    // 瓤球退出来后停驻的高度
+    L.pr = L.R * 0.8;
+    L.rimY = L.cy - L.ry * 0.12;                // 皮碗口沿
+    L.lidX = L.cx - L.R * 1.05;
+    L.lidY = L.counterY + L.R * 0.14;
+    L.plateX = L.cx + L.R * 1.02;
+    L.plateY = L.counterY + L.R * 0.1;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function hitBody(x, y) {
+    var bx = x - L.cx, by = (y - L.cy) / 0.94;
+    if (bx * bx + by * by < (L.R + 30) * (L.R + 30)) return true;
+    if (stage >= 1) { // 瓤球也可按
+      var dx = x - L.px, dy = y - L.py;
+      return dx * dx + dy * dy < (L.pr + 30) * (L.pr + 30);
+    }
+    return false;
+  }
+
+  function startPress(x, y) {
+    if (resting) { // 满盘后再按 = 换一颗
+      stage = 0; prog = 0; lidT = -1; flying = []; flops = [];
+      resetPomelo();
+      hueSet = (hueSet + 1) % HUES.length;
+      resting = false;
+      saidStart = false; saidBowl = false; saidHalf = false;
+      say('换一颗，手熟了。');
+      return;
+    }
+    if (hold || stage >= 3) return;
+    if (stage <= 2 && hitBody(x, y)) {
+      hold = true;
+      if (!saidStart) { saidStart = true; say('先给柚子开个天窗。'); }
+      else if (stage === 1 && !saidBowl) { saidBowl = true; say('扣住果瓤，整个往外退。'); }
+    }
+  }
+  function endPress() { hold = false; }
+
+  function handleTap(x, y) {
+    if (stage !== 3 || resting) return;
+    var dx = x - L.px, dy = y - L.py;
+    var r = Math.sqrt(dx * dx + dy * dy);
+    if (r > L.pr * 1.08 || r < L.pr * 0.12) return;
+    var a = Math.atan2(dy, dx);
+    if (a < 0) a += Math.PI * 2;
+    var i = Math.floor(((a + Math.PI / 12) % (Math.PI * 2)) / (Math.PI / 6));
+    if (i >= N) i = 0;
+    if (petals[i].gone || petals[i].placed) return;
+    petals[i].gone = true;
+    var mid = (i * Math.PI / 6) - Math.PI / 12;
+    flying.push({
+      i: i, t: 0,
+      sx: L.px + Math.cos(mid) * L.pr * 0.6,
+      sy: L.py + Math.sin(mid) * L.pr * 0.55,
+      sa: mid + Math.PI / 2
+    });
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (stage === 3 && !resting) handleTap(ev.clientX, ev.clientY);
+    startPress(ev.clientX, ev.clientY);
+  });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  function skinColor(c, mul, alpha) {
+    return 'rgba(' + Math.round(c.skin[0] * mul) + ',' + Math.round(c.skin[1] * mul) + ',' + Math.round(c.skin[2] * mul) + ',' + (alpha === undefined ? 1 : alpha) + ')';
+  }
+
+  function drawShadow(x, y, rx, ry, a) {
+    ctx.fillStyle = 'rgba(0,0,0,' + a + ')';
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  function groundShadow(x, rx, a) {
+    drawShadow(x, L.counterY + 2, rx, rx * 0.11, a);
+  }
+
+  // 带皮柚子身（stage0 的整颗 / stage1+ 的皮碗都靠它，用 clip 裁）
+  function drawRind(cx, cy, rx, ry, C, clipTopY) {
+    ctx.save();
+    if (clipTopY !== undefined) {
+      ctx.beginPath();
+      ctx.rect(0, clipTopY, L.w, L.h);
+      ctx.clip();
+    }
+    var g = ctx.createRadialGradient(cx - rx * 0.32, cy - ry * 0.4, rx * 0.2, cx, cy, rx * 1.18);
+    g.addColorStop(0, 'rgb(' + C.hi.join(',') + ')');
+    g.addColorStop(1, skinColor(C, 0.66));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(60,70,20,1)';
+    for (var i = 0; i < pores.length; i++) {
+      var p = pores[i];
+      if (p.x * p.x + p.y * p.y > 0.92) continue;
+      ctx.globalAlpha = p.a;
+      ctx.beginPath();
+      ctx.arc(cx + p.x * rx * 0.94, cy + p.y * ry * 0.92, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(255,255,230,' + 0.14 + ')';
+    ctx.beginPath();
+    ctx.ellipse(cx - rx * 0.36, cy - ry * 0.42, rx * 0.24, ry * 0.14, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function sector(cx, cy, a0, a1, r0, r1) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r1, a0, a1);
+    ctx.arc(cx, cy, r0, a1, a0, true);
+    ctx.closePath();
+  }
+
+  // 瓤球：底衬 + 十二瓣扇形抱合（瓣间露的是果肉底色，不是背景）
+  function drawBulb(px, py, pr, C) {
+    var coreR = pr * (0.96 - (placedCount / N) * 0.72); // 掰走的瓣越多，剩下的蒂越小
+    ctx.fillStyle = 'rgb(' + Math.round(C.deep[0] * 0.72) + ',' + Math.round(C.deep[1] * 0.72) + ',' + Math.round(C.deep[2] * 0.72) + ')';
+    ctx.beginPath();
+    ctx.arc(px, py, coreR, 0, Math.PI * 2);
+    ctx.fill();
+    var g = ctx.createRadialGradient(px, py, pr * 0.1, px, py, pr);
+    g.addColorStop(0, 'rgb(' + C.deep.join(',') + ')');
+    g.addColorStop(1, 'rgb(' + C.flesh.join(',') + ')');
+    for (var i = 0; i < N; i++) {
+      if (petals[i].gone) continue;
+      var a0 = i * Math.PI / 6 - Math.PI / 12 + 0.025;
+      var a1 = a0 + Math.PI / 6 - 0.05;
+      sector(px, py, a0, a1, pr * 0.16, pr * 0.95);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(248,243,226,0.9)';
+      ctx.lineWidth = 2.6;
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgb(' + Math.round(C.deep[0] * 0.82) + ',' + Math.round(C.deep[1] * 0.82) + ',' + Math.round(C.deep[2] * 0.82) + ')';
+    ctx.beginPath();
+    ctx.arc(px, py, Math.min(pr * 0.15, coreR * 0.9), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 棉层（白瓤），shrink 0-1 表示从顶往下撕掉的比例
+  function drawCotton(px, py, pr, shrink) {
+    if (shrink >= 1) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, py - pr * 1.1 - 4, L.w, (pr * 1.1 + 4) * (1 - shrink) + 4);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(238,231,210,0.98)';
+    ctx.beginPath();
+    ctx.ellipse(px, py, pr * 1.02, pr * 0.94, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 明暗都收在棉球轮廓内，避免悬空的色块
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(px, py, pr * 1.02, pr * 0.94, 0, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(206,196,168,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(px + pr * 0.14, py + pr * 0.6, pr * 0.92, pr * 0.52, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(247,242,226,0.75)';
+    ctx.beginPath();
+    ctx.ellipse(px - pr * 0.22, py - pr * 0.42, pr * 0.52, pr * 0.26, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // 盖子：顶面是皮，底面露棉（reveal = 切开程度 0-1）
+  function drawLid(cx, cy, rc, rot, C, reveal) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rot);
+    ctx.fillStyle = 'rgba(238,231,210,' + (0.97 * reveal) + ')';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rc * 0.86, rc * 0.26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var g = ctx.createRadialGradient(-rc * 0.3, -rc * 0.34, rc * 0.1, 0, 0, rc * 1.4);
+    g.addColorStop(0, 'rgb(' + C.hi.join(',') + ')');
+    g.addColorStop(1, skinColor(C, 0.68));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rc, rc * 0.34, 0, 0, Math.PI * 2);
+    ctx.save();
+    ctx.clip();
+    ctx.beginPath();
+    ctx.ellipse(0, -rc * 0.14, rc * 0.98, rc * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,230,0.13)';
+    ctx.beginPath();
+    ctx.ellipse(-rc * 0.3, -rc * 0.3, rc * 0.4, rc * 0.22, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // 盖沿一圈切口的白棉薄边，切开越多越明显
+    ctx.strokeStyle = 'rgba(238,231,210,' + (0.85 * reveal) + ')';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rc * 0.93, rc * 0.3, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 盘里放稳的瓣：月牙形，果粒朝上
+  function drawDishPetal(x, y, rot, pr, C, jit) {
+    ctx.save();
+    ctx.translate(x + jit.dx, y + jit.dy);
+    ctx.rotate(rot + jit.dr);
+    sector(0, 0, -0.96, 0.96, pr * 0.1, pr * 0.3);
+    ctx.fillStyle = 'rgb(' + C.flesh.join(',') + ')';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,250,0.5)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    var rng = mulberry(900 + Math.round(x * 7 + y));
+    for (var k = 0; k < 7; k++) {
+      var aa = (rng() - 0.5) * 1.5, uu = 0.14 + rng() * 0.14;
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(aa) * pr * uu, Math.sin(aa) * pr * uu * 0.6, 1.5, 2.2, rng(), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function plateSlot(k) {
+    var row = k < 6 ? 0 : 1;
+    var col = k % 6;
+    return {
+      x: L.plateX + (col - 2.5) * L.pr * 0.34,
+      y: L.plateY + (row ? L.pr * 0.18 : -L.pr * 0.16),
+      rot: Math.PI / 2 + (col - 2.5) * 0.05 + (row ? 0.1 : -0.1)
+    };
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var C = HUES[hueSet];
+
+    // ── 状态推进 ──
+    if (hold) {
+      if (stage === 0) {
+        prog = Math.min(1, prog + dt * 0.5);
+        if (prog >= 1) {
+          stage = 1; prog = 0; lidT = 0;
+          saidBowl = false;
+          say('盖下来了，里面一屋子白棉。');
+        }
+      } else if (stage === 1) {
+        prog = Math.min(1, prog + dt * 0.66);
+        if (prog >= 1) {
+          stage = 2; prog = 0;
+          say('皮碗留给台面。按住瓤，把棉衣撕干净。');
+        }
+      } else if (stage === 2) {
+        prog = Math.min(1, prog + dt * 0.4);
+        if (flops.length < 26 && Math.random() < dt * 14) {
+          flops.push({
+            x: L.px + (Math.random() - 0.5) * L.pr * 1.6,
+            y: L.py - L.pr * (1 - prog) + (Math.random() - 0.5) * 14,
+            vx: (Math.random() - 0.5) * 16,
+            vy: 22 + Math.random() * 26,
+            life: 1.1 + Math.random() * 0.5,
+            r: 2 + Math.random() * 3.6,
+            rot: Math.random() * Math.PI
+          });
+        }
+        if (prog >= 1) {
+          stage = 3; prog = 0;
+          say('撕干净了，十二瓣都亮着。点一瓣，掰一瓣。');
+        }
+      }
+    }
+    if (lidT >= 0 && lidT < 1) lidT = Math.min(1, lidT + dt * 1.5);
+    for (var f = flying.length - 1; f >= 0; f--) {
+      var fl = flying[f];
+      fl.t += dt * 1.9;
+      if (fl.t >= 1) {
+        petals[fl.i].placed = true;
+        petals[fl.i].slot = placedCount++;
+        flying.splice(f, 1);
+        if (placedCount === 6 && !saidHalf) { saidHalf = true; say('半颗了，白瓷盘快摆满。'); }
+        if (placedCount >= N) {
+          stage = 4; resting = true; doneCount++;
+          if (doneCount === 1) say('剥好了。一瓣一瓣，都是秋天兜着的水。', true);
+          else say('又一颗，剥得比上一颗利索。', true);
+        }
+      }
+    }
+    for (var q = flops.length - 1; q >= 0; q--) {
+      var fp = flops[q];
+      fp.x += fp.vx * dt; fp.y += fp.vy * dt; fp.life -= dt; fp.rot += dt * 2;
+      if (fp.life <= 0) flops.splice(q, 1);
+    }
+
+    // ── 背景：深夜厨房台面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#141a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    // 台面夜灯微晕，避免大片死黑
+    var glow = ctx.createRadialGradient(L.cx, L.counterY, 0, L.cx, L.counterY, L.R * 3.2);
+    glow.addColorStop(0, 'rgba(214,186,130,0.10)');
+    glow.addColorStop(1, 'rgba(214,186,130,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 地面影子统一一层，避免相互覆盖 ──
+    if (stage === 0) {
+      groundShadow(L.cx, L.rx * 1.02, 0.28);
+    } else {
+      groundShadow(L.cx, L.rx * 0.98, 0.28);          // 皮碗
+      if (stage >= 2) groundShadow(L.px, L.pr * 0.86, 0.22); // 瓤球
+      if (stage >= 1 && lidT >= 0) groundShadow(L.lidX, L.rx * 0.4 * lidT, 0.28 * lidT);
+    }
+    if (stage >= 3 || placedCount > 0) groundShadow(L.plateX, L.pr * 1.3, 0.3);
+
+    // ── 盘子与已入盘的瓣 ──
+    if (stage >= 3 || placedCount > 0) {
+      ctx.fillStyle = '#b9b7ae';
+      ctx.beginPath();
+      ctx.ellipse(L.plateX, L.plateY, L.pr * 1.3, L.pr * 0.52, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#d6d4cb';
+      ctx.beginPath();
+      ctx.ellipse(L.plateX, L.plateY - L.pr * 0.04, L.pr * 1.22, L.pr * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+      for (var k2 = 0; k2 < N; k2++) {
+        if (petals[k2].placed) {
+          var s = plateSlot(petals[k2].slot);
+          drawDishPetal(s.x, s.y, s.rot, L.pr, C, slotJit[k2]);
+        }
+      }
+    }
+
+    // ── 皮碗（退瓤后露出）──
+    if (stage >= 1) {
+      drawRind(L.cx, L.cy, L.rx, L.ry, C, L.rimY);
+      ctx.strokeStyle = skinColor(C, 0.55);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(L.cx, L.rimY, L.rx * 0.99, L.rx * 0.3, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(226,218,194,0.95)';
+      ctx.beginPath();
+      ctx.ellipse(L.cx, L.rimY, L.rx * 0.82, L.rx * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(186,176,148,0.45)';
+      ctx.beginPath();
+      ctx.ellipse(L.cx, L.rimY + L.ry * 0.08, L.rx * 0.56, L.rx * 0.13, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 瓤球（stage1 退瓤位移，stage2 起撕棉）；下半截坐进碗里，被碗沿挡住 ──
+    if (stage === 1) {
+      var e = prog * prog * (3 - 2 * prog);
+      var by = L.cy + (L.py - L.cy) * e;
+      drawCotton(L.cx, by, L.pr, 0);
+    } else if (stage >= 2) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      ctx.ellipse(L.cx, L.rimY, L.rx, L.rx * 0.3, 0, 0, Math.PI * 2);
+      ctx.clip('evenodd');
+      drawBulb(L.px, L.py, L.pr, C);
+      drawCotton(L.px, L.py, L.pr, stage === 2 ? prog : 1);
+      ctx.restore();
+    }
+
+    // ── stage0：整颗柚子 + 切盖 ──
+    if (stage === 0) {
+      drawRind(L.cx, L.cy, L.rx, L.ry, C);
+      var rc = L.rx * 0.36;
+      var topY = L.cy - L.ry * 0.78;
+      var lift = prog > 0.55 ? (prog - 0.55) * 6 : 0;
+      if (prog > 0.005) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(70,64,30,0.75)';
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.ellipse(L.cx, topY - lift, rc, rc * 0.32, 0, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2);
+        ctx.stroke();
+        // 小刀贴切痕走
+        var ka = -Math.PI / 2 + prog * Math.PI * 2;
+        var kx = L.cx + Math.cos(ka) * rc;
+        var ky = topY - lift + Math.sin(ka) * rc * 0.32;
+        ctx.fillStyle = '#b8bcc2';
+        ctx.beginPath();
+        ctx.moveTo(kx - L.R * 0.3, ky + 2);
+        ctx.quadraticCurveTo(kx - L.R * 0.08, ky - 3, kx + L.R * 0.1, ky - 2);
+        ctx.lineTo(kx + L.R * 0.11, ky + 3.5);
+        ctx.quadraticCurveTo(kx - L.R * 0.1, ky + 4, kx - L.R * 0.26, ky + 3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#3c3128';
+        ctx.fillRect(kx + L.R * 0.1, ky - 3, L.R * 0.34, 6);
+        ctx.restore();
+      }
+      if (prog >= 0.03) drawLid(L.cx, topY - lift + Math.sin(now / 400) * 0.4, rc, Math.sin(now / 400) * 0.02, C, prog);
+      if (!saidStart) {
+        ctx.fillStyle = 'rgba(176,168,120,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('按住柚子', L.cx, L.counterY + 30);
+      }
+    }
+
+    // ── 盖子飞落 / 落定 ──
+    if (stage >= 1 && lidT >= 0) {
+      var t = lidT;
+      var et = t * t * (3 - 2 * t);
+      var gx = L.cx + (L.lidX - L.cx) * et;
+      var gy = (L.cy - L.ry * 0.78) + (L.lidY - (L.cy - L.ry * 0.78)) * et - Math.sin(t * Math.PI) * L.R * 0.5;
+      var rc2 = L.rx * 0.36 * (1 - et * 0.12);
+      drawLid(gx, gy, rc2, et * 0.35, C, 1);
+    }
+
+    // ── 飞行中的瓣 ──
+    for (var g2 = 0; g2 < flying.length; g2++) {
+      var fv = flying[g2];
+      var slotT = plateSlot(placedCount + g2);
+      var ft = fv.t * fv.t * (3 - 2 * fv.t);
+      var fx = fv.sx + (slotT.x - fv.sx) * ft;
+      var fy = fv.sy + (slotT.y - fv.sy) * ft - Math.sin(fv.t * Math.PI) * L.R * 0.42;
+      var fr = fv.sa + (slotT.rot - fv.sa) * ft;
+      var sc = 1 - ft * 0.45;
+      ctx.save();
+      ctx.translate(fx, fy);
+      ctx.rotate(fr);
+      ctx.scale(sc, sc);
+      sector(0, 0, -0.96, 0.96, L.pr * 0.1, L.pr * 0.3);
+      ctx.fillStyle = 'rgb(' + C.flesh.join(',') + ')';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,250,0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 棉絮飘落 ──
+    for (var q2 = 0; q2 < flops.length; q2++) {
+      var fq = flops[q2];
+      ctx.save();
+      ctx.translate(fq.x, fq.y);
+      ctx.rotate(fq.rot);
+      ctx.globalAlpha = Math.min(1, fq.life);
+      ctx.fillStyle = '#ece5cd';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, fq.r * 1.5, fq.r * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    if (stage <= 2) {
+      ctx.fillText('剥 ' + Math.round(prog * 100) + ' %', w - 22, 34);
+    } else {
+      ctx.fillText('瓣 ' + placedCount + ' / ' + N, w - 22, 34);
+    }
+    ctx.textAlign = 'left';
+
+    // ── 满盘提示（避开右侧白瓷盘，落在台面左半的空当里）──
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，换一颗', L.cx - L.R * 0.52, L.counterY + L.R * 0.32);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress/handleTap）
+  window.__pomelo = {
+    stage: function () { return stage; },
+    prog: function () { return prog; },
+    placed: function () { return placedCount; },
+    resting: function () { return resting; },
+    hue: function () { return hueSet; },
+    press: function () { startPress(L.cx, stage >= 2 ? L.py : L.cy); },
+    release: function () { endPress(); },
+    tapPetal: function (i) {
+      if (stage !== 3) return;
+      var a = i * Math.PI / 6;
+      handleTap(L.px + Math.cos(a) * L.pr * 0.62, L.py + Math.sin(a) * L.pr * 0.55);
+    },
+    tapAt: function (x, y) { handleTap(x, y); }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>买豆腐</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #b8b4a4; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6a6a5c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b8b4a4;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6a6a5c;
+    text-decoration: none;
+    border-bottom: 1px dotted #6a6a5c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b8b4a4; border-color: #b8b4a4; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>买豆腐</h1>
+  <p>头板豆腐最嫩，还冒着热气。<br>按住下刀——稳一点，切三块带回家。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var cut = 0;           // 当前切割进度 0-1
+  var cutCount = 0;      // 已切块数
+  var resting = false;
+  var saidStart = false;
+  var steam = [];
+  var bagTofu = [];      // 袋中块的下落动画
+  var cutShake = 0;
+
+  var TOFU_W = 3, TOFU_H = 4; // 板上 3 列 4 行格
+  var total = 3;
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.45;
+    L.counterY = L.h * 0.64;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.boardX = L.cx;
+    L.boardY = L.counterY + (L.h - L.counterY) * 0.4;
+    L.bw = L.R * 1.5;
+    L.bh = L.R * 0.9;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      resting = false;
+      cutCount = 0;
+      say('又出一板。热气还没散。');
+      return;
+    }
+    if (hold) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('刀要垂直，腕子别抖。'); }
+  }
+  function endPress() {
+    hold = false;
+    cut = 0;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (hold && cutCount < total) {
+      cut = Math.min(1, cut + dt * 0.8); // 约 1.25 秒切一块
+      cutShake = cut < 1 ? Math.sin(now / 28) * 1.2 * cut : 0;
+      if (cut >= 1) {
+        cut = 0;
+        cutCount++;
+        bagTofu.push({ t: 0 });
+        if (cutCount === 2) say('两块了。再来一块凑三餐。');
+        if (cutCount >= total) {
+          resting = true;
+          hold = false;
+          say('三块热豆腐。回家拌一拌，就是一顿早饭。', true);
+        }
+      }
+    }
+    for (var t = bagTofu.length - 1; t >= 0; t--) {
+      if (bagTofu[t].t < 1) bagTofu[t].t += dt * 1.8;
+    }
+    if (cutCount < total && (hold || Math.random() < dt * 3)) {
+      if (steam.length < 12 && Math.random() < dt * 5) {
+        steam.push({
+          x: L.boardX + (Math.random() - 0.5) * L.bw * 0.9,
+          y: L.boardY - L.bh * 0.6,
+          v: 9 + Math.random() * 10,
+          drift: (Math.random() - 0.5) * 8,
+          life: 1, r: 4 + Math.random() * 6
+        });
+      }
+    }
+    for (var s = steam.length - 1; s >= 0; s--) {
+      var st = steam[s];
+      st.y -= st.v * dt; st.x += st.drift * dt; st.life -= dt * 0.5;
+      if (st.life <= 0) steam.splice(s, 1);
+    }
+
+    // ── 背景：清晨豆腐坊窗口 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#15181a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.boardX, L.boardY, 0, L.boardX, L.boardY, L.R * 3);
+    glow.addColorStop(0, 'rgba(220,220,200,0.1)');
+    glow.addColorStop(1, 'rgba(220,220,200,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 木架与豆腐板 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.boardX, L.boardY + L.bh * 0.55, L.bw * 0.6, L.bh * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5c4a34';
+    ctx.fillRect(L.boardX - L.bw / 2 - 10, L.boardY + L.bh * 0.32, L.bw + 20, L.bh * 0.16);
+    // 豆腐板（白）
+    ctx.fillStyle = '#cfc9b8';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(L.boardX - L.bw / 2, L.boardY - L.bh * 0.1, L.bw, L.bh * 0.5, 5);
+    else ctx.rect(L.boardX - L.bw / 2, L.boardY - L.bh * 0.1, L.bw, L.bh * 0.5);
+    ctx.fill();
+    // 豆腐主体（3x4 块，切掉的不画）
+    var cellW = L.bw / TOFU_W;
+    var cellH = L.bh * 0.62;
+    var cutTotal = cutCount;
+    // 当前正在切的先画切缝
+    for (var r2 = 0; r2 < TOFU_H; r2++) {
+      for (var c2 = 0; c2 < TOFU_W; c2++) {
+        var idx = r2 * TOFU_W + c2;
+        if (idx < cutTotal) continue;
+        var bxx = L.boardX - L.bw / 2 + c2 * cellW + cellW * 0.08;
+        var byy = L.boardY - L.bh * 0.1 + r2 * cellH * 0.42 - cellH * 0.34 + cutShake * (idx === cutTotal ? 1 : 0);
+        var hgt = cellH * 0.62;
+        ctx.fillStyle = 'rgba(246,244,232,0.96)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(bxx, byy - hgt, cellW * 0.84, hgt, 3);
+        else ctx.rect(bxx, byy - hgt, cellW * 0.84, hgt);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(214,208,188,0.7)';
+        ctx.beginPath();
+        ctx.ellipse(bxx + cellW * 0.42, byy - hgt, cellW * 0.36, cellH * 0.09, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 刀（切割中随进度下压）
+    if (hold && cut > 0 && cutCount < total) {
+      var col = Math.floor(cutCount / TOFU_H) % TOFU_W;
+      var kx = L.boardX - L.bw / 2 + cellW * (col + 0.5);
+      var ky = L.boardY - L.bh * 0.1 - cellH * 0.4 - (1 - cut) * 46;
+      ctx.strokeStyle = '#9aa2ab';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(kx - 14, ky - 40);
+      ctx.lineTo(kx, ky);
+      ctx.stroke();
+      ctx.fillStyle = '#5c4a34';
+      ctx.fillRect(kx - 22, ky - 62, 24, 10);
+    }
+
+    // ── 纸袋与切好的豆腐 ──
+    var bagX = L.cx + L.R * 1.3;
+    var bagY = L.counterY + (L.h - L.counterY) * 0.34;
+    ctx.fillStyle = '#8a7250';
+    ctx.beginPath();
+    ctx.moveTo(bagX - L.R * 0.26, bagY + L.R * 0.16);
+    ctx.lineTo(bagX + L.R * 0.26, bagY + L.R * 0.16);
+    ctx.lineTo(bagX + L.R * 0.2, bagY - L.R * 0.14);
+    ctx.lineTo(bagX - L.R * 0.2, bagY - L.R * 0.14);
+    ctx.closePath();
+    ctx.fill();
+    for (var bt = 0; bt < bagTofu.length; bt++) {
+      var bf = bagTofu[bt];
+      var ey = bagY - L.R * 0.16 - (1 - Math.min(1, bf.t)) * 34;
+      ctx.fillStyle = 'rgba(246,244,232,0.98)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bagX - L.R * 0.17 + bt * 4, ey, L.R * 0.36, L.R * 0.14, 3);
+      else ctx.rect(bagX - L.R * 0.17 + bt * 4, ey, L.R * 0.36, L.R * 0.14);
+      ctx.fill();
+    }
+
+    // ── 蒸汽 ──
+    for (var s2 = 0; s2 < steam.length; s2++) {
+      var st2 = steam[s2];
+      ctx.fillStyle = 'rgba(240,238,228,' + (0.13 * st2.life) + ')';
+      ctx.beginPath();
+      ctx.arc(st2.x, st2.y, st2.r * (1.3 - st2.life * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(cutCount + ' / ' + total + ' 块', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && cutCount === 0 && !resting) {
+      ctx.fillStyle = 'rgba(184,180,164,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住豆腐板，下刀', L.boardX, L.counterY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再来一板', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__tofu = {
+    cut: function () { return +cut.toFixed(2); },
+    cutCount: function () { return cutCount; },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

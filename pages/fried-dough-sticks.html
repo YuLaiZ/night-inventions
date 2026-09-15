@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>买油条</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d0a86a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6a50; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d0a86a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6a50;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6a50;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d0a86a; border-color: #d0a86a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>买油条</h1>
+  <p>头一锅油条刚下锅。<br>按住看着它炸——金黄了就松手，别贪。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;      // 按住=炸
+  var fry = 0;           // 炸色进度 0-1（0.75-0.92 金黄完美区）
+  var held = 0;          // 本根已拿到手 0-2
+  var resting = false;
+  var saidStart = false, saidGold = false;
+  var bob = 0;           // 油条在锅里浮动
+  var bubbles = [];      // 油泡
+  var picked = [];       // 拿在手里的油条（袋里）动画计数
+  var wiggle = 0;
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.counterY = L.h * 0.6;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.potX = L.cx;
+    L.potY = L.counterY + (L.h - L.counterY) * 0.4;
+    L.potW = L.R * 1.15;
+    L.potH = L.R * 0.6;
+    L.bagX = L.cx + L.R * 1.35;
+    L.bagY = L.counterY + (L.h - L.counterY) * 0.35;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function fryColor(t) {
+    // 白软 → 金黄 → 焦褐
+    var r, g, b;
+    if (t < 0.75) {
+      var k = t / 0.75;
+      r = Math.round(238 - k * 10);
+      g = Math.round(232 - k * 44);
+      b = Math.round(210 - k * 90);
+    } else if (t <= 0.92) {
+      var k2 = (t - 0.75) / 0.17;
+      r = Math.round(228 + k2 * 10);
+      g = Math.round(188 - k2 * 20);
+      b = Math.round(120 - k2 * 24);
+    } else {
+      var k3 = Math.min(1, (t - 0.92) / 0.08);
+      r = Math.round(238 - k3 * 118);
+      g = Math.round(168 - k3 * 108);
+      b = Math.round(96 - k3 * 60);
+    }
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  function startPress() {
+    if (resting) {
+      resting = false;
+      held = 0;
+      fry = 0;
+      picked = [];
+      say('铺子又下一锅。再看一轮金黄。');
+      return;
+    }
+    if (hold) return;
+    hold = true;
+    if (fry >= 1) { fry = 0; } // 焦了的直接换新坯
+    if (!saidStart) { saidStart = true; say('油面在响，盯紧那个色。'); }
+  }
+  function endPress() {
+    if (!hold) return;
+    hold = false;
+    if (resting) return;
+    if (fry >= 0.72 && fry <= 0.94) {
+      // 金黄完美
+      held++;
+      picked.push({ t: 0 });
+      if (held >= 2) {
+        resting = true;
+        say('两根，根根金脆。带回去，趁热。', true);
+      } else {
+        say('金脆！老板多给撒了点盐。再来一根。');
+      }
+      fry = 0;
+      saidGold = false;
+    } else if (fry < 0.72) {
+      say('还白着呢，回锅再炸几秒。');
+    } else {
+      say('糊了——贪那一口金黄，就要从头来。');
+      fry = 0;
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    bob += dt * 2.2;
+    wiggle = Math.max(0, wiggle - dt * 4);
+    if (hold && !resting) {
+      fry = Math.min(1, fry + dt * 0.11); // 约 7 秒进金黄窗
+      if (fry >= 0.72 && !saidGold) { saidGold = true; say('金黄了！松手——'); }
+      if (fry < 0.72) saidGold = false;
+      if (bubbles.length < 34 && Math.random() < dt * (18 + fry * 30)) {
+        bubbles.push({
+          x: L.potX + (Math.random() - 0.5) * L.potW * 1.5,
+          y: L.potY + L.potH * 0.1,
+          r: 1.4 + Math.random() * 2.4,
+          v: 20 + Math.random() * 26,
+          life: 1
+        });
+      }
+    }
+    for (var b = bubbles.length - 1; b >= 0; b--) {
+      var bb = bubbles[b];
+      bb.y -= bb.v * dt; bb.life -= dt * 1.1;
+      if (bb.life <= 0) bubbles.splice(b, 1);
+    }
+    for (var p = picked.length - 1; p >= 0; p--) {
+      if (picked[p].t < 1) picked[p].t += dt * 2;
+    }
+
+    // ── 背景：清晨铺面窗口 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#181a1c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.potX, L.potY, 0, L.potX, L.potY, L.R * 3.4);
+    glow.addColorStop(0, 'rgba(240,190,110,0.12)');
+    glow.addColorStop(1, 'rgba(240,190,110,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 油锅（剖面）──
+    // 锅沿与油面
+    var oilTop = L.potY - L.potH * 0.18;
+    ctx.fillStyle = '#2c333b';
+    ctx.beginPath();
+    ctx.moveTo(L.potX - L.potW, oilTop);
+    ctx.lineTo(L.potX + L.potW, oilTop);
+    ctx.lineTo(L.potX + L.potW * 0.9, L.potY + L.potH * 0.5);
+    ctx.lineTo(L.potX - L.potW * 0.9, L.potY + L.potH * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#3a434d';
+    ctx.fillRect(L.potX - L.potW, oilTop - L.potH * 0.12, L.potW * 2, L.potH * 0.12);
+    // 油
+    ctx.fillStyle = 'rgba(206,158,72,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(L.potX, oilTop + L.potH * 0.16, L.potW * 0.92, L.potH * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 油泡
+    for (var q = 0; q < bubbles.length; q++) {
+      var bq = bubbles[q];
+      ctx.fillStyle = 'rgba(248,232,190,' + (0.7 * bq.life) + ')';
+      ctx.beginPath();
+      ctx.arc(bq.x, bq.y, bq.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 锅里的油条坯 ──
+    var stickY = oilTop + L.potH * 0.05 + Math.sin(bob) * 3;
+    var stickX = L.potX;
+    var col = fryColor(fry);
+    ctx.save();
+    ctx.translate(stickX, stickY);
+    ctx.rotate(Math.sin(bob * 0.8) * 0.06 + wiggle);
+    // 身
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-L.R * 0.62, -L.R * 0.09, L.R * 1.24, L.R * 0.18, L.R * 0.09);
+    else ctx.rect(-L.R * 0.62, -L.R * 0.09, L.R * 1.24, L.R * 0.18);
+    ctx.fill();
+    // 膨胀纹理（炸得越久越鼓）
+    if (fry > 0.3) {
+      ctx.strokeStyle = 'rgba(120,84,30,' + (0.3 + fry * 0.3) + ')';
+      ctx.lineWidth = 1.6;
+      for (var s2 = -2; s2 <= 2; s2++) {
+        ctx.beginPath();
+        ctx.moveTo(s2 * L.R * 0.22, -L.R * 0.07 + (s2 % 2) * 2);
+        ctx.lineTo(s2 * L.R * 0.22, L.R * 0.07 - (s2 % 2) * 2);
+        ctx.stroke();
+      }
+    }
+    // 金黄高光
+    if (fry > 0.6) {
+      ctx.fillStyle = 'rgba(255,238,180,' + (0.25 * Math.min(1, (fry - 0.6) / 0.2)) + ')';
+      ctx.beginPath();
+      ctx.ellipse(-L.R * 0.2, -L.R * 0.04, L.R * 0.3, L.R * 0.05, -0.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 焦斑警示
+    if (fry > 0.92) {
+      ctx.fillStyle = 'rgba(30,18,6,0.55)';
+      ctx.beginPath();
+      ctx.arc(L.R * 0.3, 0, L.R * 0.08, 0, Math.PI * 2);
+      ctx.arc(-L.R * 0.35, L.R * 0.03, L.R * 0.06, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // ── 判色带（锅上方提示条）──
+    var barW = L.potW * 1.1, barH = 8;
+    var barX = L.potX - barW / 2, barY = L.potY - L.potH * 1.75;
+    for (var seg = 0; seg < 40; seg++) {
+      var st2 = seg / 40;
+      ctx.fillStyle = fryColor(st2);
+      ctx.globalAlpha = (st2 >= 0.72 && st2 <= 0.94) ? 0.95 : 0.35;
+      ctx.fillRect(barX + st2 * barW, barY, barW / 40 + 1, barH);
+    }
+    ctx.globalAlpha = 1;
+    // 完美区间标记
+    ctx.strokeStyle = 'rgba(250,240,200,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(barX + 0.72 * barW, barY - 3, 0.22 * barW, barH + 6);
+    // 指针
+    ctx.fillStyle = '#f0ead8';
+    ctx.beginPath();
+    ctx.moveTo(barX + fry * barW, barY - 5);
+    ctx.lineTo(barX + fry * barW - 5, barY - 11);
+    ctx.lineTo(barX + fry * barW + 5, barY - 11);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── 手里纸袋与油条 ──
+    ctx.fillStyle = '#8a7250';
+    ctx.beginPath();
+    ctx.moveTo(L.bagX - L.R * 0.3, L.bagY + L.R * 0.2);
+    ctx.lineTo(L.bagX + L.R * 0.3, L.bagY + L.R * 0.2);
+    ctx.lineTo(L.bagX + L.R * 0.24, L.bagY - L.R * 0.18);
+    ctx.lineTo(L.bagX - L.R * 0.24, L.bagY - L.R * 0.18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(50,38,20,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(L.bagX - L.R * 0.22, L.bagY - L.R * 0.1);
+    ctx.lineTo(L.bagX + L.R * 0.24, L.bagY - L.R * 0.05);
+    ctx.stroke();
+    for (var pk = 0; pk < picked.length; pk++) {
+      var ps = picked[pk];
+      var ey = L.bagY - L.R * 0.22 - pk * L.R * 0.1 - (1 - Math.min(1, ps.t)) * 30;
+      ctx.fillStyle = 'rgb(226,178,96)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(L.bagX - L.R * 0.2 + pk * 6, ey, L.R * 0.44, L.R * 0.09, L.R * 0.045);
+      else ctx.rect(L.bagX - L.R * 0.2 + pk * 6, ey, L.R * 0.44, L.R * 0.09);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(held + ' / 2 根', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && fry === 0 && !resting) {
+      ctx.fillStyle = 'rgba(208,168,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住锅，炸', L.potX, L.counterY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，下一锅', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__youtiao = {
+    fry: function () { return +fry.toFixed(2); },
+    held: function () { return held; },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

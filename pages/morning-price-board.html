@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日价目</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a8a494; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #68665a; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a8a494;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #68665a;
+    text-decoration: none;
+    border-bottom: 1px dotted #68665a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a8a494; border-color: #a8a494; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>今日价目</h1>
+  <p>开门前，把小黑板挂出去。<br>按住写——今日都是热乎价。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var write = 0;         // 书写进度 0-4 条
+  var lineProg = 0;      // 当前条内进度 0-1
+  var resting = false;
+  var saidStart = false;
+  var erasing = false;   // 板擦中
+  var erase = 0;         // 板擦进度 0-1
+  var batch = 0;
+
+  var MENUS = [
+    ['豆浆', '1 元'],
+    ['油条', '1 元'],
+    ['茶叶蛋', '1 块5'],
+    ['豆腐脑', '2 元'],
+    ['热馒头', '5 毛']
+  ];
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // 每批菜单的粉笔字微扰动（角度/位移）
+  var jitters = [];
+  function rollJitters() {
+    jitters = [];
+    var rng = mulberry(20260915 + batch * 31);
+    for (var i = 0; i < MENUS.length; i++) {
+      jitters.push({ rot: (rng() - 0.5) * 0.03, dx: (rng() - 0.5) * 3, dy: (rng() - 0.5) * 2.4 });
+    }
+  }
+  rollJitters();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.55;
+    L.R = Math.min(L.w * 0.3, L.h * 0.26, 200);
+    L.bw = L.R * 1.7;
+    L.bh = L.R * 1.5;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      resting = false;
+      erasing = true;
+      erase = 0;
+      batch++;
+      rollJitters();
+      return;
+    }
+    if (hold || write >= MENUS.length) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('粉笔有点短，字丑但实在。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (erasing) {
+      erase += dt * 0.9;
+      if (erase >= 1) {
+        erasing = false;
+        write = 0; lineProg = 0;
+        resting = false;
+        say('擦干净了。今日价，实惠如常。');
+      }
+      return;
+    }
+
+    if (hold && write < MENUS.length) {
+      lineProg += dt * 0.75;
+      if (lineProg >= 1) {
+        lineProg = 0;
+        write++;
+        if (write === 2) say('豆浆油条，老两样先写上。');
+        if (write >= MENUS.length) {
+          resting = true;
+          hold = false;
+          say('写完了。挂出去，今天就开张。', true);
+        }
+      }
+    }
+
+    // ── 背景：铺内墙上 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#171412');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 小黑板 ──
+    var bx = L.cx - L.bw / 2, by = L.cy - L.bh / 2;
+    // 木框
+    ctx.fillStyle = '#6a5238';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx - 14, by - 14, L.bw + 28, L.bh + 28, 10);
+    else ctx.rect(bx - 14, by - 14, L.bw + 28, L.bh + 28);
+    ctx.fill();
+    // 板面（深绿，微磨砂）
+    var boardG = ctx.createLinearGradient(bx, by, bx + L.bw, by + L.bh);
+    boardG.addColorStop(0, '#2a3a32');
+    boardG.addColorStop(1, '#223029');
+    ctx.fillStyle = boardG;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, L.bw, L.bh, 6);
+    else ctx.rect(bx, by, L.bw, L.bh);
+    ctx.fill();
+    // 板面残粉
+    ctx.fillStyle = 'rgba(235,235,225,0.05)';
+    var rng = mulberry(5 + batch);
+    for (var d = 0; d < 26; d++) {
+      ctx.beginPath();
+      ctx.arc(bx + rng() * L.bw, by + rng() * L.bh, rng() * 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 板擦（resting 时放在框沿）
+    if (resting) {
+      ctx.fillStyle = '#4a3a2c';
+      ctx.fillRect(bx + L.bw * 0.6, by + L.bh + 4, 46, 10);
+      ctx.fillStyle = 'rgba(235,235,225,0.35)';
+      ctx.fillRect(bx + L.bw * 0.6, by + L.bh + 12, 46, 4);
+    }
+
+    // ── 粉笔字 ──
+    var colX = bx + L.bw * 0.12;
+    var colY = by + L.bh * 0.22;
+    var rowH = L.bh * 0.19;
+    for (var i = 0; i <= write && i < MENUS.length; i++) {
+      var full = (i < write) ? 1 : lineProg;
+      if (full <= 0 && !(erasing)) continue;
+      var jt = jitters[i] || { rot: 0, dx: 0, dy: 0 };
+      var y2 = colY + i * rowH;
+      var shown = erasing ? (1 - erase * 1.4) : 1;
+      if (shown <= 0) continue;
+      ctx.save();
+      ctx.translate(colX + jt.dx, y2 + jt.dy);
+      ctx.rotate(jt.rot);
+      ctx.globalAlpha = Math.max(0, Math.min(1, shown)) * 0.92;
+      var name = MENUS[i][0];
+      var price = MENUS[i][1];
+      ctx.fillStyle = '#e8e6da';
+      ctx.font = '500 ' + Math.round(L.R * 0.13) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'left';
+      if (i < write || erasing) {
+        ctx.fillText(name, 0, 0);
+      } else {
+        // 正在写的条：按进度显示字数
+        var nChars = Math.ceil(name.length * Math.min(1, lineProg * 1.6));
+        ctx.fillText(name.slice(0, nChars), 0, 0);
+      }
+      // 价格（右侧，黄粉笔）
+      ctx.fillStyle = '#e8d9a0';
+      ctx.font = '500 ' + Math.round(L.R * 0.115) + 'px ui-monospace, "SF Mono", Menlo, monospace';
+      ctx.textAlign = 'right';
+      if (i < write || (i === write && lineProg > 0.6) || erasing) {
+        ctx.fillText(price, L.bw * 0.76, 0);
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    // 分隔虚线
+    ctx.strokeStyle = 'rgba(235,235,225,0.14)';
+    ctx.lineWidth = 1;
+    for (var dv = 1; dv < MENUS.length; dv++) {
+      if (dv > write) break;
+      var dy2 = colY + dv * rowH - rowH * 0.32;
+      ctx.beginPath();
+      ctx.moveTo(bx + L.bw * 0.1, dy2);
+      ctx.lineTo(bx + L.bw * 0.9, dy2);
+      ctx.stroke();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(write + ' / ' + MENUS.length + ' 条', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && write === 0 && !hold && !resting && !erasing) {
+      ctx.fillStyle = 'rgba(168,164,148,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住黑板，写', L.cx, by + L.bh + 44);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，擦掉重写', L.cx, by + L.bh + 44);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__board = {
+    written: function () { return write; },
+    resting: function () { return resting; },
+    erasing: function () { return erasing; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

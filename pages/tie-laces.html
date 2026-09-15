@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>系鞋带</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89878; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e6452; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a89878;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6e6452;
+    text-decoration: none;
+    border-bottom: 1px dotted #6e6452;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89878; border-color: #a89878; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>系鞋带</h1>
+  <p>出门前的最后一步。<br>按住交叉拉紧——再按住，打个结。好了，出门吧。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var step = 0;          // 0 未系 1 交叉拉紧中 2 打结中 3 完成
+  var prog = 0;          // 当前步进度
+  var bowPop = 0;        // 蝴蝶结弹出 0-1
+  var saidStart = false;
+  var times = 0;
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.shoeX = L.cx;
+    L.shoeY = L.h * 0.56;
+    L.R = Math.min(L.w * 0.26, L.h * 0.22, 160);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 鞋孔位置（三对，沿鞋身）
+  function eyelets() {
+    var s = L.R;
+    return [
+      { x: L.shoeX - s * 0.34, y: L.shoeY - s * 0.3 },
+      { x: L.shoeX + s * 0.34, y: L.shoeY - s * 0.34 },
+      { x: L.shoeX - s * 0.36, y: L.shoeY - s * 0.06 },
+      { x: L.shoeX + s * 0.36, y: L.shoeY - s * 0.08 },
+      { x: L.shoeX - s * 0.34, y: L.shoeY + s * 0.18 },
+      { x: L.shoeX + s * 0.36, y: L.shoeY + s * 0.16 }
+    ];
+  }
+
+  function startPress() {
+    if (step === 3) {
+      // 解开重来
+      step = 0; prog = 0; bowPop = 0;
+      times++;
+      say('又松了？鞋带的事，急不来。');
+      return;
+    }
+    if (hold) return;
+    hold = true;
+    if (step === 0 && !saidStart) { saidStart = true; say('两边带子，交叉收——'); }
+    if (step === 1) say('绕一个圈，抽紧——');
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (hold && step < 2) {
+      prog = Math.min(1, prog + dt * 0.75); // 约 1.3 秒一步
+      if (prog >= 1) {
+        prog = 0;
+        step++;
+        if (step === 1) { hold = false; say('拉紧了。还差个结。'); }
+      }
+    }
+    if (step === 2 && hold) {
+      // 打结中：蝴蝶结慢慢弹出
+      bowPop = Math.min(1, bowPop + dt * 1.2);
+      if (bowPop >= 1) {
+        step = 3;
+        hold = false;
+        times++;
+        if (times === 1) say('好了。出门吧，今天路平。', true);
+        else say('又系好了。走两步试试，不磨脚。', true);
+      }
+    }
+    if (step === 3 && bowPop < 1) bowPop = Math.min(1, bowPop + dt * 2);
+
+    // ── 背景：玄关 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#171412');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 地垫
+    ctx.fillStyle = 'rgba(90,70,50,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(L.cx, L.h * 0.78, L.R * 1.6, L.R * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 帆布鞋（俯视）──
+    var s = L.R;
+    ctx.save();
+    ctx.translate(L.shoeX, L.shoeY);
+    ctx.rotate(-0.28);
+    // 鞋身
+    ctx.fillStyle = '#ddd6c6';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.55, -s * 0.52);
+    ctx.quadraticCurveTo(s * 0.1, -s * 0.62, s * 0.52, -s * 0.5);
+    ctx.quadraticCurveTo(s * 0.78, -s * 0.28, s * 0.72, s * 0.05);
+    ctx.quadraticCurveTo(s * 0.4, s * 0.42, -s * 0.1, s * 0.44);
+    ctx.quadraticCurveTo(-s * 0.5, s * 0.3, -s * 0.55, -s * 0.52);
+    ctx.closePath();
+    ctx.fill();
+    // 鞋头
+    ctx.fillStyle = '#cfc7b4';
+    ctx.beginPath();
+    ctx.ellipse(s * 0.5, -s * 0.16, s * 0.26, s * 0.3, -0.25, 0, Math.PI * 2);
+    ctx.fill();
+    // 鞋口（后跟开口）
+    ctx.fillStyle = 'rgba(60,52,40,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(-s * 0.42, -s * 0.2, s * 0.12, s * 0.2, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // 鞋舌
+    ctx.fillStyle = '#d2cab8';
+    ctx.beginPath();
+    ctx.ellipse(-s * 0.05, -s * 0.12, s * 0.3, s * 0.16, -0.05, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── 鞋孔 ──
+    var eye = eyelets();
+    ctx.fillStyle = '#8a8272';
+    for (var e = 0; e < eye.length; e++) {
+      ctx.beginPath();
+      ctx.arc(eye[e].x, eye[e].y, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 鞋带 ──
+    var lace = '#c8b48c';
+    var tight = (step >= 1) ? 1 : prog;         // 交叉拉紧程度
+    var knot = step >= 2 ? bowPop : 0;          // 结的弹出
+    ctx.lineCap = 'round';
+    // 底段交叉（下两孔到中孔）
+    ctx.strokeStyle = lace;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(eye[4].x, eye[4].y);
+    ctx.lineTo(eye[3].x, eye[3].y);
+    ctx.moveTo(eye[5].x, eye[5].y);
+    ctx.lineTo(eye[2].x, eye[2].y);
+    ctx.stroke();
+    // 上段交叉（随拉紧收紧）
+    var crossGap = 1 - tight * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(eye[2].x, eye[2].y);
+    ctx.lineTo(eye[1].x + (eye[1].x - L.shoeX) * (1 - tight) * 0.6, eye[1].y - 4 - (1 - tight) * 10);
+    ctx.moveTo(eye[3].x, eye[3].y);
+    ctx.lineTo(eye[0].x + (eye[0].x - L.shoeX) * (1 - tight) * 0.6, eye[0].y - 4 - (1 - tight) * 10);
+    ctx.stroke();
+    // 中孔交叉（拉紧后成 X）
+    ctx.beginPath();
+    ctx.moveTo(eye[0].x, eye[0].y);
+    ctx.lineTo(eye[3].x, eye[3].y);
+    ctx.moveTo(eye[1].x, eye[1].y);
+    ctx.lineTo(eye[2].x, eye[2].y);
+    ctx.stroke();
+    // 松散垂尾（未系时从上孔垂下）
+    if (step === 0) {
+      ctx.strokeStyle = 'rgba(200,180,140,0.9)';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(eye[0].x, eye[0].y);
+      ctx.quadraticCurveTo(eye[0].x - 18, eye[0].y + 26, eye[0].x - 6, eye[0].y + 44);
+      ctx.moveTo(eye[1].x, eye[1].y);
+      ctx.quadraticCurveTo(eye[1].x + 18, eye[1].y + 26, eye[1].x + 6, eye[1].y + 44);
+      ctx.stroke();
+    }
+
+    // ── 蝴蝶结（打结时弹出）──
+    if (knot > 0.02) {
+      var kp = knot;
+      var kx = (eye[0].x + eye[1].x) / 2, ky = (eye[0].y + eye[1].y) / 2 - 6;
+      var ks = 0.6 + kp * 0.4;
+      ctx.save();
+      ctx.translate(kx, ky);
+      ctx.scale(ks, ks);
+      // 两个环
+      ctx.strokeStyle = lace;
+      ctx.lineWidth = 5.5;
+      for (var lp = -1; lp <= 1; lp += 2) {
+        ctx.beginPath();
+        ctx.ellipse(lp * 14, -4, 12, 7, lp * 0.35, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // 两尾
+      ctx.lineWidth = 4.5;
+      ctx.beginPath();
+      ctx.moveTo(-3, 2);
+      ctx.quadraticCurveTo(-10, 16, -16, 26);
+      ctx.moveTo(3, 2);
+      ctx.quadraticCurveTo(10, 14, 14, 24);
+      ctx.stroke();
+      // 中心结
+      ctx.fillStyle = '#b89a6c';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 5.5, 4.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 抽紧弹跳
+      if (kp >= 1) {
+        ctx.strokeStyle = 'rgba(255,250,230,0.25)';
+        ctx.lineWidth = 1.4;
+        for (var sp3 = 1; sp3 <= 2; sp3++) {
+          ctx.beginPath();
+          ctx.arc(kx, ky, 18 + sp3 * 14, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // ── 引导 ──
+    if (step === 0 && !hold && prog === 0) {
+      ctx.fillStyle = 'rgba(168,152,120,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住，交叉拉紧', L.cx, L.shoeY + L.R * 0.85);
+    }
+    if (step === 1 && !hold) {
+      ctx.fillStyle = 'rgba(168,152,120,0.6)';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按住，打个结', L.cx, L.shoeY + L.R * 0.85);
+    }
+    if (step === 3) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，解开重系', L.cx, L.shoeY + L.R * 0.85);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__laces = {
+    step: function () { return step; },
+    prog: function () { return +prog.toFixed(2); },
+    bowPop: function () { return +bowPop.toFixed(2); },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

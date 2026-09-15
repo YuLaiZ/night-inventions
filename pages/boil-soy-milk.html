@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>煮豆浆</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8b088; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6c6352; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8b088;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c6352;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c6352;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8b088; border-color: #c8b088; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>煮豆浆</h1>
+  <p>凌晨的豆浆最会起哄——假沸就得扑锅。<br>按住搅，别让它漫出来。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var stir = 0;          // 搅动相位
+  var foam = 0.25;       // 泡沫水位 0-1，1=扑锅
+  var cook = 0;          // 熬煮进度（累计按住）
+  var resting = false;
+  var spilled = false;   // 扑锅瞬间状态
+  var spills = [];       // 溢出的浆滴
+  var saidStart = false, saidWarn = false;
+  var batches = 0;
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var grains = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 30; i++) grains.push({ x: rng(), y: rng(), a: 0.04 + rng() * 0.05 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.counterY = L.h * 0.66;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.potX = L.cx;
+    L.potY = L.counterY + (L.h - L.counterY) * 0.38;
+    L.potW = L.R * 1.05;
+    L.potH = L.R * 0.66;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function reset() {
+    foam = 0.25; cook = 0;
+    spilled = false; spills = [];
+    saidWarn = false;
+    resting = false;
+  }
+
+  function startPress() {
+    if (resting || spilled) {
+      reset();
+      batches = 0;
+      say('擦擦灶台，再烧一锅。火调小了些。');
+    }
+    if (hold) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('匀着搅，泡就压下去了。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (!resting && !spilled) {
+      if (hold) {
+        stir += dt * 7;
+        foam = Math.max(0, foam - dt * 0.75);
+        cook = Math.min(1, cook + dt * 0.05); // 约 20 秒熬成
+        if (cook >= 1) {
+          resting = true;
+          hold = false;
+          batches++;
+          if (batches === 1) say('煮透了。头一锅的香，是从锅沿守出来的。', true);
+          else say('又一锅透的。街角就闻得到。', true);
+        }
+      } else {
+        foam = Math.min(1, foam + dt * 0.34); // 松手约 2-3 秒扑锅
+        if (foam > 0.72 && !saidWarn) { saidWarn = true; say('要漫了！快按住搅——'); }
+        if (foam > 0.75) saidWarn = false;
+        if (foam >= 1) {
+          spilled = true;
+          hold = false;
+          for (var s = 0; s < 16; s++) {
+            spills.push({
+              x: L.potX + (Math.random() - 0.5) * L.potW * 1.7,
+              y: L.potY - L.potH * 0.72,
+              vx: (Math.random() - 0.5) * 60,
+              vy: -30 - Math.random() * 50,
+              life: 1, r: 2 + Math.random() * 3
+            });
+          }
+        }
+      }
+    }
+    if (spilled) {
+      capPhaseHint();
+      for (var p = spills.length - 1; p >= 0; p--) {
+        var sp = spills[p];
+        sp.x += sp.vx * dt; sp.y += sp.vy * dt;
+        sp.vy += 240 * dt;
+        if (sp.y > L.counterY + (h - L.counterY) * 0.5) spills.splice(p, 1);
+      }
+    }
+    var hintT = 0;
+    function capPhaseHint() { hintT += dt; }
+
+    // ── 背景：凌晨灶台 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#131a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.cx, L.counterY, 0, L.cx, L.counterY, L.R * 3.2);
+    glow.addColorStop(0, 'rgba(230,190,120,0.1)');
+    glow.addColorStop(1, 'rgba(230,190,120,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+    ctx.fillStyle = 'rgba(255,250,235,1)';
+    for (var g = 0; g < grains.length; g++) {
+      ctx.globalAlpha = grains[g].a;
+      ctx.fillRect(grains[g].x * w, L.counterY + grains[g].y * (h - L.counterY), 1.4, 1.4);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 锅与豆浆 ──
+    // 锅身
+    ctx.fillStyle = '#2c333b';
+    ctx.beginPath();
+    ctx.moveTo(L.potX - L.potW, L.potY - L.potH * 0.5);
+    ctx.lineTo(L.potX + L.potW, L.potY - L.potH * 0.5);
+    ctx.lineTo(L.potX + L.potW * 0.9, L.potY + L.potH * 0.5);
+    ctx.lineTo(L.potX - L.potW * 0.9, L.potY + L.potH * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#3a434d';
+    ctx.fillRect(L.potX - L.potW, L.potY - L.potH * 0.5, L.potW * 2, L.potH * 0.14);
+    // 液面高度：泡沫越高液面越贴锅沿
+    var rim = L.potY - L.potH * 0.5;
+    var level = rim + L.potH * (0.62 - foam * 0.58);
+    // 豆浆
+    ctx.fillStyle = 'rgba(238,226,196,0.95)';
+    ctx.beginPath();
+    ctx.ellipse(L.potX, level + (rim - level) * 0.1, L.potW * 0.94, L.potH * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 泡沫层（松手时疯涨）
+    var foamN = Math.floor(foam * 46);
+    var rngF = mulberry(20260915);
+    for (var f = 0; f < foamN; f++) {
+      var fa = rngF() * Math.PI * 2;
+      var fr = rngF() * L.potW * 0.85;
+      var fb = 2 + rngF() * 3.4 * (0.5 + foam);
+      ctx.fillStyle = 'rgba(246,240,222,' + (0.75 - foam * 0.1) + ')';
+      ctx.beginPath();
+      ctx.arc(L.potX + Math.cos(fa) * fr, level + Math.sin(fa) * (rim - level) * 0.35 - foam * 7, fb, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 涡旋（搅动时）
+    if (hold) {
+      ctx.strokeStyle = 'rgba(200,178,130,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(L.potX + Math.sin(stir) * 6, level + 2, L.potW * 0.5, L.potH * 0.1, Math.sin(stir * 0.7) * 0.1, 0, Math.PI * 2);
+      ctx.stroke();
+      // 木勺
+      ctx.save();
+      ctx.translate(L.potX + Math.cos(stir) * L.potW * 0.4, level - L.potH * 0.1);
+      ctx.rotate(Math.sin(stir * 1.3) * 0.25);
+      ctx.strokeStyle = '#8a6f4c';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -L.potH * 1.1);
+      ctx.lineTo(0, 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── 溢出的浆滴 ──
+    for (var q = 0; q < spills.length; q++) {
+      var sq = spills[q];
+      ctx.fillStyle = 'rgba(238,226,196,' + (0.85 * sq.life) + ')';
+      ctx.beginPath();
+      ctx.arc(sq.x, sq.y, sq.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (spilled) {
+      // 灶台上的白渍
+      ctx.fillStyle = 'rgba(238,226,196,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(L.potX, L.potY + L.potH * 0.62, L.potW * 1.05, L.potH * 0.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    if (spilled) ctx.fillText('扑 锅', w - 22, 34);
+    else ctx.fillText('熬 ' + Math.round(cook * 100) + ' %', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 提示 ──
+    if (!saidStart && !resting && !spilled && foam < 0.5) {
+      ctx.fillStyle = 'rgba(200,176,136,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住锅，搅', L.cx, L.counterY + 34);
+    }
+    if (spilled) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，重烧一锅', L.cx, L.counterY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再烧一锅', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__soymilk = {
+    cook: function () { return +cook.toFixed(2); },
+    foam: function () { return +foam.toFixed(2); },
+    spilled: function () { return spilled; },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

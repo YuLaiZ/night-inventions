@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>摇桂花</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0c1117;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d0a856; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7d7458; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c9a95e;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7d7458;
+    text-decoration: none;
+    border-bottom: 1px dotted #7d7458;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c9a95e; border-color: #c9a95e; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>摇桂花</h1>
+  <p>中秋前的桂花最盛。<br>按住树冠摇一摇——花落在床单上，甜收进罐子里。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TARGET = 120;      // 床单上的花攒够这个数就收罐
+  var hold = false;
+  var sway = 0;          // 树冠摆动相位
+  var amp = 0;           // 当前摆幅（按住渐大，松手衰减）
+  var hueSet = 0;
+  var doneCount = 0;
+  var resting = false;
+  var jarT = -1;         // 收罐动画 0-1，-1 未开始
+  var saidStart = false, saidJar = false;
+  var onSheet = [];      // 已落床单的花 {x, y, r, rot, tw}
+  var falling = [];      // 飘落中的花 {x, y, vx, vy, rot, vr, r, life}
+  var saidHalf = false;
+
+  // 三种花色：金桂 / 橙金 / 银桂
+  var HUES = [
+    { petal: [234, 200, 96], glow: [246, 226, 150], deep: [196, 156, 60] },
+    { petal: [238, 176, 84], glow: [248, 214, 130], deep: [200, 132, 52] },
+    { petal: [238, 226, 158], glow: [250, 244, 204], deep: [198, 184, 116] }
+  ];
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // 预生成：树冠花簇（簇心+围点）、叶点、床单纹理抖动（相对坐标，resize 不跳）
+  var clusters = [], leaves = [], sheetDots = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 16; i++) {
+      var cxr = rng() * 1.7 - 0.85, cyr = rng() * 1.5 - 0.78, n = 4 + Math.floor(rng() * 4);
+      for (var k = 0; k < n; k++) {
+        clusters.push({
+          x: cxr + (rng() - 0.5) * 0.24,
+          y: cyr + (rng() - 0.5) * 0.22,
+          s: 2.2 + rng() * 2.6, tw: rng() * Math.PI * 2
+        });
+      }
+    }
+    for (var j = 0; j < 70; j++) leaves.push({ x: rng() * 2 - 1, y: rng() * 2 - 1, s: 1.4 + rng() * 2.2 });
+    for (var k2 = 0; k2 < 26; k2++) sheetDots.push({ x: rng(), y: rng(), a: 0.04 + rng() * 0.05 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.groundY = L.h * 0.72;
+    L.R = Math.min(L.w * 0.26, L.h * 0.24, 170);
+    L.treeX = L.w * 0.5;
+    L.canopyY = L.h * 0.42;         // 树冠中心
+    L.trunkTop = L.canopyY + L.R * 0.34;
+    L.sheetW = L.R * 1.5;
+    L.sheetH = L.R * 0.52;
+    L.sheetY = L.groundY - L.sheetH * 1.5;   // 布底要留在地面线以上
+    L.jarX = L.cx + L.R * 0.98;
+    L.jarY = L.groundY - L.R * 0.1;
+    L.jarS = L.R * 0.24;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function hitCanopy(x, y) {
+    var dx = x - L.treeX, dy = y - L.canopyY;
+    return dx * dx + dy * dy * 1.44 < (L.R + 26) * (L.R + 26);
+  }
+
+  function resetTree(keepHue) {
+    onSheet = [];
+    falling = [];
+    jarT = -1;
+    resting = false;
+    saidJar = false;
+    saidHalf = false;
+    if (!keepHue) hueSet = (hueSet + 1) % HUES.length;
+  }
+
+  function startPress(x, y) {
+    if (resting) {
+      resetTree(false);
+      doneCount++;
+      say('再摇一棵，这棵开得更密。');
+      return;
+    }
+    if (hold || jarT >= 0) return;
+    if (hitCanopy(x, y)) {
+      hold = true;
+      if (!saidStart) { saidStart = true; say('抓紧枝条，慢慢地摇——花要落得匀。'); }
+    }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function (ev) { startPress(ev.clientX, ev.clientY); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  function flower(x, y, r, rot, C, alpha) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgb(' + C.petal.join(',') + ')';
+    for (var p = 0; p < 4; p++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.beginPath();
+      ctx.ellipse(r * 0.62, 0, r * 0.52, r * 0.34, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgb(' + C.deep.join(',') + ')';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var C = HUES[hueSet];
+
+    // ── 状态推进 ──
+    if (hold && !resting && jarT < 0) {
+      amp = Math.min(1, amp + dt * 1.6);
+      sway += dt * 5.2;
+      if (falling.length < 90 && Math.random() < dt * 34 * amp) {
+        var a = Math.random() * Math.PI * 2;
+        falling.push({
+          x: L.treeX + Math.cos(a) * L.R * (0.15 + Math.random() * 0.75),
+          y: L.canopyY + Math.sin(a) * L.R * 0.5,
+          vx: (Math.random() - 0.5) * 34,
+          vy: 14 + Math.random() * 26,
+          rot: Math.random() * Math.PI * 2,
+          vr: (Math.random() - 0.5) * 3,
+          r: 2.6 + Math.random() * 2.4,
+          swayP: Math.random() * Math.PI * 2
+        });
+      }
+    } else {
+      amp = Math.max(0, amp - dt * 1.8);
+      sway += dt * (0.8 + amp * 4);
+    }
+    if (jarT >= 0 && jarT < 1) jarT = Math.min(1, jarT + dt * 0.55);
+    for (var f = falling.length - 1; f >= 0; f--) {
+      var fl = falling[f];
+      fl.swayP += dt * 3;
+      fl.x += (fl.vx + Math.sin(fl.swayP) * 16) * dt;
+      fl.y += fl.vy * dt;
+      fl.vy = Math.min(64, fl.vy + dt * 30);
+      fl.rot += fl.vr * dt;
+      var sheetTop = L.sheetY - L.sheetH * 0.42;
+      if (fl.y >= sheetTop && Math.abs(fl.x - L.cx) < L.sheetW * 0.55 && fl.vy > 0) {
+        onSheet.push({ x: fl.x, y: sheetTop + 3 + Math.random() * (L.sheetH * 0.8), r: fl.r * 0.92, rot: fl.rot, tw: Math.random() * Math.PI * 2 });
+        falling.splice(f, 1);
+        if (onSheet.length === Math.floor(TARGET / 2) && !saidHalf) { saidHalf = true; say('半床的花了，手别停。'); }
+        if (onSheet.length >= TARGET && jarT < 0) {
+          jarT = 0;
+          saidJar = true;
+          say('够一罐了。提起床单，往里收——');
+        }
+      } else if (fl.y > L.groundY + L.R * 0.3) {
+        falling.splice(f, 1); // 落到地上的花归入夜色
+      }
+    }
+
+    // ── 背景：深夜院子 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    bg.addColorStop(0, '#0c1117');
+    bg.addColorStop(1, '#121a22');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.groundY);
+    // 月亮
+    ctx.fillStyle = 'rgba(226,224,206,0.9)';
+    ctx.beginPath();
+    ctx.arc(L.cx + L.R * 1.55, L.h * 0.17, L.R * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(226,224,206,0.07)';
+    ctx.beginPath();
+    ctx.arc(L.cx + L.R * 1.55, L.h * 0.17, L.R * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    // 地面
+    ctx.fillStyle = '#14110d';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    var gGlow = ctx.createRadialGradient(L.cx, L.groundY, 0, L.cx, L.groundY, L.R * 3);
+    gGlow.addColorStop(0, 'rgba(214,186,130,0.09)');
+    gGlow.addColorStop(1, 'rgba(214,186,130,0)');
+    ctx.fillStyle = gGlow;
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(200,180,140,0.06)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    var shakeX = Math.sin(sway) * amp * L.R * 0.045;
+
+    // ── 树影 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.treeX + shakeX * 2, L.groundY + 2, L.R * 0.85, L.R * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 树干 ──
+    ctx.strokeStyle = '#3a2e22';
+    ctx.lineWidth = L.R * 0.12;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(L.treeX + shakeX * 1.4, L.groundY - 2);
+    ctx.quadraticCurveTo(L.treeX + shakeX, L.canopyY + L.R * 0.3, L.treeX + shakeX * 0.5, L.trunkTop);
+    ctx.stroke();
+    ctx.lineWidth = L.R * 0.038;
+    ctx.beginPath();
+    ctx.moveTo(L.treeX + shakeX * 0.8, L.canopyY + L.R * 0.42);
+    ctx.quadraticCurveTo(L.treeX + shakeX * 0.6 - L.R * 0.3, L.canopyY + L.R * 0.2, L.treeX + shakeX * 0.4 - L.R * 0.52, L.canopyY + L.R * 0.02);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(L.treeX + shakeX * 0.8, L.canopyY + L.R * 0.34);
+    ctx.quadraticCurveTo(L.treeX + shakeX * 0.6 + L.R * 0.3, L.canopyY + L.R * 0.16, L.treeX + shakeX * 0.4 + L.R * 0.5, L.canopyY - L.R * 0.06);
+    ctx.stroke();
+
+    // ── 树冠（深绿云朵，摇时整体晃）──
+    var cy2 = L.canopyY + shakeX * 0.3;
+    function blob(dx, dy, rx, ry) {
+      ctx.beginPath();
+      ctx.ellipse(L.treeX + shakeX + dx, cy2 + dy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#18231a';
+    blob(-L.R * 0.52, L.R * 0.08, L.R * 0.58, L.R * 0.4);
+    blob(L.R * 0.52, L.R * 0.06, L.R * 0.58, L.R * 0.4);
+    blob(0, -L.R * 0.18, L.R * 0.68, L.R * 0.44);
+    ctx.fillStyle = '#1e2c20';
+    blob(0, L.R * 0.1, L.R * 0.74, L.R * 0.38);
+    // 叶点
+    ctx.fillStyle = 'rgba(46,66,48,0.9)';
+    for (var i = 0; i < leaves.length; i++) {
+      var lf = leaves[i];
+      if (lf.x * lf.x * 1.2 + lf.y * lf.y > 1) continue;
+      ctx.beginPath();
+      ctx.arc(L.treeX + shakeX + lf.x * L.R * 0.62, cy2 + lf.y * L.R * 0.38, lf.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 树冠上的花簇（夜里发亮的金点）
+    for (var c = 0; c < clusters.length; c++) {
+      var cl = clusters[c];
+      if (cl.x * cl.x * 1.15 + cl.y * cl.y > 0.94) continue;
+      var tw = 0.55 + 0.45 * Math.sin(now / 700 + cl.tw);
+      ctx.fillStyle = 'rgba(' + C.glow.join(',') + ',' + (0.5 + tw * 0.5) + ')';
+      ctx.beginPath();
+      ctx.arc(L.treeX + shakeX + cl.x * L.R * 0.6, cy2 + cl.y * L.R * 0.36, cl.s * 0.52 * (0.8 + tw * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 接花的床单：一根横竿搭着，两端竖杆撑地 ──
+    var sTop = L.sheetY - L.sheetH * 0.42;
+    // 垂布（搭在横竿前，先画竿再画布会让竿被盖住——先布后竿）
+    var lift = jarT >= 0 ? Math.sin(Math.min(1, jarT) * Math.PI) : 0;
+    var hem = sTop + L.sheetH * 1.18 - lift * L.sheetH * 0.12;
+    var clothW = L.sheetW * 0.92;
+    var poleL = L.cx - clothW - 14, poleR = L.cx + clothW + 14;
+    var sheetGrad = ctx.createLinearGradient(0, sTop, 0, hem);
+    sheetGrad.addColorStop(0, '#e2ddcc');
+    sheetGrad.addColorStop(1, '#b5b09e');
+    ctx.fillStyle = sheetGrad;
+    ctx.beginPath();
+    ctx.moveTo(L.cx - clothW, sTop);
+    // 上沿随竿微垂
+    ctx.quadraticCurveTo(L.cx, sTop + L.sheetH * 0.08, L.cx + clothW, sTop);
+    // 右侧垂边（微飘）
+    ctx.quadraticCurveTo(L.cx + clothW * 1.04, (sTop + hem) / 2, L.cx + clothW * 0.97, hem);
+    // 下沿（微弧）
+    ctx.quadraticCurveTo(L.cx, hem + L.sheetH * 0.1, L.cx - clothW * 0.97, hem);
+    // 左侧垂边
+    ctx.quadraticCurveTo(L.cx - clothW * 1.04, (sTop + hem) / 2, L.cx - clothW, sTop);
+    ctx.closePath();
+    ctx.fill();
+    // 竖向布褶
+    ctx.strokeStyle = 'rgba(120,112,92,0.28)';
+    ctx.lineWidth = 1;
+    for (var s = 1; s <= 4; s++) {
+      var fx = L.cx - clothW + clothW * 2 * s / 5;
+      ctx.beginPath();
+      ctx.moveTo(fx, sTop + L.sheetH * 0.06);
+      ctx.quadraticCurveTo(fx + (s % 2 ? 4 : -4), (sTop + hem) / 2, fx, hem - 2);
+      ctx.stroke();
+    }
+    // 布面细点
+    ctx.fillStyle = 'rgba(255,255,250,0.5)';
+    for (var d = 0; d < sheetDots.length; d++) {
+      var dt2 = sheetDots[d];
+      ctx.globalAlpha = dt2.a;
+      ctx.fillRect(L.cx - clothW * 0.9 + dt2.x * clothW * 1.8, sTop + dt2.y * (hem - sTop), 1.6, 1.6);
+    }
+    ctx.globalAlpha = 1;
+    // 横竿（压在布上沿）与竖杆
+    ctx.strokeStyle = '#6a5b40';
+    ctx.lineWidth = 3.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(poleL - 8, sTop - 2);
+    ctx.lineTo(poleR + 8, sTop - 2);
+    ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(poleL, sTop);
+    ctx.lineTo(poleL, L.groundY);
+    ctx.moveTo(poleR, sTop);
+    ctx.lineTo(poleR, L.groundY);
+    ctx.stroke();
+
+    // 床单上落定的花
+    for (var o = 0; o < onSheet.length; o++) {
+      var osf = onSheet[o];
+      flower(osf.x, osf.y, osf.r, osf.rot, C, 0.9);
+    }
+
+    // ── 玻璃罐（收罐时才登场）──
+    if (jarT >= 0) {
+      var jt = jarT * jarT * (3 - 2 * jarT);
+      // 罐
+      ctx.fillStyle = 'rgba(210,220,226,0.16)';
+      ctx.strokeStyle = 'rgba(220,230,236,0.55)';
+      ctx.lineWidth = 2;
+      var jw = L.jarS, jh = L.jarS * 1.25;
+      var jy = L.jarY - jh;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(L.jarX - jw * 0.55, jy, jw * 1.1, jh, jw * 0.16);
+      else ctx.rect(L.jarX - jw * 0.55, jy, jw * 1.1, jh);
+      ctx.fill();
+      ctx.stroke();
+      // 罐口与盖
+      ctx.fillStyle = '#5a4a30';
+      ctx.fillRect(L.jarX - jw * 0.62, jy - jw * 0.2, jw * 1.24, jw * 0.26);
+      // 罐里的糖桂花：随进度涨
+      var fillH = jh * 0.72 * jt;
+      if (fillH > 1) {
+        ctx.fillStyle = 'rgba(' + C.deep.join(',') + ',0.85)';
+        ctx.beginPath();
+        ctx.ellipse(L.jarX, jy + jh - fillH / 2, jw * 0.46, fillH / 2 + 1, 0, 0, Math.PI * 2);
+        ctx.fill();
+        for (var g = 0; g < 14; g++) {
+          var ga = (g * 137 + jt * 300) % 628 / 100;
+          ctx.fillStyle = 'rgba(' + C.glow.join(',') + ',0.7)';
+          ctx.beginPath();
+          ctx.arc(L.jarX + Math.cos(ga) * jw * 0.3 * Math.sin(g * 3 + jt * 9), jy + jh - (g / 14) * fillH, 1.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // 收罐尾声：床单的花飞进罐
+      if (jarT > 0.15) {
+        var flyN = Math.min(onSheet.length, Math.floor((jarT - 0.15) / 0.85 * onSheet.length) + 3);
+        for (var pf = 0; pf < flyN; pf++) {
+          var src = onSheet[pf];
+          if (!src) break;
+          var pt = Math.min(1, (jarT - 0.15 - pf * 0.002) / 0.5);
+          if (pt >= 1) continue; // 到罐的花由罐内花影代表
+          var et2 = pt * pt * (3 - 2 * pt);
+          var px2 = src.x + (L.jarX - src.x) * et2;
+          var py2 = src.y + (L.jarY - jh * 0.4 - src.y) * et2 - Math.sin(pt * Math.PI) * L.R * 0.25;
+          flower(px2, py2, src.r * 0.8, src.rot + et2 * 5, C, 0.9 * (1 - et2 * 0.6));
+        }
+      }
+      if (jarT >= 1 && !resting) {
+        resting = true;
+        doneCount++;
+        if (doneCount === 1) say('封好了。明天冲一勺，甜一整个秋天。', true);
+        else say('又封一罐。秋天的甜，是摇下来的。', true);
+      }
+    }
+
+    // ── 飘落中的花 ──
+    for (var f2 = 0; f2 < falling.length; f2++) {
+      var fl2 = falling[f2];
+      flower(fl2.x, fl2.y, fl2.r, fl2.rot, C, 0.95);
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('花 ' + Math.min(onSheet.length, TARGET) + ' / ' + TARGET, w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 满罐提示 ──
+    if (!saidStart && !resting && onSheet.length === 0) {
+      ctx.fillStyle = 'rgba(201,169,94,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住树冠，摇', L.treeX, L.canopyY - L.R * 0.58);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再摇一树', L.cx, L.groundY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__osmanthus = {
+    onSheet: function () { return onSheet.length; },
+    falling: function () { return falling.length; },
+    jarT: function () { return jarT; },
+    resting: function () { return resting; },
+    hue: function () { return hueSet; },
+    amp: function () { return amp; },
+    press: function () { startPress(L.treeX, L.canopyY); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

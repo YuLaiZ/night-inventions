@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>续一杯热水</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #a89a7c; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6a6254; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a89a7c;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6a6254;
+    text-decoration: none;
+    border-bottom: 1px dotted #6a6254;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89a7c; border-color: #a89a7c; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>续一杯热水</h1>
+  <p>热水瓶里还剩半瓶夜。<br>按住它，给搪瓷缸续满——天没亮，先把自己照顾好。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var pour = 0;          // 倾倒角度 0-1
+  var cup = 0.35;        // 缸中水位 0-1（初始半杯剩一点）
+  var steam = [];
+  var waves = [];
+  var resting = false;
+  var saidStart = false;
+  var refill = 0;        // 续满次数
+  var tilt = 0;          // 瓶身当前倾角
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var shellLines = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 9; i++) shellLines.push({ x: rng() * 2 - 1, a: 0.1 + rng() * 0.12 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.counterY = L.h * 0.66;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.cupX = L.cx - L.R * 0.55;
+    L.cupY = L.counterY + (L.h - L.counterY) * 0.42;
+    L.cw = L.R * 0.62;
+    L.ch = L.R * 0.66;
+    L.flaskX = L.cx + L.R * 0.75;
+    L.flaskY = L.counterY + (L.h - L.counterY) * 0.34;
+    L.fw = L.R * 0.46;
+    L.fh = L.R * 1.15;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      cup = 0.35;
+      resting = false;
+      say('喝完了。再续一杯，带着走。');
+      return;
+    }
+    if (hold || cup >= 1) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('瓶口对准缸沿——水是烫的，慢些。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (hold && cup < 1) {
+      tilt = Math.min(1, tilt + dt * 2.2);
+      if (tilt > 0.6) {
+        cup = Math.min(1, cup + dt * 0.16);
+        if (waves.length < 5 && Math.random() < dt * 6) {
+          waves.push({ x: L.cupX + (Math.random() - 0.5) * L.cw * 0.6, life: 1, r: 3 });
+        }
+        if (cup >= 1) {
+          resting = true;
+          hold = false;
+          refill++;
+          if (refill === 1) say('满杯。热气一熏，人就醒了。', true);
+          else say('又续一杯。夜里的人，靠这个撑着。', true);
+        }
+      }
+    } else {
+      tilt = Math.max(0, tilt - dt * 2.6);
+    }
+    rippleWaves(dt);
+    function rippleWaves(dt2) {
+      for (var v = waves.length - 1; v >= 0; v--) {
+        var wv = waves[v];
+        wv.r += dt2 * 22; wv.life -= dt2 * 2.2;
+        if (wv.life <= 0) waves.splice(v, 1);
+      }
+    }
+    // 蒸汽（缸里有水就有）
+    if (cup > 0.15 && steam.length < 14 && Math.random() < dt * 6) {
+      steam.push({
+        x: L.cupX + (Math.random() - 0.5) * L.cw * 0.7,
+        y: L.cupY - L.ch * cup - 6,
+        v: 10 + Math.random() * 12,
+        drift: (Math.random() - 0.5) * 9,
+        life: 1, r: 3.5 + Math.random() * 5
+      });
+    }
+    for (var s = steam.length - 1; s >= 0; s--) {
+      var st = steam[s];
+      st.y -= st.v * dt; st.x += st.drift * dt; st.life -= dt * 0.5;
+      if (st.life <= 0) steam.splice(s, 1);
+    }
+
+    // ── 背景：深夜桌台 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#131a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.cx, L.counterY, 0, L.cx, L.counterY, L.R * 3);
+    glow.addColorStop(0, 'rgba(220,190,140,0.09)');
+    glow.addColorStop(1, 'rgba(220,190,140,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 搪瓷缸 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.cupX, L.cupY + 3, L.cw * 0.95, L.ch * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var cupTop = L.cupY - L.ch;
+    ctx.fillStyle = '#d8d4c8';
+    ctx.beginPath();
+    ctx.moveTo(L.cupX - L.cw * 0.72, cupTop);
+    ctx.lineTo(L.cupX + L.cw * 0.72, cupTop);
+    ctx.lineTo(L.cupX + L.cw * 0.82, L.cupY);
+    ctx.lineTo(L.cupX - L.cw * 0.82, L.cupY);
+    ctx.closePath();
+    ctx.fill();
+    // 缸身蓝边与磨掉的瓷
+    ctx.strokeStyle = '#4f7a9a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(L.cupX - L.cw * 0.76, cupTop + L.ch * 0.16);
+    ctx.lineTo(L.cupX + L.cw * 0.76, cupTop + L.ch * 0.16);
+    ctx.stroke();
+    ctx.fillStyle = '#b8b2a2';
+    ctx.beginPath();
+    ctx.ellipse(L.cupX + L.cw * 0.28, cupTop + L.ch * 0.55, L.cw * 0.14, L.ch * 0.16, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // 缸内水
+    var wy = L.cupY - L.ch * cup;
+    ctx.fillStyle = 'rgba(150,178,200,0.55)';
+    ctx.beginPath();
+    ctx.ellipse(L.cupX, wy, L.cw * 0.64, L.cw * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 水波
+    for (var v = 0; v < waves.length; v++) {
+      var wv = waves[v];
+      ctx.strokeStyle = 'rgba(220,236,250,' + (0.6 * wv.life) + ')';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(wv.x, wy, wv.r, wv.r * 0.3, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 缸沿
+    ctx.strokeStyle = '#9c968a';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(L.cupX, cupTop, L.cw * 0.72, L.cw * 0.12, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // ── 水线（倾倒时）──
+    if (tilt > 0.6 && cup < 1) {
+      var spoutX = L.flaskX - L.fw * 0.75;
+      var spoutY = L.flaskY - L.fh * 0.25;
+      ctx.strokeStyle = 'rgba(190,214,236,0.7)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(spoutX, spoutY);
+      ctx.quadraticCurveTo((spoutX + L.cupX) * 0.6, spoutY + 22, L.cupX + L.cw * 0.15, wy - 2);
+      ctx.stroke();
+    }
+
+    // ── 热水瓶（按住倾倒）──
+    var tAng = -tilt * 0.5;
+    ctx.save();
+    ctx.translate(L.flaskX, L.flaskY);
+    ctx.rotate(tAng);
+    // 竹壳瓶身
+    ctx.fillStyle = '#8a6f48';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-L.fw, -L.fh * 0.55, L.fw * 2, L.fh, 8);
+    else ctx.rect(-L.fw, -L.fh * 0.55, L.fw * 2, L.fh);
+    ctx.fill();
+    // 竹壳竖纹
+    ctx.strokeStyle = 'rgba(60,46,26,0.6)';
+    ctx.lineWidth = 1.6;
+    for (var sl = 0; sl < shellLines.length; sl++) {
+      var sl2 = shellLines[sl];
+      ctx.globalAlpha = sl2.a + 0.15;
+      ctx.beginPath();
+      ctx.moveTo(sl2.x * L.fw, -L.fh * 0.55);
+      ctx.lineTo(sl2.x * L.fw, L.fh * 0.45);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // 瓶口与瓶塞
+    ctx.fillStyle = '#5c4c34';
+    ctx.fillRect(-L.fw * 0.55, -L.fh * 0.62, L.fw * 1.1, L.fh * 0.08);
+    if (tilt < 0.3) {
+      ctx.fillStyle = '#3c3020';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(-L.fw * 0.34, -L.fh * 0.76, L.fw * 0.68, L.fh * 0.15, 4);
+      else ctx.rect(-L.fw * 0.34, -L.fh * 0.76, L.fw * 0.68, L.fh * 0.15);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // ── 蒸汽 ──
+    for (var s2 = 0; s2 < steam.length; s2++) {
+      var st2 = steam[s2];
+      ctx.fillStyle = 'rgba(240,238,228,' + (0.15 * st2.life) + ')';
+      ctx.beginPath();
+      ctx.arc(st2.x, st2.y, st2.r * (1.3 - st2.life * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('杯 ' + Math.round(cup * 100) + ' %', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && !resting && tilt < 0.1) {
+      ctx.fillStyle = 'rgba(168,154,124,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住热水瓶', L.flaskX, L.flaskY + L.fh * 0.75);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，喝掉再续', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__cup = {
+    cup: function () { return +cup.toFixed(2); },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

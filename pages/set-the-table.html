@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>摆碗筷</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #b8a484; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e6452; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b8a484;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6e6452;
+    text-decoration: none;
+    border-bottom: 1px dotted #6e6452;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b8a484; border-color: #b8a484; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>摆碗筷</h1>
+  <p>豆浆在灶上，桌子还空着。<br>按住摆桌——两副碗筷，等头一锅豆浆上桌。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var placed = 0;        // 已摆件数 0-4
+  var placeT = 0;        // 摆放动画计时
+  var resting = false;
+  var saidStart = false;
+  var tableDone = 0;
+
+  var ITEMS = [
+    { nx: -0.28, ny: -0.18, kind: 'bowl' },
+    { nx: 0.22, ny: -0.18, kind: 'bowl' },
+    { nx: -0.06, ny: -0.18, kind: 'chop' },
+    { nx: 0.44, ny: -0.18, kind: 'chop' }
+  ];
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var woodGrain = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 12; i++) woodGrain.push({ y: rng(), a: 0.05 + rng() * 0.06, w: 60 + rng() * 120 });
+  })();
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.cy = L.h * 0.6;
+    L.R = Math.min(L.w * 0.26, L.h * 0.24, 165);
+    L.tw = L.R * 2.1;
+    L.th = L.R * 1.7;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function reset() {
+    placed = 0; resting = false; saidStart = false;
+  }
+
+  function startPress() {
+    if (resting) {
+      reset();
+      say('收走，擦桌，再摆一遍。');
+      return;
+    }
+    if (hold) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('一只手拿一样，摆得对称些。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  function drawBowl(x, y, s) {
+    // 俯视碗：外圈口沿+内圈汤底
+    ctx.fillStyle = '#e8e2d4';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 26 * s, 20 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#b8ac94';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#d4ecf2';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 19 * s, 14 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(x - 5 * s, y - 3 * s, 5 * s, 2.6 * s, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawChopsticks(x, y, s) {
+    // 竖放：筷枕在碗右侧，筷尖朝上
+    ctx.fillStyle = 'rgba(30,22,12,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 14 * s, 12 * s, 3 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#c8a874';
+    ctx.lineWidth = 3.8;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 5 * s, y + 16 * s);
+    ctx.lineTo(x - 3 * s, y - 18 * s);
+    ctx.moveTo(x + 5 * s, y + 16 * s);
+    ctx.lineTo(x + 5 * s, y - 15 * s);
+    ctx.stroke();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (hold && !resting && placed < ITEMS.length) {
+      placeT += dt * 1.3;
+      if (placeT >= 1) {
+        placeT = 0;
+        placed++;
+        if (placed === 2) say('左边好了。右边照着摆。');
+        if (placed === 4) {
+          resting = true;
+          hold = false;
+          tableDone++;
+          if (tableDone === 1) say('摆好了。就等头一锅豆浆上桌。', true);
+          else say('又是齐齐整整的两副。老主顾要来了。', true);
+        }
+      }
+    }
+
+    // ── 背景：铺内晨前 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.cy - L.th);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#161a1e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, Math.max(0, L.cy - L.th));
+    // 地面
+    ctx.fillStyle = '#14110d';
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 木桌 ──
+    var tableTop = L.cy - L.th / 2;
+    var tableG = ctx.createLinearGradient(0, tableTop, 0, tableTop + L.th);
+    tableG.addColorStop(0, '#6a563e');
+    tableG.addColorStop(1, '#4c3c2a');
+    ctx.fillStyle = tableG;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(L.cx - L.tw / 2, tableTop, L.tw, L.th, 14);
+    else ctx.rect(L.cx - L.tw / 2, tableTop, L.tw, L.th);
+    ctx.fill();
+    // 桌面木纹
+    ctx.strokeStyle = 'rgba(40,30,18,0.5)';
+    ctx.lineWidth = 1.4;
+    for (var g = 0; g < woodGrain.length; g++) {
+      var wg = woodGrain[g];
+      ctx.globalAlpha = wg.a;
+      ctx.beginPath();
+      ctx.moveTo(L.cx - L.tw * 0.44, tableTop + wg.y * L.th);
+      ctx.quadraticCurveTo(L.cx + wg.w - 60, tableTop + wg.y * L.th - 5, L.cx + L.tw * 0.44, tableTop + wg.y * L.th + 3);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // 桌沿高光
+    ctx.strokeStyle = 'rgba(220,196,150,0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(L.cx - L.tw / 2 + 8, tableTop + 3);
+    ctx.lineTo(L.cx + L.tw / 2 - 8, tableTop + 3);
+    ctx.stroke();
+
+    // ── 摆上的碗筷（含飞入动画）──
+    for (var i = 0; i < ITEMS.length; i++) {
+      var it = ITEMS[i];
+      var ix = L.cx + it.nx * L.R * 1.2;
+      var iy = L.cy + it.ny * L.R * 1.1;
+      if (i < placed) {
+        if (it.kind === 'bowl') drawBowl(ix, iy, 1);
+        else drawChopsticks(ix, iy, 1);
+      } else if (i === placed && hold) {
+        // 正在飞入的那件：从桌沿滑向位置
+        var t = Math.min(1, placeT);
+        var et = t * t * (3 - 2 * t);
+        var fx = L.cx + (ix - L.cx) * et;
+        var fy = tableTop + L.th + 40 + (iy - tableTop - L.th - 40) * et;
+        ctx.globalAlpha = 0.5 + et * 0.5;
+        if (it.kind === 'bowl') drawBowl(fx, fy, 0.9 + et * 0.1);
+        else drawChopsticks(fx, fy, 0.9 + et * 0.1);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // ── 晨光（摆满后桌面亮起）──
+    if (placed >= 4) {
+      var dawn = ctx.createLinearGradient(0, tableTop, 0, tableTop + L.th);
+      dawn.addColorStop(0, 'rgba(240,214,150,' + (0.08 + 0.05 * Math.sin(now / 900)) + ')');
+      dawn.addColorStop(1, 'rgba(240,214,150,0)');
+      ctx.fillStyle = dawn;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(L.cx - L.tw / 2, tableTop, L.tw, L.th, 14);
+      else ctx.rect(L.cx - L.tw / 2, tableTop, L.tw, L.th);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(placed + ' / ' + ITEMS.length, w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 完成 ──
+    if (!saidStart && placed === 0 && !hold) {
+      ctx.fillStyle = 'rgba(184,164,132,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住桌子，开摆', L.cx, tableTop + L.th + 40);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，收走重摆', L.cx, tableTop + L.th + 40);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__table = {
+    placed: function () { return placed; },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

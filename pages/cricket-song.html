@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蛐蛐</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a9a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #66705c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #9aa878;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #66705c;
+    text-decoration: none;
+    border-bottom: 1px dotted #66705c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9aa878; border-color: #9aa878; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>蛐蛐</h1>
+  <p>墙根有一只，后半夜还在叫。<br>按住屏幕，递一根草——它肯不肯理你，看缘分。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var trust = 0;         // 信任度 0-1，按住渐增、松手缓降
+  var chirpPhase = 0;    // 叫声节奏相位
+  var chirping = false;  // 当前这一拍是否在叫
+  var waves = [];        // 声纹波纹 {r, life, side}
+  var saidStart = false;
+  var chirpCount = 0;    // 今晚陪它叫的组数
+  var grassT = 0;        // 草茎伸出程度 0-1
+  var hopT = -1;         // 蟋蟀受惊后跳回动画 -1 闲置
+  var mood = '';         // 最近情绪文案
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var grassBlades = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 9; i++) {
+      grassBlades.push({ x: rng() * 2 - 1, h: 0.5 + rng() * 0.7, sway: rng() * Math.PI * 2, curve: (rng() - 0.5) * 0.8 });
+    }
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  // 更次：19-21 一更 …… 3-5 五更
+  function nightWatch() {
+    var hh = new Date().getHours();
+    if (hh >= 19 && hh < 21) return ['一更', '天刚黑透'];
+    if (hh >= 21 && hh < 23) return ['二更', '人声渐稀'];
+    if (hh >= 23 || hh < 1) return ['三更', '夜到最深'];
+    if (hh >= 1 && hh < 3) return ['四更', '露水最重'];
+    if (hh >= 3 && hh < 5) return ['五更', '天快亮了'];
+    return ['白日', '它也要歇'];
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.42;
+    L.groundY = L.h * 0.72;
+    L.R = Math.min(L.w * 0.22, L.h * 0.2, 140);
+    L.cX = L.cx + L.R * 0.3;
+    L.cY = L.groundY - L.R * 0.08;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    hold = true;
+    if (!saidStart) { saidStart = true; say('慢慢递，别惊着它。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    trust = Math.max(0, Math.min(1, trust + (hold ? dt * 0.16 : -dt * 0.07)));
+    grassT += ((hold ? 1 : 0) - grassT) * dt * 3;
+    if (hopT >= 0) { hopT += dt * 2; if (hopT > 1) hopT = -1; }
+
+    // 叫声节奏：信任越高叫得越欢；周期唧-唧-停
+    chirpPhase += dt * (1.1 + trust * 1.3);
+    var beat = chirpPhase % 1.6;
+    var wasChirping = chirping;
+    chirping = trust > 0.15 && beat < 0.72 && (beat % 0.36 < 0.2);
+    if (chirping && !wasChirping && Math.random() < 0.6 + trust * 0.4) {
+      chirpCount++;
+      waves.push({ r: L.R * 0.16, life: 1, side: Math.random() > 0.5 ? 1 : -1 });
+      if (chirpCount === 10) say('它肯理你了。');
+      if (chirpCount === 30) { say('' + nightWatch()[0] + '了，它陪你守着呢。', true); }
+    }
+    for (var v = waves.length - 1; v >= 0; v--) {
+      var wv = waves[v];
+      wv.r += dt * L.R * 0.9;
+      wv.life -= dt * 0.75;
+      if (wv.life <= 0) waves.splice(v, 1);
+    }
+
+    // ── 背景：墙根 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#121a1c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.groundY);
+    // 墙（右侧暗面+砖缝）
+    ctx.fillStyle = '#151a1e';
+    ctx.fillRect(w * 0.55, 0, w * 0.45, L.groundY);
+    ctx.strokeStyle = 'rgba(80,90,95,0.25)';
+    ctx.lineWidth = 1.5;
+    for (var br = 0; br < 6; br++) {
+      var byy = L.groundY - br * L.R * 0.34 - L.R * 0.1;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.55, byy);
+      ctx.lineTo(w, byy);
+      ctx.stroke();
+      for (var bc = 0; bc < 3; bc++) {
+        var bxx = w * (0.62 + bc * 0.13) + (br % 2) * w * 0.055;
+        ctx.beginPath();
+        ctx.moveTo(bxx, byy);
+        ctx.lineTo(bxx, byy + L.R * 0.34);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#100e0a';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    var glow = ctx.createRadialGradient(L.cx, L.groundY, 0, L.cx, L.groundY, L.R * 2.8);
+    glow.addColorStop(0, 'rgba(190,200,150,0.07)');
+    glow.addColorStop(1, 'rgba(190,200,150,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.groundY - 60, w, h - L.groundY + 60);
+
+    // ── 声纹波纹（从蟋蟀背后墙根漾出）──
+    for (var q = 0; q < waves.length; q++) {
+      var wq = waves[q];
+      ctx.strokeStyle = 'rgba(200,214,150,' + (0.4 * wq.life) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(L.cX, L.cY - L.R * 0.14, wq.r, Math.PI * (wq.side > 0 ? 1.15 : 1.55), Math.PI * (wq.side > 0 ? 1.85 : 2.25));
+      ctx.stroke();
+    }
+
+    // ── 草丛 ──
+    for (var g = 0; g < grassBlades.length; g++) {
+      var gb = grassBlades[g];
+      var gx = L.cx + gb.x * L.R * 1.15;
+      var gh = L.R * gb.h;
+      var sway = Math.sin(now / 1400 + gb.sway) * 3 + (hold ? Math.sin(now / 220 + gb.sway) * 2 : 0);
+      ctx.strokeStyle = 'rgba(70,88,58,0.9)';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(gx, L.groundY);
+      ctx.quadraticCurveTo(gx + gb.curve * 26 + sway * 0.5, L.groundY - gh * 0.45, gx + gb.curve * 40 + sway * 1.6, L.groundY - gh * 0.72);
+      ctx.stroke();
+    }
+
+    // ── 草茎（按住时从左侧递向蟋蟀）──
+    if (grassT > 0.02) {
+      var stemLen = L.R * 1.1 * grassT;
+      var sx0 = L.cx - L.R * 1.5, sy0 = L.groundY - L.R * 0.16;
+      var ex0 = sx0 + stemLen, ey0 = sy0 - stemLen * 0.18;
+      ctx.strokeStyle = 'rgba(150,170,110,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx0, sy0);
+      ctx.quadraticCurveTo(sx0 + stemLen * 0.5, sy0 - stemLen * 0.3, ex0, ey0);
+      ctx.stroke();
+      // 草穗
+      ctx.fillStyle = 'rgba(180,196,130,0.9)';
+      ctx.beginPath();
+      ctx.ellipse(ex0, ey0 - 4, 3, 9, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 蟋蟀 ──
+    var hop = hopT >= 0 ? Math.sin(hopT * Math.PI) * L.R * 0.18 : 0;
+    var shy = (1 - trust) * L.R * 0.06; // 不熟时往墙根缩
+    var cx2 = L.cX + shy;
+    var cy2 = L.cY - hop - shy * 0.4;
+    var bodyBob = chirping ? Math.sin(now / 42) * 1.4 : 0;
+    ctx.save();
+    ctx.translate(cx2, cy2 + bodyBob);
+    ctx.scale(1.3, 1.3);
+    // 后腿（两根折线）
+    ctx.strokeStyle = '#3d3426';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-5, -2); ctx.lineTo(-12, -9); ctx.lineTo(-19, -3);
+    ctx.moveTo(-5, -1); ctx.lineTo(-11, -5); ctx.lineTo(-17, 2);
+    ctx.stroke();
+    // 身体（卵圆）
+    ctx.fillStyle = '#4a4028';
+    ctx.beginPath();
+    ctx.ellipse(2, -4, 13, 7, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    // 背纹
+    ctx.strokeStyle = 'rgba(30,26,16,0.7)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-9, -6); ctx.lineTo(12, -5);
+    ctx.stroke();
+    // 头与触须
+    ctx.fillStyle = '#3d3426';
+    ctx.beginPath();
+    ctx.arc(13, -5, 4.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90,80,55,0.9)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(15, -7); ctx.quadraticCurveTo(24, -14, 31, -13);
+    ctx.moveTo(15, -6); ctx.quadraticCurveTo(25, -9, 33, -7);
+    ctx.stroke();
+    // 振翅时翅面微光
+    if (chirping) {
+      ctx.fillStyle = 'rgba(220,228,170,' + (0.25 + 0.2 * Math.sin(now / 30)) + ')';
+      ctx.beginPath();
+      ctx.ellipse(1, -7, 10, 3.4, -0.06, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // ── 右上角等宽刻度：更次 ──
+    var watch = nightWatch();
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(watch[0], w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 状态文案 ──
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(154,168,120,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，递一根草', L.cx + L.R * 0.6, L.groundY + 34);
+    } else if (trust > 0.75 && hold) {
+      ctx.fillStyle = 'rgba(154,168,120,0.55)';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(watch[1] + ' · 它叫给你听', L.cx + L.R * 0.6, L.groundY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__cricket = {
+    trust: function () { return +trust.toFixed(2); },
+    chirpCount: function () { return chirpCount; },
+    chirping: function () { return chirping; },
+    watch: function () { return nightWatch()[0]; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

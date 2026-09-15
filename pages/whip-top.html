@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抽陀螺</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #9a8a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6c6552; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #a89a78;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c6552;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c6552;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #a89a78; border-color: #a89a78; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>抽陀螺</h1>
+  <p>院子的夜比屋里长。<br>点一下，抽一鞭——看它今晚能站多久。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var spin = 0;          // 当前转速 rad/s
+  var angle = 0;         // 累计旋转角
+  var spinning = false;  // 是否立着
+  var whipT = -1;        // 鞭子甩击动画 0-1，-1 闲置
+  var runStart = 0;      // 本回合开始时刻
+  var best = 0;          // 今晚最久（秒）
+  var lastLen = 0;       // 上一回合时长
+  var falls = 0;         // 倒下的次数
+  var saidStart = false;
+  var dust = [];         // 抽鞭时的尘点
+  var lean = 0;          // 晃动倾斜
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.groundY = L.h * 0.66;
+    L.R = Math.min(L.w * 0.2, L.h * 0.19, 130);
+    L.topX = L.cx;
+    L.topY = L.groundY - L.R * 0.62;
+    L.bestX = L.w * 0.5;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function whip() {
+    if (whipT >= 0) return;
+    whipT = 0;
+    spin = Math.min(30, spin + 13);
+    if (!spinning) {
+      spinning = true;
+      runStart = Date.now();
+    }
+    for (var i = 0; i < 8; i++) {
+      dust.push({
+        x: L.topX + L.R * 0.7,
+        y: L.topY + L.R * 0.4 + (Math.random() - 0.5) * 14,
+        vx: -40 - Math.random() * 50,
+        vy: -20 - Math.random() * 30,
+        life: 1, r: 1.5 + Math.random() * 2.2
+      });
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function () {
+    whip();
+    if (!saidStart) { saidStart = true; say('缠好，甩出去——鞭子要抽在腰上。'); }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (whipT >= 0) {
+      whipT += dt * 2.4;
+      if (whipT > 1) whipT = -1;
+    }
+    if (spinning) {
+      var decay = 0.45 + spin * 0.03;        // 一鞭约二三十秒，补鞭可续
+      spin = Math.max(0, spin - decay * dt);
+      angle += spin * dt;
+      var wobbleAmp = Math.max(0, 1 - spin / 9);
+      lean = Math.sin(now / 120) * wobbleAmp * 0.22 + Math.sin(now / 47) * wobbleAmp * 0.06;
+      if (spin <= 0.01) {
+        spinning = false;
+        lastLen = (now - runStart) / 1000;
+        falls++;
+        if (lastLen > best) {
+          best = lastLen;
+          say('' + lastLen.toFixed(1) + ' 秒，今晚最久。地都记住了。', true);
+        } else {
+          say('' + lastLen.toFixed(1) + ' 秒。差 ' + (best - lastLen).toFixed(1) + ' 秒破纪录。', true);
+        }
+      }
+    }
+    for (var d = dust.length - 1; d >= 0; d--) {
+      var dd = dust[d];
+      dd.x += dd.vx * dt; dd.y += dd.vy * dt;
+      dd.vy += 90 * dt; dd.life -= dt * 1.4;
+      if (dd.life <= 0) dust.splice(d, 1);
+    }
+
+    // ── 背景：深夜院子 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#131a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.groundY);
+    ctx.fillStyle = '#14110d';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    var glow = ctx.createRadialGradient(L.cx, L.groundY, 0, L.cx, L.groundY, L.R * 3);
+    glow.addColorStop(0, 'rgba(214,186,130,0.09)');
+    glow.addColorStop(1, 'rgba(214,186,130,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(210,190,160,0.06)';
+    ctx.fillRect(0, L.groundY, w, 2);
+    // 月亮
+    ctx.fillStyle = 'rgba(226,224,206,0.85)';
+    ctx.beginPath();
+    ctx.arc(w * 0.82, h * 0.18, L.R * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(226,224,206,0.06)';
+    ctx.beginPath();
+    ctx.arc(w * 0.82, h * 0.18, L.R * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 地面使用痕迹（倒过几次后留下一圈浅印）
+    if (falls > 0) {
+      ctx.strokeStyle = 'rgba(190,170,130,' + Math.min(0.16, falls * 0.04) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(L.cx, L.groundY + 6, L.R * (1 + falls * 0.06), L.R * 0.16, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ── 陀螺 ──
+    var tx = L.topX, ty = L.topY;
+    var blur = spinning ? Math.min(1, spin / 14) : 0;
+    if (spinning) {
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(tx, L.groundY + 3, L.R * 0.5, L.R * 0.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.rotate(spinning ? lean : 1.32); // 倒下侧躺，顶盘翘起
+    // 静止时把整体放低，让盘沿贴地
+    if (!spinning) ctx.translate(0, L.R * 0.22);
+    // 鞭痕缠柄
+    // 顶盘（同心环，旋转的缺口标记）
+    var rDisc = L.R * 0.5;
+    ctx.fillStyle = '#5a4a32';
+    ctx.beginPath();
+    ctx.arc(0, -L.R * 0.28, rDisc, 0, Math.PI * 2);
+    ctx.fill();
+    // 环纹
+    ctx.strokeStyle = 'rgba(214,186,120,0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, -L.R * 0.28, rDisc * 0.66, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(150,120,80,0.7)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, -L.R * 0.28, rDisc * 0.38, 0, Math.PI * 2);
+    ctx.stroke();
+    // 旋转标记点（高速时画成环）
+    var markA = angle % (Math.PI * 2);
+    if (blur > 0.55) {
+      ctx.strokeStyle = 'rgba(240,220,160,0.5)';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.arc(0, -L.R * 0.28, rDisc * 0.82, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      for (var m = 0; m < 3; m++) {
+        var ma = markA + m * Math.PI * 2 / 3;
+        ctx.fillStyle = 'rgba(240,220,160,0.85)';
+        ctx.beginPath();
+        ctx.arc(Math.cos(ma) * rDisc * 0.82, -L.R * 0.28 + Math.sin(ma) * rDisc * 0.82 * 0.32, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 顶尖柄
+    ctx.fillStyle = '#7a6848';
+    ctx.beginPath();
+    ctx.arc(0, -L.R * 0.28, rDisc * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    // 锥体（向下收尖）
+    ctx.fillStyle = '#6b5940';
+    ctx.beginPath();
+    ctx.moveTo(-rDisc, -L.R * 0.28);
+    ctx.quadraticCurveTo(-rDisc * 0.55, L.R * 0.28, -2, L.R * 0.62);
+    ctx.lineTo(2, L.R * 0.62);
+    ctx.quadraticCurveTo(rDisc * 0.55, L.R * 0.28, rDisc, -L.R * 0.28);
+    ctx.closePath();
+    ctx.fill();
+    // 锥体亮面
+    ctx.fillStyle = 'rgba(240,225,180,0.14)';
+    ctx.beginPath();
+    ctx.moveTo(-rDisc * 0.5, -L.R * 0.26);
+    ctx.quadraticCurveTo(-rDisc * 0.3, L.R * 0.2, -1, L.R * 0.58);
+    ctx.lineTo(2, L.R * 0.62);
+    ctx.quadraticCurveTo(-rDisc * 0.2, L.R * 0.1, -rDisc * 0.18, -L.R * 0.26);
+    ctx.closePath();
+    ctx.fill();
+    // 地尖
+    ctx.fillStyle = '#8a7452';
+    ctx.beginPath();
+    ctx.arc(0, L.R * 0.64, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── 鞭子（甩击动画：从右上方划一道弧）──
+    if (whipT >= 0) {
+      var t = whipT;
+      var sx = tx + L.R * 2.2, sy = ty - L.R * 1.4;
+      var ex = tx + L.R * 0.35, ey = ty + L.R * 0.3;
+      var et = t * t * (3 - 2 * t);
+      var mx = sx + (ex - sx) * et, my = sy + (ey - sy) * et;
+      ctx.strokeStyle = 'rgba(216,200,160,' + (0.9 - t * 0.5) + ')';
+      ctx.lineWidth = 2.6 - t * 1.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(sx + 40, sy - 30);
+      ctx.quadraticCurveTo(mx + 30, my - 40, mx, my);
+      ctx.stroke();
+      // 鞭梢白痕
+      if (t < 0.5) {
+        ctx.strokeStyle = 'rgba(255,252,240,' + (0.8 - t * 1.5) + ')';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(mx, my);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+      }
+    }
+
+    // ── 尘点 ──
+    for (var q = 0; q < dust.length; q++) {
+      var dq = dust[q];
+      ctx.fillStyle = 'rgba(200,180,140,' + (0.5 * dq.life) + ')';
+      ctx.beginPath();
+      ctx.arc(dq.x, dq.y, dq.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 刻度：当前时长与今晚最久 ──
+    var cur = spinning ? (now - runStart) / 1000 : lastLen;
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(cur.toFixed(1) + ' s', w - 22, 34);
+    ctx.fillText('best ' + best.toFixed(1), w - 22, 52);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && !spinning) {
+      ctx.fillStyle = 'rgba(168,154,120,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下，抽一鞭', L.cx, L.groundY + 34);
+    }
+    if (spinning && spin < 6 && spin > 0.02) {
+      ctx.fillStyle = 'rgba(200,168,102,' + (0.4 + 0.25 * Math.sin(now / 180)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('快抽！', L.cx - L.R * 1.8, ty - L.R * 0.1);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 whip）
+  window.__top = {
+    spin: function () { return spin; },
+    spinning: function () { return spinning; },
+    best: function () { return best; },
+    lastLen: function () { return lastLen; },
+    falls: function () { return falls; },
+    whip: function () { whip(); }
+  };
+})();
+</script>
+</body>
+</html>

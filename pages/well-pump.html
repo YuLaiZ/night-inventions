@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>压水井</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #7e94a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c6874; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8fa6ba;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c6874;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c6874;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8fa6ba; border-color: #8fa6ba; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>压水井</h1>
+  <p>井在院角睡了很久。<br>先舀一瓢引水——再按住压杆，把月亮压上来。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var stage = 0;         // 0 待引水 1 压水中 2 满桶
+  var hold = false;
+  var lever = 0;         // 压杆摆动相位
+  var leverAmp = 0;
+  var water = 0;         // 桶中水位 0-1
+  var pourT = -1;        // 引水倾倒动画 0-1
+  var saidStart = false, saidPrime = false;
+  var drops = [];        // 出水水滴
+  var ripple = 0;        // 桶内水波相位
+  var doneCount = 0;
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var plankGrain = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 20; i++) plankGrain.push({ x: rng(), y: rng(), a: 0.05 + rng() * 0.06 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.groundY = L.h * 0.7;
+    L.R = Math.min(L.w * 0.24, L.h * 0.22, 150);
+    L.pumpX = L.cx - L.R * 0.5;        // 泵体中心
+    L.spoutX = L.pumpX + L.R * 0.42;   // 泵嘴
+    L.spoutY = L.groundY - L.R * 0.74;
+    L.leverX = L.pumpX - L.R * 0.12;   // 压杆支点
+    L.leverY = L.groundY - L.R * 0.92;
+    L.bucketX = L.spoutX + L.R * 0.78;
+    L.bucketY = L.groundY;
+    L.bw = L.R * 0.5;
+    L.bh = L.R * 0.5;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function reset() {
+    stage = 0; water = 0; pourT = -1;
+    leverAmp = 0; drops = [];
+    saidPrime = false;
+  }
+
+  function startPress() {
+    if (stage === 0 && pourT < 0) {
+      pourT = 0;
+      if (!saidStart) { saidStart = true; say('先舀一瓢引水，把井唤醒。'); }
+      return;
+    }
+    if (stage === 2) {
+      reset();
+      doneCount++;
+      say('水泼回院子里。井记着这个凉。');
+      return;
+    }
+    if (hold || stage !== 1) return;
+    hold = true;
+    if (!saidPrime) { saidPrime = true; say('压杆往下摁——水在管子里找路。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (pourT >= 0 && pourT < 1) {
+      pourT += dt * 0.8;
+      if (pourT >= 1) {
+        pourT = -1;
+        stage = 1;
+        say('引水到了。按住压杆，别松。');
+      }
+    }
+    if (hold && stage === 1) {
+      leverAmp = Math.min(1, leverAmp + dt * 2);
+      lever += dt * 6.2;
+      var flow = leverAmp > 0.5 && Math.sin(lever) > 0;
+      if (flow && drops.length < 30 && Math.random() < dt * 40) {
+        drops.push({
+          x: L.spoutX + 4, y: L.spoutY + 6,
+          vx: 42 + Math.random() * 30, vy: 8 + Math.random() * 14,
+          life: 1, r: 1.6 + Math.random() * 1.6
+        });
+      }
+      if (leverAmp > 0.5) water = Math.min(1, water + dt * 0.088);
+      if (water >= 1) {
+        stage = 2;
+        hold = false;
+        doneCount++;
+        if (doneCount === 1) say('满桶了。你看——一桶井水，泡着一个月亮。', true);
+        else say('又是一桶月亮。井里存着好多。', true);
+      }
+    } else {
+      leverAmp = Math.max(0, leverAmp - dt * 2.2);
+      lever += dt * (1.5 + leverAmp * 4);
+    }
+    ripple += dt * 3;
+    for (var d = drops.length - 1; d >= 0; d--) {
+      var dr = drops[d];
+      dr.x += dr.vx * dt; dr.y += dr.vy * dt;
+      dr.vy += 220 * dt;
+      var rimY = L.bucketY - L.bh * water - 4;
+      if (dr.y >= rimY && dr.x > L.bucketX - L.bw * 0.7 && dr.x < L.bucketX + L.bw * 0.7) {
+        drops.splice(d, 1);
+      } else if (dr.y > L.groundY + 6) {
+        drops.splice(d, 1);
+      }
+    }
+
+    // ── 背景：深夜院子 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#121a22');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.groundY);
+    // 月亮
+    ctx.fillStyle = 'rgba(226,224,206,0.88)';
+    ctx.beginPath();
+    ctx.arc(w * 0.78, h * 0.17, L.R * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(226,224,206,0.06)';
+    ctx.beginPath();
+    ctx.arc(w * 0.78, h * 0.17, L.R * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#14110d';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    var glow = ctx.createRadialGradient(L.cx, L.groundY, 0, L.cx, L.groundY, L.R * 3.2);
+    glow.addColorStop(0, 'rgba(214,186,130,0.09)');
+    glow.addColorStop(1, 'rgba(214,186,130,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(210,190,160,0.06)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    // ── 水桶 ──
+    var bx = L.bucketX, byTop = L.bucketY - L.bh;
+    drawShadowIf(bx);
+    function drawShadowIf(ccx) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(ccx, L.bucketY + 2, L.bw * 0.85, L.bh * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 桶身（微梯形）
+    ctx.fillStyle = '#4a3a28';
+    ctx.beginPath();
+    ctx.moveTo(bx - L.bw * 0.78, byTop);
+    ctx.lineTo(bx + L.bw * 0.78, byTop);
+    ctx.lineTo(bx + L.bw * 0.92, L.bucketY);
+    ctx.lineTo(bx - L.bw * 0.92, L.bucketY);
+    ctx.closePath();
+    ctx.fill();
+    // 板条缝
+    ctx.strokeStyle = 'rgba(20,16,10,0.5)';
+    ctx.lineWidth = 1.4;
+    for (var pl = 1; pl <= 2; pl++) {
+      var px2 = bx - L.bw * 0.78 + (L.bw * 1.84) * pl / 3;
+      ctx.beginPath();
+      ctx.moveTo(px2, byTop);
+      ctx.lineTo(px2 + (px2 - bx) * 0.14, L.bucketY);
+      ctx.stroke();
+    }
+    // 铁箍一道
+    ctx.strokeStyle = '#2c2c30';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bx - L.bw * 0.82, byTop + L.bh * 0.55);
+    ctx.lineTo(bx + L.bw * 0.82, byTop + L.bh * 0.55);
+    ctx.stroke();
+    // 桶内水
+    if (water > 0.01) {
+      var wy = L.bucketY - L.bh * water;
+      var ws = 0.8 + water * 0.14;
+      ctx.fillStyle = 'rgba(58,88,116,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(bx, wy, L.bw * ws * 0.86, L.bh * 0.09, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 月影（水过半才开始亮）
+      var moonA = Math.min(1, Math.max(0, (water - 0.45) / 0.5)) * (0.55 + 0.2 * Math.sin(ripple * 2));
+      if (moonA > 0.02) {
+        ctx.fillStyle = 'rgba(238,234,210,' + moonA + ')';
+        ctx.beginPath();
+        ctx.ellipse(bx + Math.sin(ripple) * 2.2, wy + 2 + Math.cos(ripple * 1.7) * 1.2, L.bw * 0.3, L.bh * 0.055, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // ── 压水井 ──
+    // 座（高身铸铁）
+    ctx.fillStyle = '#3a4046';
+    ctx.fillRect(L.pumpX - L.R * 0.36, L.groundY - L.R * 0.86, L.R * 0.72, L.R * 0.86);
+    ctx.fillStyle = '#2e3338';
+    ctx.fillRect(L.pumpX - L.R * 0.44, L.groundY - L.R * 0.92, L.R * 0.88, L.R * 0.1);
+    // 出水嘴（连着座右上）
+    ctx.fillStyle = '#454c54';
+    ctx.beginPath();
+    ctx.moveTo(L.spoutX - L.R * 0.3, L.spoutY - L.R * 0.04);
+    ctx.quadraticCurveTo(L.spoutX + L.R * 0.06, L.spoutY - L.R * 0.06, L.spoutX + L.R * 0.16, L.spoutY + L.R * 0.06);
+    ctx.lineTo(L.spoutX + L.R * 0.06, L.spoutY + L.R * 0.14);
+    ctx.quadraticCurveTo(L.spoutX - L.R * 0.08, L.spoutY + L.R * 0.04, L.spoutX - L.R * 0.3, L.spoutY + L.R * 0.08);
+    ctx.closePath();
+    ctx.fill();
+    // 支点立柱（座顶竖起）
+    ctx.fillStyle = '#3a4046';
+    ctx.fillRect(L.leverX - L.R * 0.045, L.leverY, L.R * 0.09, L.groundY - L.leverY - L.R * 0.86);
+    // 压杆（长臂向左上把手、短臂向右下连泵）
+    var ang = Math.sin(lever) * 0.13 * leverAmp + 0.05;
+    ctx.save();
+    ctx.translate(L.leverX, L.leverY);
+    ctx.rotate(ang);
+    ctx.strokeStyle = '#7a6248';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-L.R * 0.92, -L.R * 0.06);
+    ctx.lineTo(L.R * 0.4, L.R * 0.1);
+    ctx.stroke();
+    // 杆端把手
+    ctx.fillStyle = '#2b2622';
+    ctx.beginPath();
+    ctx.arc(-L.R * 0.92, -L.R * 0.06, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // 短臂连杆入泵顶
+    ctx.strokeStyle = '#5c4c3a';
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(L.R * 0.36, L.R * 0.09);
+    ctx.lineTo(L.R * 0.46, L.R * 0.26);
+    ctx.stroke();
+    ctx.restore();
+    // 支点轴
+    ctx.fillStyle = '#23282d';
+    ctx.beginPath();
+    ctx.arc(L.leverX, L.leverY, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 引水瓢（阶段 0 挂在座侧，倒水时倾）──
+    var ladleX = L.pumpX + L.R * 0.58;
+    var ladleY = L.groundY - L.R * 0.4;
+    if (stage === 0) {
+      var tilt = pourT >= 0 ? Math.sin(pourT * Math.PI) * 1.1 : 0;
+      ctx.save();
+      ctx.translate(ladleX, ladleY);
+      ctx.rotate(-tilt);
+      // 瓢：半圆水瓢，瓢口朝上偏泵
+      ctx.strokeStyle = '#8a8f96';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, L.R * 0.13, -0.4, Math.PI + 0.4);
+      ctx.stroke();
+      if (pourT < 0) {
+        ctx.fillStyle = 'rgba(120,160,195,0.6)';
+        ctx.beginPath();
+        ctx.arc(0, 0, L.R * 0.115, Math.PI + 0.35, -0.35);
+        ctx.fill();
+      } else if (pourT < 0.6) {
+        // 倒出的水线
+        ctx.strokeStyle = 'rgba(150,190,225,0.75)';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(L.R * 0.1, -L.R * 0.08);
+        ctx.quadraticCurveTo(L.R * 0.2, L.R * 0.1, L.R * 0.08, L.R * 0.34);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // ── 出水水滴 ──
+    for (var q = 0; q < drops.length; q++) {
+      var dq = drops[q];
+      ctx.fillStyle = 'rgba(150,190,225,' + (0.85 * dq.life) + ')';
+      ctx.beginPath();
+      ctx.arc(dq.x, dq.y, dq.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 出水弧线（压水稳定时）──
+    if (stage === 1 && leverAmp > 0.5 && Math.sin(lever) > 0.2 && water < 1) {
+      ctx.strokeStyle = 'rgba(150,190,225,0.5)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(L.spoutX + L.R * 0.2, L.spoutY + L.R * 0.1);
+      ctx.quadraticCurveTo(L.spoutX + L.R * 0.42, L.spoutY + L.R * 0.3, L.bucketX, L.bucketY - L.bh * water - 2);
+      ctx.stroke();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    if (stage === 1) ctx.fillText('桶 ' + Math.round(water * 100) + ' %', w - 22, 34);
+    else if (stage === 2) ctx.fillText('桶 满', w - 22, 34);
+    else ctx.fillText('井 深', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (stage === 0 && pourT < 0) {
+      ctx.fillStyle = 'rgba(143,166,186,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下，舀引水', L.pumpX + L.R * 0.5, L.groundY + 34);
+    }
+    if (stage === 1 && !hold && leverAmp < 0.1) {
+      ctx.fillStyle = 'rgba(143,166,186,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住压杆', L.leverX, L.leverY - L.R * 0.3);
+    }
+    if (stage === 2) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，泼掉重来', L.cx, L.groundY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__pump = {
+    stage: function () { return stage; },
+    water: function () { return +water.toFixed(3); },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

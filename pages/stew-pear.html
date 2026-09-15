@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>冰糖雪梨</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8a866; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6c6552; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8a866;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c6552;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c6552;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8a866; border-color: #c8a866; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>冰糖雪梨</h1>
+  <p>秋天燥，灶上要有点咕嘟声。<br>按住盯火——汤清了才会金。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var prog = 0;          // 炖煮进度
+  var pots = 0;          // 炖好的锅数
+  var resting = false;
+  var saidStart = false;
+  var bubbles = [];      // 汤面气泡
+  var steam = [];        // 热气
+  var pearFloat = [];    // 锅里梨块的浮沉相位
+  var wobble = 0;
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var pears = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 5; i++) pears.push({ x: rng() * 1.4 - 0.7, s: 0.8 + rng() * 0.5, ph: rng() * Math.PI * 2, rot: (rng() - 0.5) * 0.8 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.counterY = L.h * 0.62;
+    L.R = Math.min(L.w * 0.23, L.h * 0.2, 145);
+    L.potX = L.cx;
+    L.potY = L.counterY - L.R * 0.18;
+    L.potW = L.R * 1.06;
+    L.potH = L.R * 0.62;
+    L.bowlX = L.cx - L.R * 1.6;
+    L.bowlY = L.counterY + (L.h - L.counterY) * 0.3;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function resetPot(newFlavor) {
+    prog = 0; resting = false;
+    bubbles = []; steam = [];
+    pearFloat = [];
+    saidStart = false;
+  }
+
+  function startPress() {
+    if (resting) {
+      resetPot();
+      pots = 0;
+      say('再炖一锅。这次多放了一颗枣。');
+      return;
+    }
+    if (hold || prog >= 1) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('火苗舔着锅底，别走开。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var dx = ev.clientX - L.potX, dy = ev.clientY - (L.potY - L.R * 0.3);
+    if (resting || dx * dx + dy * dy < (L.R * 1.6) * (L.R * 1.6)) startPress();
+  });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (hold && prog < 1) {
+      prog = Math.min(1, prog + dt * 0.085); // 约 12 秒炖好
+      if (bubbles.length < 40 && Math.random() < dt * (10 + prog * 40)) {
+        bubbles.push({
+          x: L.potX + (Math.random() - 0.5) * L.potW * 1.5,
+          y: L.potY + L.potH * 0.28,
+          r: 1.6 + Math.random() * 2.6,
+          v: 16 + Math.random() * 22 + prog * 20,
+          life: 1
+        });
+      }
+      if (prog >= 1) {
+        hold = false;
+        pots++;
+        if (pots === 1) say('盛一碗。热气糊在脸上，秋燥退了。', true);
+        else say('又一锅。灶上一直温着，就不算冷。', true);
+        resting = true;
+      }
+    }
+    // 热气（炖得越久/完成后越多）
+    if ((prog > 0.25 || resting) && steam.length < 18 && Math.random() < dt * 8) {
+      steam.push({
+        x: L.potX + (Math.random() - 0.5) * L.potW * 1.3,
+        y: L.potY - L.potH * 0.62,
+        v: 12 + Math.random() * 14,
+        drift: (Math.random() - 0.5) * 10,
+        life: 1, r: 5 + Math.random() * 7
+      });
+    }
+    for (var b = bubbles.length - 1; b >= 0; b--) {
+      var bb = bubbles[b];
+      bb.y -= bb.v * dt; bb.life -= dt * 0.9;
+      if (bb.life <= 0) bubbles.splice(b, 1);
+    }
+    for (var s = steam.length - 1; s >= 0; s--) {
+      var st = steam[s];
+      st.y -= st.v * dt; st.x += st.drift * dt; st.life -= dt * 0.45;
+      if (st.life <= 0) steam.splice(s, 1);
+    }
+
+    // ── 背景：深夜灶台 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#141a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.cx, L.counterY, 0, L.cx, L.counterY, L.R * 3.2);
+    glow.addColorStop(0, 'rgba(230,170,100,0.12)');
+    glow.addColorStop(1, 'rgba(230,170,100,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 盛好的一碗（完成后出现）──
+    if (resting) {
+      var bw = L.R * 0.5, bh = L.R * 0.22;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(L.bowlX, L.bowlY + bh * 0.9, bw * 1.05, bh * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#d8d4c8';
+      ctx.beginPath();
+      ctx.moveTo(L.bowlX - bw, L.bowlY - bh * 0.4);
+      ctx.quadraticCurveTo(L.bowlX, L.bowlY + bh * 1.1, L.bowlX + bw, L.bowlY - bh * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(226,180,92,0.9)';
+      ctx.beginPath();
+      ctx.ellipse(L.bowlX, L.bowlY - bh * 0.38, bw * 0.82, bh * 0.28, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 碗上热气
+      if (steam.length < 22 && Math.random() < dt * 6) {
+        steam.push({ x: L.bowlX + (Math.random() - 0.5) * bw, y: L.bowlY - bh, v: 10 + Math.random() * 10, drift: (Math.random() - 0.5) * 8, life: 1, r: 4 + Math.random() * 5 });
+      }
+    }
+
+    // ── 锅（剖面）──
+    var potLift = hold ? Math.sin(now / 90) * 0.6 : 0;
+    // 锅身
+    ctx.fillStyle = '#2c333b';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(L.potX - L.potW, L.potY - L.potH, L.potW * 2, L.potH * 1.6, [6, 6, 14, 14]);
+    else ctx.rect(L.potX - L.potW, L.potY - L.potH, L.potW * 2, L.potH * 1.6);
+    ctx.fill();
+    // 锅沿高光
+    ctx.fillStyle = '#3a434d';
+    ctx.fillRect(L.potX - L.potW, L.potY - L.potH, L.potW * 2, L.potH * 0.18);
+    // 手柄
+    ctx.fillStyle = '#1f252b';
+    ctx.fillRect(L.potX - L.potW - L.R * 0.16, L.potY - L.potH * 0.55, L.R * 0.16, L.potH * 0.16);
+    ctx.fillRect(L.potX + L.potW, L.potY - L.potH * 0.55, L.R * 0.16, L.potH * 0.16);
+    // 汤面（清→金）
+    var soupTop = L.potY - L.potH * 0.42 + potLift;
+    var soup = ctx.createLinearGradient(0, soupTop, 0, L.potY + L.potH * 0.55);
+    soup.addColorStop(0, 'rgba(' + Math.round(232 - prog * 12) + ',' + Math.round(228 - prog * 40) + ',' + Math.round(200 - prog * 70) + ',0.95)');
+    soup.addColorStop(1, 'rgba(' + Math.round(216 - prog * 12) + ',' + Math.round(196 - prog * 24) + ',' + Math.round(168 - prog * 52) + ',0.95)');
+    ctx.fillStyle = soup;
+    ctx.beginPath();
+    ctx.ellipse(L.potX, soupTop + L.potH * 0.34, L.potW * 0.92, L.potH * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(' + Math.round(226 - prog * 10) + ',' + Math.round(222 - prog * 44) + ',' + Math.round(196 - prog * 74) + ',0.9)';
+    ctx.beginPath();
+    ctx.ellipse(L.potX, soupTop + L.potH * 0.3, L.potW * 0.88, L.potH * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 锅里的梨块（浮沉）
+    for (var i = 0; i < pears.length; i++) {
+      var pf = pears[i];
+      var sink = Math.sin(now / 900 + pf.ph) * L.potH * 0.1;
+      var px = L.potX + pf.x * L.potW * 0.62;
+      var py = soupTop + L.potH * 0.28 + pf.sink;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(pf.rot + Math.sin(now / 700 + pf.ph) * 0.12);
+      ctx.fillStyle = 'rgba(238,232,208,0.95)';
+      ctx.strokeStyle = 'rgba(180,150,90,0.8)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 8 * pf.s, 6 * pf.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(214,206,172,0.9)';
+      ctx.beginPath();
+      ctx.ellipse(2 * pf.s, 1.5 * pf.s, 5 * pf.s, 3.4 * pf.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // 气泡
+    for (var b = 0; b < bubbles.length; b++) {
+      var bb = bubbles[b];
+      ctx.strokeStyle = 'rgba(255,252,238,' + (0.5 * bb.life) + ')';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(bb.x, bb.y, bb.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ── 灶火（按住才旺）──
+    var fire = hold ? 1 : (prog > 0 && prog < 1 ? 0.3 : 0);
+    if (fire > 0 && prog < 1) {
+      var fy = L.potY + L.potH * 0.62;
+      for (var f = -2; f <= 2; f++) {
+        var fx = L.potX + f * L.potW * 0.3;
+        var fh = (10 + Math.abs(f) * -2 + Math.sin(now / 70 + f * 2) * 3) * fire;
+        var fg = ctx.createLinearGradient(fx, fy, fx, fy - fh);
+        fg.addColorStop(0, 'rgba(240,150,60,0.9)');
+        fg.addColorStop(1, 'rgba(250,220,120,0.9)');
+        ctx.fillStyle = fg;
+        ctx.beginPath();
+        ctx.moveTo(fx - 5, fy);
+        ctx.quadraticCurveTo(fx - 3 + Math.sin(now / 60 + f) * 2, fy - fh * 0.7, fx, fy - fh);
+        ctx.quadraticCurveTo(fx + 3 + Math.sin(now / 80 + f * 3) * 2, fy - fh * 0.7, fx + 5, fy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // ── 热气 ──
+    for (var s2 = 0; s2 < steam.length; s2++) {
+      var st2 = steam[s2];
+      ctx.fillStyle = 'rgba(240,238,228,' + (0.16 * st2.life) + ')';
+      ctx.beginPath();
+      ctx.arc(st2.x, st2.y, st2.r * (1.3 - st2.life * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(prog * 100) + ' %', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 完成提示 ──
+    if (!saidStart && prog === 0 && !resting) {
+      ctx.fillStyle = 'rgba(200,168,102,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住锅，盯火', L.cx, L.counterY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再炖一锅', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__pear = {
+    prog: function () { return prog; },
+    pots: function () { return pots; },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

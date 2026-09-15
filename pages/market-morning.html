@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>早市买菜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>早市买菜</h1>
+  <p>西红柿堆成小山，还带露水。<br>点一颗，翻过来看看蒂——沙瓤的才带回家。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 3;
+  var picked = 0;        // 已入袋
+  var inspect = null;    // 正在翻看的西红柿 {idx, t}
+  var resting = false;
+  var saidStart = false;
+  var taken = {};        // 已被挑走的索引
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // 筐里西红柿：位置/大小/色差
+  var tomatoes = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 10; i++) {
+      var a = rng() * Math.PI * 2, rr = Math.sqrt(rng());
+      tomatoes.push({
+        x: Math.cos(a) * rr * 0.78,
+        y: Math.sin(a) * rr * 0.62,
+        s: 0.85 + rng() * 0.3,
+        hue: rng() * 14 - 7,
+        rot: rng() * Math.PI
+      });
+    }
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.42;
+    L.counterY = L.h * 0.62;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.basketX = L.cx;
+    L.basketY = L.counterY + (L.h - L.counterY) * 0.36;
+    L.bw = L.R * 1.6;
+    L.bh = L.R * 0.85;
+    L.bagX = L.cx + L.R * 1.5;
+    L.bagY = L.counterY + (L.h - L.counterY) * 0.4;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function pickNearest(x, y) {
+    var best = -1, bestD = 1e9;
+    for (var i = 0; i < tomatoes.length; i++) {
+      if (taken[i]) continue;
+      var tx = L.basketX + tomatoes[i].x * L.bw * 0.42;
+      var ty = L.basketY - L.bh * 0.1 + tomatoes[i].y * L.bh * 0.3;
+      var d = (tx - x) * (tx - x) + (ty - y) * (ty - y);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return bestD < Math.pow(L.R * 0.35, 2) ? best : -1;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      picked = 0;
+      taken = {};
+      inspect = null;
+      say('又一场早市。露水还亮着。');
+      return;
+    }
+    if (inspect || picked >= TOTAL) return;
+    var idx = pickNearest(ev.clientX, ev.clientY);
+    if (idx >= 0) {
+      inspect = { idx: idx, t: 0 };
+      if (!saidStart) { saidStart = true; say('翻过来看蒂——蒂绿的才沙瓤。'); }
+    }
+  });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (inspect) {
+      inspect.t += dt * 0.7; // 翻看约 1.4 秒
+      if (inspect.t >= 1) {
+        taken[inspect.idx] = true;
+        inspect = null;
+        picked++;
+        if (picked >= TOTAL) {
+          resting = true;
+          say('三颗，都沙瓤。早市越走越亮。', true);
+        } else {
+          say('蒂青、皮紧、沉手——好。再来一颗。');
+        }
+      }
+    }
+
+    // ── 背景：清晨早市 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#1a1a16');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.basketX, L.basketY, 0, L.basketX, L.basketY, L.R * 3.2);
+    glow.addColorStop(0, 'rgba(240,190,120,0.1)');
+    glow.addColorStop(1, 'rgba(240,190,120,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 竹筐 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.basketX, L.basketY + L.bh * 0.62, L.bw * 0.58, L.bh * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 筐身（编织纹）
+    ctx.fillStyle = '#8a6f48';
+    ctx.beginPath();
+    ctx.moveTo(L.basketX - L.bw / 2, L.basketY - L.bh * 0.2);
+    ctx.lineTo(L.basketX + L.bw / 2, L.basketY - L.bh * 0.2);
+    ctx.lineTo(L.basketX + L.bw * 0.42, L.basketY + L.bh * 0.55);
+    ctx.lineTo(L.basketX - L.bw * 0.42, L.basketY + L.bh * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(52,38,22,0.7)';
+    ctx.lineWidth = 2;
+    for (var wv = 1; wv <= 3; wv++) {
+      var wy = L.basketY - L.bh * 0.2 + (L.bh * 0.75) * wv / 4;
+      ctx.beginPath();
+      ctx.moveTo(L.basketX - L.bw * (0.5 - wv * 0.02), wy);
+      ctx.lineTo(L.basketX + L.bw * (0.5 - wv * 0.02), wy);
+      ctx.stroke();
+    }
+    for (var wvv = 0; wvv < 5; wvv++) {
+      var wx = L.basketX - L.bw * 0.44 + (L.bw * 0.88) * wvv / 4;
+      ctx.beginPath();
+      ctx.moveTo(wx, L.basketY - L.bh * 0.16);
+      ctx.lineTo(wx + (wx - L.basketX) * 0.1, L.basketY + L.bh * 0.5);
+      ctx.stroke();
+    }
+
+    // ── 筐里的西红柿 ──
+    for (var i = 0; i < tomatoes.length; i++) {
+      if (taken[i]) continue;
+      var tm = tomatoes[i];
+      var tx = L.basketX + tm.x * L.bw * 0.42;
+      var ty = L.basketY - L.bh * 0.12 + tm.y * L.bh * 0.3;
+      drawTomato(tx, ty, L.R * 0.16 * tm.s, tm.hue, tm.rot);
+    }
+
+    // ── 正在翻看的（居中放大+旋转）──
+    if (inspect) {
+      var tmI = tomatoes[inspect.idx];
+      var it = inspect.t;
+      var sc = 1 + Math.min(1, it * 2) * 1.15;
+      var rot = tmI.rot + it * Math.PI * 2; // 翻转一圈
+      var ix = L.cx + (L.bagX - L.cx) * 0.1;
+      var iy = L.counterY + (L.bagY - L.counterY) * 0.15;
+      drawTomatoBig(ix, iy, L.R * 0.34 * sc, tmI.hue, rot);
+    }
+
+    // ── 布袋与入袋的 ──
+    ctx.fillStyle = '#d8d2c0';
+    ctx.beginPath();
+    ctx.moveTo(L.bagX - L.R * 0.34, L.bagY + L.R * 0.12);
+    ctx.lineTo(L.bagX + L.R * 0.34, L.bagY + L.R * 0.12);
+    ctx.lineTo(L.bagX + L.R * 0.28, L.bagY - L.R * 0.3);
+    ctx.lineTo(L.bagX - L.R * 0.28, L.bagY - L.R * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(140,120,90,0.5)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(L.bagX - L.R * 0.2, L.bagY + L.R * 0.08);
+    ctx.lineTo(L.bagX + L.R * 0.22, L.bagY + L.R * 0.06);
+    ctx.moveTo(L.bagX - L.R * 0.22, L.bagY - L.R * 0.08);
+    ctx.lineTo(L.bagX + L.R * 0.24, L.bagY - L.R * 0.1);
+    ctx.stroke();
+    // 袋口露出的红
+    for (var pk2 = 0; pk2 < picked; pk2++) {
+      ctx.fillStyle = 'rgba(214,72,52,' + (0.95 - pk2 * 0.1) + ')';
+      ctx.beginPath();
+      ctx.arc(L.bagX - L.R * 0.1 + pk2 * L.R * 0.12, L.bagY - L.R * 0.26, L.R * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(picked + ' / ' + TOTAL + ' 颗', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && picked === 0 && !inspect && !resting) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一颗，翻过来看', L.basketX, L.basketY + L.bh * 0.8);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再逛一场', L.cx, L.counterY + 34);
+    }
+
+    function drawTomato(x, y, r, hue, rot) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot * 0.3);
+      var g = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r);
+      g.addColorStop(0, 'rgb(' + Math.round(238 + hue) + ',' + Math.round(120 + hue) + ',84)');
+      g.addColorStop(1, 'rgb(' + Math.round(196 + hue) + ',62,40)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      // 高光
+      ctx.fillStyle = 'rgba(255,240,220,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.32, -r * 0.38, r * 0.2, r * 0.11, -0.6, 0, Math.PI * 2);
+      ctx.fill();
+      // 蒂
+      ctx.strokeStyle = '#4a7a3c';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.85);
+      ctx.lineTo(0, -r * 0.55);
+      ctx.stroke();
+      ctx.restore();
+    }
+    function drawTomatoBig(x, y, r, hue, rot) {
+      // 底面视图：蒂部特写
+      ctx.save();
+      ctx.translate(x, y);
+      var g = ctx.createRadialGradient(-r * 0.2, -r * 0.25, r * 0.1, 0, 0, r);
+      g.addColorStop(0, 'rgb(' + Math.round(244 + hue) + ',' + Math.round(130 + hue) + ',92)');
+      g.addColorStop(1, 'rgb(' + Math.round(200 + hue) + ',66,42)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      // 沙瓤纹（放射浅纹）
+      ctx.strokeStyle = 'rgba(255,210,170,0.4)';
+      ctx.lineWidth = 1.6;
+      for (var v2 = 0; v2 < 6; v2++) {
+        var va = rot + v2 * Math.PI / 3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(va) * r * 0.2, Math.sin(va) * r * 0.2);
+        ctx.lineTo(Math.cos(va) * r * 0.82, Math.sin(va) * r * 0.82);
+        ctx.stroke();
+      }
+      // 蒂（绿星）
+      ctx.fillStyle = '#4a8a42';
+      for (var lv = 0; lv < 5; lv++) {
+        var la = rot + lv * Math.PI * 2 / 5 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(la) * r * 0.24, Math.sin(la) * r * 0.24, r * 0.16, r * 0.07, la, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#3c7038';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 pointerdown 判定）
+  window.__market = {
+    picked: function () { return picked; },
+    resting: function () { return resting; },
+    inspecting: function () { return inspect ? 1 : 0; },
+    tap: function (x, y) {
+      if (resting) { resting = false; picked = 0; taken = {}; inspect = null; return; }
+      var idx = pickNearest(x, y);
+      if (idx >= 0 && !inspect && picked < TOTAL) inspect = { idx: idx, t: 0 };
+    }
+  };
+})();
+</script>
+</body>
+</html>

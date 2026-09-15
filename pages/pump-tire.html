@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给车打气</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #9aa4ae; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5e6870; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #9aa4ae;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5e6870;
+    text-decoration: none;
+    border-bottom: 1px dotted #5e6870;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9aa4ae; border-color: #9aa4ae; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给车打气</h1>
+  <p>车停了一夜，胎软了。<br>按住打气筒压——指针进了绿，就拔管。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var pressure = 0.32;   // 胎压 0-1.08，绿区 0.85-1.0
+  var pumpT = 0;         // 下压动画 0-1
+  var resting = false;   // 打足拔管
+  var popped = false;    // 爆胎
+  var saidStart = false;
+  var pumps = 0;
+  var wheelSpin = 0;
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.44;
+    L.groundY = L.h * 0.72;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.wheelX = L.cx;
+    L.wheelY = L.groundY - L.R * 0.42;
+    L.gaugeX = L.cx + L.R * 1.25;
+    L.gaugeY = L.groundY - L.R * 0.85;
+    L.pumpX = L.cx + L.R * 0.85;
+    L.pumpBaseY = L.groundY - L.R * 0.1;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function pumpOnce() {
+    if (resting || popped) return;
+    pressure += 0.11;
+    pumpT = 1;
+    pumps++;
+    if (pressure >= 1.06) {
+      popped = true;
+      say('嘭——打过头，胎炸了。按一下换条新胎。');
+      return;
+    }
+    if (pressure >= 0.95) {
+      resting = true;
+      if (pumps <= 6) say('打足了。拔管——今天骑它去远一点。', true);
+      else say('正好打足。手快了，但是够硬。', true);
+    } else if (pressure >= 0.85) {
+      say('进绿了，再来一下收尾。');
+    }
+  }
+
+  function startPress() {
+    if (resting) {
+      resting = false;
+      popped = false;
+      pressure = 0.32;
+      pumps = 0;
+      say('新胎装好了。接着练。');
+      return;
+    }
+    if (popped) {
+      popped = false;
+      pressure = 0.32;
+      pumps = 0;
+      say('换了条新胎，稳着来。');
+      return;
+    }
+    pumpOnce();
+  }
+  function endPress() { pumpT = 0; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); pumpT = 1; });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    pumpT = Math.max(0, pumpT - dt * 2.6);
+    if (popped) wheelSpin = 0;
+
+    // ── 背景：清晨楼道口 ──
+    var lit = 0.35;
+    var bg = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    bg.addColorStop(0, 'rgb(' + Math.round(15 + lit * 28) + ',' + Math.round(21 + lit * 30) + ',' + Math.round(27 + lit * 28) + ')');
+    bg.addColorStop(1, 'rgb(' + Math.round(21 + lit * 36) + ',' + Math.round(25 + lit * 28) + ',' + Math.round(21 + lit * 18) + ')');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.groundY);
+    ctx.fillStyle = '#131110';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(210,190,160,0.06)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    // ── 车轮 ──
+    var wr = L.R * 0.55;
+    var flat = (1 - Math.min(1, pressure / 0.95)) * L.R * 0.07; // 气不足轮胎被压扁
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(L.wheelX, L.groundY - wr + flat * 0.5, wr * 1.02, wr * 0.9 + flat * 0.4, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 胎
+    ctx.strokeStyle = '#33302c';
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(L.wheelX, L.wheelY + flat * 0.3, wr, 0, Math.PI * 2);
+    ctx.stroke();
+    // 轮辋
+    ctx.strokeStyle = '#8a8f96';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(L.wheelX, L.wheelY + flat * 0.3, wr - 8, 0, Math.PI * 2);
+    ctx.stroke();
+    // 辐条（打气时轮子微转）
+    wheelSpin += (resting ? 0 : pumpT * 0.9) * dt * 10;
+    ctx.strokeStyle = 'rgba(140,146,152,0.7)';
+    ctx.lineWidth = 1.6;
+    for (var sp = 0; sp < 8; sp++) {
+      var sa = wheelSpin + sp * Math.PI / 4;
+      ctx.beginPath();
+      ctx.moveTo(L.wheelX, L.wheelY + flat * 0.3);
+      ctx.lineTo(L.wheelX + Math.cos(sa) * (wr - 8), L.wheelY + flat * 0.3 + Math.sin(sa) * (wr - 8));
+      ctx.stroke();
+    }
+    // 气嘴
+    ctx.fillStyle = '#8a8f96';
+    ctx.fillRect(L.wheelX + wr * 0.5 - 2, L.wheelY + flat * 0.3 - 14, 4, 12);
+
+    // ── 打气筒（按住时杆下压）──
+    var bodyH = L.R * 0.6;
+    var px = L.pumpX;
+    var py = L.pumpBaseY;
+    // 筒身
+    ctx.fillStyle = '#3c424a';
+    ctx.fillRect(px - L.R * 0.09, py - bodyH, L.R * 0.18, bodyH);
+    ctx.fillStyle = '#2b3138';
+    ctx.fillRect(px - L.R * 0.12, py - 6, L.R * 0.24, 8);
+    // 软管连气嘴
+    ctx.strokeStyle = '#4a4238';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(px - L.R * 0.09, py - bodyH + 14);
+    ctx.quadraticCurveTo(px - L.R * 0.5, py - bodyH * 0.6, L.wheelX + wr * 0.5 + 4, L.wheelY + flat * 0.3 - 6);
+    ctx.stroke();
+    // 手柄杆（按住下压）
+    var rodLen = L.R * 0.5 - pumpT * L.R * 0.3;
+    ctx.strokeStyle = '#8a8f96';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(px, py - bodyH);
+    ctx.lineTo(px, py - bodyH - rodLen);
+    ctx.stroke();
+    // 手柄横杆
+    ctx.fillStyle = '#31485c';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(px - L.R * 0.16, py - bodyH - rodLen - 8, L.R * 0.32, 9, 4);
+    else ctx.rect(px - L.R * 0.16, py - bodyH - rodLen - 8, L.R * 0.32, 9);
+    ctx.fill();
+
+    // ── 胎压表 ──
+    var gr = L.R * 0.34;
+    ctx.fillStyle = '#e8e4d8';
+    ctx.beginPath();
+    ctx.arc(L.gaugeX, L.gaugeY, gr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#4a4438';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    // 弧刻度：红(0-0.85) 绿(0.85-1.0) 红(1.0-1.08)
+    function gaugeArc(a0, a1, color) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(L.gaugeX, L.gaugeY, gr - 10, a0, a1);
+      ctx.stroke();
+    }
+    var base = Math.PI * 0.75, span = Math.PI * 1.5;
+    gaugeArc(base, base + span * (0.85 / 1.08), '#b06050');
+    gaugeArc(base + span * (0.85 / 1.08), base + span, '#5e9a6a');
+    // 指针
+    var na = base + span * Math.min(1, pressure / 1.08);
+    ctx.strokeStyle = '#2a2a2a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(L.gaugeX, L.gaugeY);
+    ctx.lineTo(L.gaugeX + Math.cos(na) * (gr - 14), L.gaugeY + Math.sin(na) * (gr - 14));
+    ctx.stroke();
+    ctx.fillStyle = '#2a2a2a';
+    ctx.beginPath();
+    ctx.arc(L.gaugeX, L.gaugeY, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 爆胎效果 ──
+    if (popped) {
+      ctx.fillStyle = 'rgba(40,34,28,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(L.wheelX, L.wheelY + L.R * 0.2, wr * 0.9, wr * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(popped ? '爆 胎' : '压 ' + Math.round(Math.min(1, pressure) * 100) + ' %', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && !resting && !popped && pumps === 0) {
+      ctx.fillStyle = 'rgba(154,164,174,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下，压一杆', L.pumpX, L.groundY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，换条新胎', L.cx, L.groundY + 34);
+    }
+    if (popped) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，换条新胎', L.cx, L.groundY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 pumpOnce/startPress）
+  window.__pump = {
+    pressure: function () { return +pressure.toFixed(2); },
+    resting: function () { return resting; },
+    popped: function () { return popped; },
+    pumps: function () { return pumps; },
+    tap: function () { startPress(); }
+  };
+})();
+</script>
+</body>
+</html>

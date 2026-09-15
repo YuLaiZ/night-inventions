@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>磨剪刀</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #9aa8b0; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c6670; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #9fb0b8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c6670;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c6670;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #9fb0b8; border-color: #9fb0b8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>磨剪刀</h1>
+  <p>钝了的不是剪刀，是日子。<br>按住它在石上来回——磨亮了，才好裁明天的布。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var prog = 0;          // 磨刀进度
+  var slide = 0;         // 推拉相位
+  var hueSet = 0;        // 0 家用剪 1 裁缝剪 2 老铁剪
+  var doneCount = 0;
+  var resting = false;
+  var saidStart = false;
+  var sparks = [];       // 磨出的水光/火星
+  var shreds = [];       // 完成时飘落的纸条
+  var capPhase = 0;      // 试剪动画相位
+
+  var HUES = [
+    { blade: [176, 182, 190], edge: [236, 244, 250], handle: [222, 120, 96] },
+    { blade: [150, 168, 178], edge: [228, 244, 248], handle: [88, 110, 140] },
+    { blade: [122, 118, 116], edge: [224, 226, 222], handle: [70, 62, 54] }
+  ];
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var stoneDots = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 34; i++) stoneDots.push({ x: rng(), y: rng(), a: 0.06 + rng() * 0.08, r: 0.8 + rng() * 1.6 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.counterY = L.h * 0.64;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 150);
+    L.stoneX = L.cx;
+    L.stoneY = L.counterY + (L.h - L.counterY) * 0.42;
+    L.stoneW = L.R * 1.7;
+    L.stoneH = L.R * 0.3;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      prog = 0; resting = false;
+      hueSet = (hueSet + 1) % HUES.length;
+      saidStart = false;
+      say('再拿一把来。剪过年的窗花正合适。');
+      return;
+    }
+    if (hold || prog >= 1) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('贴着石面，来回推——别急，刃是一趟一趟亮的。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  // 剪刀：侧视 X 形，刃口亮度随 prog
+  function drawScissors(x, y, sc, C, prog, tilt) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    ctx.scale(sc, sc);
+    var dark = 1 - prog;
+    for (var s = -1; s <= 1; s += 2) {
+      ctx.save();
+      ctx.rotate(s * 0.16);
+      // 刀刃
+      var bl = ctx.createLinearGradient(0, 0, 62, -8);
+      bl.addColorStop(0, 'rgb(' + Math.round(C.blade[0] * (0.6 + dark * 0.3)) + ',' + Math.round(C.blade[1] * (0.6 + dark * 0.3)) + ',' + Math.round(C.blade[2] * (0.6 + dark * 0.3)) + ')');
+      bl.addColorStop(1, 'rgba(' + C.edge.join(',') + ',' + (0.35 + prog * 0.65) + ')');
+      ctx.fillStyle = bl;
+      ctx.beginPath();
+      ctx.moveTo(-8, 0);
+      ctx.quadraticCurveTo(28, s * 7, 66, s * 2.2);
+      ctx.lineTo(66, s * 4.6);
+      ctx.quadraticCurveTo(30, s * 12, -8, s * 5);
+      ctx.closePath();
+      ctx.fill();
+      // 刃口线（磨亮的部分）
+      if (prog > 0.02) {
+        ctx.strokeStyle = 'rgba(' + C.edge.join(',') + ',' + (prog * 0.95) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(2, s * 1.2);
+        ctx.lineTo(64, s * 3);
+        ctx.stroke();
+      }
+      // 柄环
+      ctx.strokeStyle = 'rgb(' + C.handle.join(',') + ')';
+      ctx.lineWidth = 5.5;
+      ctx.beginPath();
+      ctx.arc(-22, s * 13, 9.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // 铆钉
+    ctx.fillStyle = '#3a3f45';
+    ctx.beginPath();
+    ctx.arc(0, 0, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var C = HUES[hueSet];
+
+    // ── 状态推进 ──
+    if (hold && prog < 1) {
+      prog = Math.min(1, prog + dt * 0.09); // 约 11 秒磨亮
+      slide += dt * 5.5;
+      if (sparks.length < 26 && Math.random() < dt * 26) {
+        sparks.push({
+          x: L.stoneX + (Math.random() - 0.5) * L.stoneW * 0.7,
+          y: L.stoneY - L.stoneH * 0.1,
+          vx: (Math.random() - 0.5) * 60,
+          vy: -40 - Math.random() * 60,
+          life: 1, r: 1 + Math.random() * 1.8,
+          cool: Math.random() > 0.4 // 水光或火星
+        });
+      }
+      if (prog >= 1) {
+        hold = false;
+        resting = true;
+        doneCount++;
+        capPhase = 0;
+        for (var p2 = 0; p2 < 3; p2++) {
+          shreds.push({ x: L.cx + L.R * 1.2, y: L.stoneY - L.R * 0.4, vx: 18 + Math.random() * 26, vy: 8 + Math.random() * 14, rot: Math.random() * 2 - 1, vr: (Math.random() - 0.5) * 3, life: 1, len: 26 + Math.random() * 18 });
+        }
+        if (doneCount === 1) say('亮了。咔嚓——纸条应声而落。', true);
+        else say('又一把。明朝裁布，利索。', true);
+      }
+    }
+    capPhase += dt;
+    for (var p = sparks.length - 1; p >= 0; p--) {
+      var sp = sparks[p];
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt;
+      sp.vy += 160 * dt; sp.life -= dt * 1.8;
+      if (sp.life <= 0) sparks.splice(p, 1);
+    }
+    for (var sh = shreds.length - 1; sh >= 0; sh--) {
+      var sd = shreds[sh];
+      sd.x += sd.vx * dt; sd.y += sd.vy * dt;
+      sd.vy += 26 * dt; sd.rot += sd.vr * dt; sd.life -= dt * 0.35;
+      if (sd.life <= 0 || sd.y > h + 30) shreds.splice(sh, 1);
+    }
+
+    // ── 背景：深夜桌面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#141a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.cx, L.counterY, 0, L.cx, L.counterY, L.R * 3.2);
+    glow.addColorStop(0, 'rgba(200,200,190,0.08)');
+    glow.addColorStop(1, 'rgba(200,200,190,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // ── 磨石 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.stoneX, L.stoneY + L.stoneH * 0.75, L.stoneW * 0.55, L.stoneH * 0.32, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var stoneG = ctx.createLinearGradient(0, L.stoneY - L.stoneH, 0, L.stoneY + L.stoneH * 0.5);
+    stoneG.addColorStop(0, '#5c5a54');
+    stoneG.addColorStop(1, '#3d3c38');
+    ctx.fillStyle = stoneG;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(L.stoneX - L.stoneW / 2, L.stoneY - L.stoneH * 0.5, L.stoneW, L.stoneH, 8);
+    else ctx.rect(L.stoneX - L.stoneW / 2, L.stoneY - L.stoneH * 0.5, L.stoneW, L.stoneH);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(230,235,240,1)';
+    for (var d = 0; d < stoneDots.length; d++) {
+      var dt2 = stoneDots[d];
+      ctx.globalAlpha = dt2.a;
+      ctx.beginPath();
+      ctx.arc(L.stoneX - L.stoneW * 0.48 + dt2.x * L.stoneW * 0.96, L.stoneY - L.stoneH * 0.4 + dt2.y * L.stoneH * 0.8, dt2.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // 石面水光（磨的时候有）
+    if (hold && prog < 1) {
+      ctx.fillStyle = 'rgba(190,210,225,0.14)';
+      var wx = L.stoneX + Math.sin(slide) * L.stoneW * 0.3 - 26;
+      ctx.beginPath();
+      ctx.ellipse(wx, L.stoneY - L.stoneH * 0.1, 30, L.stoneH * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 剪刀（按住时沿石面推拉）──
+    var scX = L.stoneX + (hold && prog < 1 ? Math.sin(slide) * L.stoneW * 0.3 : 0);
+    var scY = L.stoneY - L.stoneH * 0.55;
+    var tilt = hold && prog < 1 ? Math.sin(slide * 2) * 0.04 : -0.06;
+    drawShadowIf(L.stoneX, scX, L.stoneY);
+    drawScissors(scX, scY, 1.7, C, prog, tilt);
+    function drawShadowIf(px, cx2, py) {
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(cx2, py + L.stoneH * 0.5, L.R * 0.55, L.R * 0.09, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 火星与水光 ──
+    for (var q = 0; q < sparks.length; q++) {
+      var sq = sparks[q];
+      if (sq.cool) ctx.fillStyle = 'rgba(200,225,245,' + (0.7 * sq.life) + ')';
+      else ctx.fillStyle = 'rgba(250,210,130,' + (0.8 * sq.life) + ')';
+      ctx.beginPath();
+      ctx.arc(sq.x, sq.y, sq.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 试剪飘落的纸条（完成时）──
+    for (var s3 = 0; s3 < shreds.length; s3++) {
+      var s4 = shreds[s3];
+      ctx.save();
+      ctx.translate(s4.x, s4.y);
+      ctx.rotate(s4.rot);
+      ctx.fillStyle = 'rgba(232,230,220,' + Math.min(1, s4.life + 0.2) + ')';
+      ctx.fillRect(-s4.len / 2, -3, s4.len, 6);
+      ctx.restore();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(prog * 100) + ' %', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 完成提示 ──
+    if (!saidStart && prog === 0 && !resting) {
+      ctx.fillStyle = 'rgba(159,176,184,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住剪刀，来回磨', L.cx, L.counterY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再拿一把', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__sharp = {
+    prog: function () { return prog; },
+    resting: function () { return resting; },
+    hue: function () { return hueSet; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

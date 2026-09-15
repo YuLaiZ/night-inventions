@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>倒垃圾</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #8a9a86; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #5c685c; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #8a9a86;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #5c685c;
+    text-decoration: none;
+    border-bottom: 1px dotted #5c685c;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #8a9a86; border-color: #8a9a86; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>倒垃圾</h1>
+  <p>出门第一件事。<br>按住蓄力，松手抛——三袋都进，今早就算顺。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var power = 0;         // 蓄力 0-1
+  var bags = 0;          // 已进桶
+  var TOTAL = 3;
+  var flying = null;     // 飞行中的袋子 {x, y, vx, vy, rot, vr, bounced}
+  var resting = false;
+  var saidStart = false;
+  var lidPop = 0;        // 桶盖弹开动画
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.3;
+    L.groundY = L.h * 0.74;
+    L.R = Math.min(L.w * 0.22, L.h * 0.2, 140);
+    L.binX = L.w * 0.76;
+    L.binY = L.groundY;
+    L.bw = L.R * 0.42;
+    L.bh = L.R * 0.56;
+    L.handX = L.cx;
+    L.handY = L.groundY - L.R * 0.45;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      resting = false;
+      bags = 0;
+      say('新的一天，新的一袋。');
+      return;
+    }
+    if (hold || flying) return;
+    hold = true;
+    power = 0;
+    if (!saidStart) { saidStart = true; say('掂一掂，力道差不多就行。'); }
+  }
+  function endPress() {
+    if (!hold) return;
+    hold = false;
+    if (flying || resting) return;
+    // 确定性落点：power=0.72 恰好落进桶口，飞行 1.1 秒反解初速
+    var T = 1.1;
+    var xTarget = L.handX + (L.binX - L.handX) * (0.35 + power * 0.65) / 0.83;
+    flying = {
+      x: L.handX, y: L.handY - 8,
+      vx: (xTarget - L.handX) / T,
+      vy: ((L.binY - L.bh) - (L.handY - 8) - 0.5 * 430 * T * T) / T,
+      rot: 0, vr: 3 + power * 5,
+      bounced: false
+    };
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (hold && !flying) power = Math.min(1, power + dt * 0.5);
+    if (lidPop > 0) lidPop -= dt * 2;
+
+    if (flying) {
+      flying.x += flying.vx * dt;
+      flying.y += flying.vy * dt;
+      flying.vy += 430 * dt;
+      flying.rot += flying.vr * dt;
+      var rimY = L.binY - L.bh;
+      var inX = Math.abs(flying.x - L.binX) < L.bw * 0.5;
+      if (!flying.bounced && flying.vy > 0 && flying.y >= rimY - 4 && flying.y <= rimY + 12 && inX) {
+        // 进桶
+        flying = null;
+        bags++;
+        lidPop = 1;
+        if (bags >= TOTAL) {
+          resting = true;
+          say('三袋全进。今天的垃圾，一件不落。', true);
+        } else {
+          say('哐当——进了。' + (TOTAL - bags) + ' 袋。');
+        }
+      } else if (flying.y >= L.groundY - 6) {
+        if (!flying.bounced) {
+          flying.y = L.groundY - 6;
+          flying.vy = -flying.vy * 0.3;
+          flying.vx *= 0.5;
+          flying.bounced = true;
+        } else {
+          flying = null;
+          say('差一点。捡回来再抛。');
+        }
+      }
+    }
+
+    // ── 背景：清晨楼道口 ──
+    var lit = 0.3;
+    var bg = ctx.createLinearGradient(0, 0, 0, L.groundY);
+    bg.addColorStop(0, 'rgb(' + Math.round(16 + lit * 30) + ',' + Math.round(22 + lit * 30) + ',' + Math.round(28 + lit * 28) + ')');
+    bg.addColorStop(1, 'rgb(' + Math.round(20 + lit * 40) + ',' + Math.round(26 + lit * 32) + ',' + Math.round(22 + lit * 20) + ')');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.groundY);
+    // 楼道门（左侧）
+    ctx.fillStyle = '#26221c';
+    ctx.fillRect(L.cx - L.R * 0.6, L.groundY - L.R * 1.05, L.R * 1.2, L.R * 1.05);
+    ctx.fillStyle = '#312a20';
+    ctx.fillRect(L.cx - L.R * 0.5, L.groundY - L.R * 0.92, L.R * 1.0, L.R * 0.92);
+    ctx.fillStyle = 'rgba(250,220,140,0.1)';
+    ctx.fillRect(L.cx - L.R * 0.5, L.groundY - L.R * 0.92, L.R * 1.0, L.R * 0.14);
+    // 地面
+    ctx.fillStyle = '#131110';
+    ctx.fillRect(0, L.groundY, w, h - L.groundY);
+    ctx.fillStyle = 'rgba(210,190,160,0.06)';
+    ctx.fillRect(0, L.groundY, w, 2);
+
+    // ── 垃圾桶 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.binX, L.binY + 3, L.bw * 0.85, L.bh * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 桶盖（进桶时弹开）
+    var lidLift = Math.max(0, lidPop) * 10;
+    ctx.fillStyle = '#3e5244';
+    ctx.beginPath();
+    ctx.ellipse(L.binX, L.binY - L.bh - lidLift, L.bw * 0.62, L.bh * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 桶身
+    ctx.fillStyle = '#46584a';
+    ctx.beginPath();
+    ctx.moveTo(L.binX - L.bw * 0.52, L.binY - L.bh);
+    ctx.lineTo(L.binX + L.bw * 0.52, L.binY - L.bh);
+    ctx.lineTo(L.binX + L.bw * 0.44, L.binY);
+    ctx.lineTo(L.binX - L.bw * 0.44, L.binY);
+    ctx.closePath();
+    ctx.fill();
+    // 桶身条纹
+    ctx.strokeStyle = 'rgba(24,32,26,0.5)';
+    ctx.lineWidth = 2;
+    for (var st = 1; st <= 2; st++) {
+      var sy = L.binY - L.bh * st / 3;
+      ctx.beginPath();
+      ctx.moveTo(L.binX - L.bw * (0.5 - st * 0.03), sy);
+      ctx.lineTo(L.binX + L.bw * (0.5 - st * 0.03), sy);
+      ctx.stroke();
+    }
+
+    // ── 飞行/手中的袋子 ──
+    function drawBag(x, y, rot, s) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.scale(s, s);
+      ctx.fillStyle = '#3c4038';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, L.R * 0.13, L.R * 0.15, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 系口
+      ctx.strokeStyle = 'rgba(180,186,170,0.8)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-4, -L.R * 0.14);
+      ctx.lineTo(0, -L.R * 0.19);
+      ctx.lineTo(4, -L.R * 0.14);
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (flying) drawBag(flying.x, flying.y, flying.rot, 1);
+    else if (!resting) {
+      drawBag(L.handX, L.handY - 8, Math.sin(now / 300) * 0.06 - (hold ? power * 0.5 : 0), 1);
+      // 蓄力条
+      if (hold) {
+        ctx.fillStyle = 'rgba(30,26,20,0.7)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(L.handX - L.R * 0.4, L.handY - L.R * 0.75, L.R * 0.8, 8, 4);
+        else ctx.rect(L.handX - L.R * 0.4, L.handY - L.R * 0.75, L.R * 0.8, 8);
+        ctx.fill();
+        var pc = power < 0.5 ? 'rgba(150,190,150,0.9)' : (power <= 0.79 ? 'rgba(240,214,140,0.95)' : 'rgba(210,120,90,0.9)');
+        ctx.fillStyle = pc;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(L.handX - L.R * 0.4 + 2, L.handY - L.R * 0.75 + 2, (L.R * 0.8 - 4) * power, 4, 2);
+        else ctx.rect(L.handX - L.R * 0.4 + 2, L.handY - L.R * 0.75 + 2, (L.R * 0.8 - 4) * power, 4);
+        ctx.fill();
+      }
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(bags + ' / ' + TOTAL + ' 袋', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && bags === 0 && !hold && !flying && !resting) {
+      ctx.fillStyle = 'rgba(138,154,134,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住蓄力，松手抛', L.cx, L.groundY + 34);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，明天再来', L.cx, L.groundY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__trash = {
+    bags: function () { return bags; },
+    power: function () { return +power.toFixed(2); },
+    resting: function () { return resting; },
+    fly: function () { return flying ? { x: Math.round(flying.x), y: Math.round(flying.y), vy: Math.round(flying.vy) } : null; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

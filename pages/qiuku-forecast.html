@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>秋裤预报</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #d8d4c4;
+    user-select: none;
+    -webkit-user-select: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 20px;
+  }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c6a55;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c6a55;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+  }
+  .back:hover { color: #b0a878; border-color: #b0a878; }
+  h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #b0a878; padding-left: 0.28em;
+  }
+  .sheet {
+    width: min(460px, 92vw);
+    background: #171e26;
+    border: 1px solid #2a323c;
+    padding: 26px 26px 22px;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+  }
+  .sheet .head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px; letter-spacing: 0.12em; color: #6d7683;
+    border-bottom: 1px dashed #2f3844;
+    padding-bottom: 12px; margin-bottom: 18px;
+  }
+  .temp {
+    font-size: 44px; font-weight: 300;
+    color: #e8e2ce;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .temp small { font-size: 16px; color: #8b94a1; }
+  .verdict {
+    min-height: 76px;
+    font-size: 15px; line-height: 1.9; letter-spacing: 0.05em;
+    color: #cfc9b4;
+    text-align: center;
+    margin: 14px 0 6px;
+  }
+  .verdict em { font-style: normal; color: #d9b96a; }
+  input[type="range"] {
+    width: 100%; margin-top: 8px;
+    accent-color: #b0a878;
+    cursor: pointer;
+  }
+  .scale {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: #5c6470;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    margin-top: 6px;
+  }
+  .wind {
+    display: flex; justify-content: center; gap: 8px;
+    margin-top: 16px;
+  }
+  .wind button {
+    background: none; border: 1px solid #343e4a; color: #8b94a1;
+    font-family: inherit; font-size: 11px; letter-spacing: 0.08em;
+    padding: 5px 12px; cursor: pointer;
+  }
+  .wind button.on { border-color: #b0a878; color: #d9b96a; }
+  .note {
+    margin-top: 14px; font-size: 10.5px; letter-spacing: 0.06em;
+    color: #565f6b; text-align: center;
+  }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<h1>秋裤预报</h1>
+
+<div class="sheet">
+  <div class="head"><span>夜间起报 · 不构成穿搭建议</span><span>第 2026-秋 号</span></div>
+  <div class="temp"><span id="tv">12</span><small> ℃</small></div>
+  <input type="range" id="slider" min="-15" max="25" step="1" value="12" aria-label="明早气温">
+  <div class="scale"><span>-15</span><span>5</span><span>25</span></div>
+  <div class="verdict" id="vd"></div>
+  <div class="wind" id="wind">
+    <button data-w="0" class="on">无风</button>
+    <button data-w="1">有风</button>
+    <button data-w="2">下雨</button>
+  </div>
+  <div class="note">本预报由一位深知冷暖的人连夜签发。降温幅度以妈妈感知为准。</div>
+</div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var slider = document.getElementById('slider');
+  var tv = document.getElementById('tv');
+  var vd = document.getElementById('vd');
+  var wind = 0;
+  var windBtns = document.querySelectorAll('#wind button');
+
+  // 判词分档：[最低温, 基准判词, 有风补一句, 下雨补一句]
+  var BANDS = [
+    [20, '秋裤继续压箱底。脚踝先替你守着门。', '风是热的，不算数。', '雨是温的，随它下。'],
+    [15, '早晚凉。秋裤在门口探了探头，先不让它进。', '有风就另说——风不讲道理。', '雨天湿冷，让它先进来站一会儿。'],
+    [10, '别硬撑了。秋裤该出场，没有人会笑话你。', '风一吹，温度还得再减两度。', '雨天配凉腿，明早你就知道了。'],
+    [5, '穿。风已经不讲道理了，你也别讲。', '这种风里，体面是留给自己看的。', '雨往骨头缝里钻，秋裤挡一半是一半。'],
+    [0, '秋裤外面还得加一层绒。妈妈说的，都对。', '风像小刀，绒是刀鞘。', '冷雨浇在台阶上，也浇在侥幸心理上。'],
+    [-99, '两条。一条保命，一条留给体面——体面输了。', '风已经改行当推土机了。', '这雨落下来是为了让所有人回家。']
+  ];
+
+  function verdictFor(t) {
+    for (var i = 0; i < BANDS.length; i++) {
+      if (t >= BANDS[i][0]) {
+        var base = BANDS[i][1];
+        if (wind === 1) return { main: base, extra: BANDS[i][2] };
+        if (wind === 2) return { main: base, extra: BANDS[i][3] };
+        return { main: base, extra: '' };
+      }
+    }
+    return { main: '', extra: '' };
+  }
+
+  function render() {
+    var t = parseInt(slider.value, 10);
+    tv.textContent = String(t);
+    var v = verdictFor(t);
+    vd.innerHTML = v.main + (v.extra ? '<br><em>' + v.extra + '</em>' : '');
+  }
+
+  slider.addEventListener('input', render);
+  windBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      wind = parseInt(b.getAttribute('data-w'), 10);
+      windBtns.forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      render();
+    });
+  });
+  render();
+
+  // QA 钩子
+  window.__qiuku = {
+    set: function (t, w) {
+      slider.value = String(t);
+      if (w !== undefined) {
+        wind = w;
+        windBtns.forEach(function (x) { x.classList.remove('on'); });
+        windBtns[w].classList.add('on');
+      }
+      render();
+      return vd.textContent;
+    },
+    temp: function () { return parseInt(slider.value, 10); },
+    wind: function () { return wind; }
+  };
+})();
+</script>
+</body>
+</html>

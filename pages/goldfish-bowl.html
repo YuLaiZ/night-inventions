@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>金鱼</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d0a86a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6a50; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d0a86a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6a50;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6a50;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d0a86a; border-color: #d0a86a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>金鱼</h1>
+  <p>晨光进水，比灯好看。<br>按住撒一撮食——它们记得手。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var feed = [];         // 食粒 {x, y, vy, eaten}
+  var fedCount = 0;
+  var saidStart = false;
+  var dust = [];         // 水中微尘
+  var fishes = [];
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.bowlR = Math.min(L.w * 0.3, L.h * 0.32, 240);
+    L.bowlX = L.cx;
+    L.bowlY = L.h * 0.62;
+    L.waterTop = L.bowlY - L.bowlR * 0.62;
+    L.waterBot = L.bowlY + L.bowlR * 0.72;
+    L.bowlW = L.bowlR * 1.35;
+    L.bowlH = L.bowlR * 1.08;
+    L.bowlTop = L.waterTop - 30;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+    initDust();
+    initFishes();
+  });
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  // 微尘
+  var dust = [];
+  function initDust() {
+    dust = [];
+    var rng = mulberry(11);
+    for (var i = 0; i < 40; i++) {
+      dust.push({
+        x: L.bowlX + (rng() * 2 - 1) * L.bowlR * 0.8,
+        y: L.waterTop + rng() * (L.waterBot - L.waterTop),
+        v: 3 + rng() * 6,
+        ph: rng() * Math.PI * 2,
+        r: 0.6 + rng() * 1.1
+      });
+    }
+  }
+
+  // 金鱼：巡游+追食
+  function makeFish(seed, colorA, colorB, size) {
+    var rng = mulberry(seed);
+    return {
+      x: L.bowlX + (rng() * 2 - 1) * L.bowlR * 0.5,
+      y: L.waterTop + 40 + rng() * (L.waterBot - L.waterTop - 80),
+      dir: rng() > 0.5 ? 1 : -1,
+      speed: 14 + rng() * 10,
+      sway: rng() * Math.PI * 2,
+      tail: rng() * Math.PI * 2,
+      colorA: colorA, colorB: colorB, size: size,
+      turn: 0
+    };
+  }
+  function initFishes() {
+    fishes = [
+      makeFish(21, [232, 120, 60], [246, 180, 90], 1.25),
+      makeFish(22, [240, 240, 236], [248, 200, 120], 1.0),
+      makeFish(23, [212, 84, 52], [240, 150, 70], 0.9)
+    ];
+  }
+
+  // 初始化顺序注意：layout 先行
+  layout();
+  initDust();
+  initFishes();
+
+  function startPress() {
+    hold = true;
+    // 撒 4-6 粒食
+    var rng = mulberry(Date.now() & 0xffff);
+    var n = 4 + Math.floor(rng() * 3);
+    for (var i = 0; i < n; i++) {
+      feed.push({
+        x: L.cx + (rng() * 2 - 1) * L.bowlR * 0.3,
+        y: L.waterTop + 6,
+        vy: 12 + rng() * 10,
+        eaten: false
+      });
+    }
+    fedCount += n;
+    if (!saidStart) { saidStart = true; say('它们会抢在最前面。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 食粒下沉 ──
+    for (var f = feed.length - 1; f >= 0; f--) {
+      var fd = feed[f];
+      if (!fd.eaten) {
+        fd.y += fd.vy * dt;
+        fd.vy = Math.min(26, fd.vy + dt * 8);
+        if (fd.y > L.waterBot - 10) { fd.y = L.waterBot - 10; fd.vy = 0; }
+      }
+      if (fd.y > L.waterBot - 12 && fd.y < L.waterBot - 6) fd.eaten = fd.eaten; // 沉底仍可啄
+    }
+
+    // ── 金鱼 AI ──
+    for (var i = 0; i < fishes.length; i++) {
+      var fish = fishes[i];
+      fish.tail += dt * (4 + fish.speed * 0.1);
+      // 找最近食粒
+      var target = null, bestD = 1e9;
+      for (var j = 0; j < feed.length; j++) {
+        if (feed[j].eaten) continue;
+        var dx = feed[j].x - fish.x, dy = feed[j].y - fish.y;
+        var d2 = dx * dx + dy * dy;
+        if (d2 < bestD) { bestD = d2; target = feed[j]; }
+      }
+      var tx, ty, sp = fish.speed;
+      if (target && bestD < Math.pow(L.bowlR * 1.1, 2)) {
+        tx = target.x; ty = target.y;
+        sp = fish.speed * 2.1;
+        if (bestD < 400) {
+          // 啄食
+          target.eaten = true;
+          fish.turn = (Math.random() - 0.5) * 1.6;
+        }
+      } else {
+        // 巡游
+        fish.sway += dt * 0.4;
+        tx = L.bowlX + Math.cos(fish.sway) * L.bowlR * 0.55;
+        ty = (L.waterTop + L.waterBot) / 2 + Math.sin(fish.sway * 0.7) * (L.waterBot - L.waterTop) * 0.22;
+      }
+      var tdx = tx - fish.x, tdy = ty - fish.y;
+      var td = Math.sqrt(tdx * tdx + tdy * tdy) || 1;
+      if (td > 6) {
+        var want = Math.atan2(tdy, tdx);
+        var cur = Math.atan2(Math.sin(fish.turn), Math.cos(fish.turn));
+        var diff = want - cur;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        fish.turn = cur + diff * Math.min(1, dt * 3);
+        fish.x += Math.cos(fish.turn) * sp * dt;
+        fish.y += Math.sin(fish.turn) * sp * dt * 0.7;
+      }
+      // 缸壁约束（椭圆归一）
+      var fxN = (fish.x - L.bowlX) / (L.bowlW * 0.82);
+      var fyN = (fish.y - L.bowlY) / (L.bowlH * 0.82);
+      if (fxN * fxN + fyN * fyN > 1) {
+        fish.x -= fxN * 3; fish.y -= fyN * 3;
+        fish.turn += Math.PI * 0.02;
+      }
+      fish.y = Math.max(L.waterTop + 24, Math.min(L.waterBot - 14, fish.y));
+    }
+
+    // ── 微尘 ──
+    for (var d = 0; d < dust.length; d++) {
+      var du = dust[d];
+      du.y -= du.v * dt * 0.4;
+      du.x += Math.sin(now / 900 + du.ph) * 3 * dt;
+      if (du.y < L.waterTop + 4) du.y = L.waterBot - 4;
+    }
+
+    // ── 绘制 ──
+    // 桌面
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#171412');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 缸后墙光（晨光窗光斑）
+    var sunG = ctx.createLinearGradient(0, 0, w, h);
+    sunG.addColorStop(0, 'rgba(240,210,150,0.10)');
+    sunG.addColorStop(0.5, 'rgba(240,210,150,0.03)');
+    sunG.addColorStop(1, 'rgba(240,210,150,0)');
+    ctx.fillStyle = sunG;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 缸体 ──
+    // 玻璃缸轮廓（圆缸正视为宽椭圆）
+    var bowlW = L.bowlR * 1.35, bowlH = L.bowlR * 1.08;
+    var bowlTop = L.waterTop - 30;
+    // 水体
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(L.bowlX, L.bowlY, bowlW, bowlH, 0, 0, Math.PI * 2);
+    ctx.clip();
+    var waterG = ctx.createLinearGradient(0, L.waterTop, 0, L.waterBot);
+    waterG.addColorStop(0, 'rgba(120,170,190,0.30)');
+    waterG.addColorStop(1, 'rgba(60,110,140,0.42)');
+    ctx.fillStyle = waterG;
+    ctx.fillRect(L.bowlX - bowlW, bowlTop, bowlW * 2, bowlH * 2);
+    // 光柱
+    var beam = ctx.createLinearGradient(L.bowlX - bowlW * 0.6, L.waterTop, L.bowlX + bowlW * 0.2, L.waterBot);
+    beam.addColorStop(0, 'rgba(250,226,160,0.20)');
+    beam.addColorStop(1, 'rgba(250,226,160,0)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(L.bowlX - bowlW * 0.75, L.waterTop);
+    ctx.lineTo(L.bowlX - bowlW * 0.25, L.waterTop);
+    ctx.lineTo(L.bowlX + bowlW * 0.35, L.waterBot);
+    ctx.lineTo(L.bowlX - bowlW * 0.45, L.waterBot);
+    ctx.closePath();
+    ctx.fill();
+    // 微尘
+    for (var d2 = 0; d2 < dust.length; d2++) {
+      var du2 = dust[d2];
+      ctx.fillStyle = 'rgba(235,240,230,' + (0.3 - du2.r * 0.08) + ')';
+      ctx.beginPath();
+      ctx.arc(du2.x, du2.y, du2.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 水草
+    for (var pg = 0; pg < 2; pg++) {
+      var gx = L.bowlX + (pg ? 1 : -1) * bowlW * 0.42;
+      ctx.strokeStyle = pg ? 'rgba(70,130,80,0.75)' : 'rgba(56,112,66,0.75)';
+      ctx.lineWidth = 3;
+      for (var gl = 0; gl < 4; gl++) {
+        var glh = 40 + gl * 16;
+        var gs = Math.sin(now / 900 + gl + pg * 2) * 8;
+        ctx.beginPath();
+        ctx.moveTo(gx, L.waterBot);
+        ctx.quadraticCurveTo(gx + gs * 0.4, L.waterBot - glh * 0.6, gx + gs + gl * 3, L.waterBot - glh);
+        ctx.stroke();
+      }
+    }
+    // 缸底石子
+    var rngS = mulberry(3);
+    for (var pe = 0; pe < 14; pe++) {
+      var pex = L.bowlX + (rngS() * 2 - 1) * bowlW * 0.8;
+      var pey = L.waterBot - rngS() * 8;
+      ctx.fillStyle = 'rgba(150,140,120,' + (0.3 + rngS() * 0.3) + ')';
+      ctx.beginPath();
+      ctx.ellipse(pex, pey, 3 + rngS() * 4, 2.4 + rngS() * 1.8, rngS() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 食粒（亮橙大点，沉底也可见）
+    for (var f2 = 0; f2 < feed.length; f2++) {
+      var f3 = feed[f2];
+      if (f3.eaten) continue;
+      ctx.fillStyle = 'rgba(238,182,88,1)';
+      ctx.beginPath();
+      ctx.arc(f3.x, f3.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,236,190,0.9)';
+      ctx.beginPath();
+      ctx.arc(f3.x - 0.8, f3.y - 0.8, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 金鱼
+    for (var fi = 0; fi < fishes.length; fi++) {
+      var fs = fishes[fi];
+      var fsS = fs.size * 1.25;
+      ctx.save();
+      ctx.translate(fs.x, fs.y);
+      var face = Math.cos(fs.turn) >= 0 ? 1 : -1;
+      ctx.scale(face * fsS, fsS);
+      // 尾鳍
+      var tailSw = Math.sin(fs.tail) * 0.5;
+      ctx.fillStyle = 'rgba(' + fs.colorB.join(',') + ',0.85)';
+      ctx.beginPath();
+      ctx.moveTo(-10, 0);
+      ctx.quadraticCurveTo(-20, -8 + tailSw * 6, -26, tailSw * 8);
+      ctx.quadraticCurveTo(-20, 8 + tailSw * 4, -10, 0);
+      ctx.fill();
+      // 身体
+      var bodyG = ctx.createLinearGradient(0, -8, 0, 8);
+      bodyG.addColorStop(0, 'rgb(' + fs.colorB.join(',') + ')');
+      bodyG.addColorStop(1, 'rgb(' + fs.colorA.join(',') + ')');
+      ctx.fillStyle = bodyG;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 13, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 白斑
+      ctx.fillStyle = 'rgba(250,248,240,0.7)';
+      ctx.beginPath();
+      ctx.ellipse(2, -2, 5, 3, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // 眼
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.arc(9, -2.4, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+      // 背鳍
+      ctx.fillStyle = 'rgba(' + fs.colorA.join(',') + ',0.8)';
+      ctx.beginPath();
+      ctx.moveTo(-3, -7);
+      ctx.quadraticCurveTo(1, -12, 5, -6);
+      ctx.closePath();
+      ctx.fill();
+      // 胸鳍（游动摆）
+      var finS = Math.sin(fs.tail * 1.3) * 0.4;
+      ctx.strokeStyle = 'rgba(' + fs.colorB.join(',') + ',0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(4, 4);
+      ctx.quadraticCurveTo(2, 9 + finS * 4, -2, 10 + finS * 3);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+    // 水面线
+    ctx.strokeStyle = 'rgba(200,225,235,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(L.bowlX, L.waterTop, bowlW * 0.94, 6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 缸口沿（空心玻璃圈，高于水面）
+    ctx.strokeStyle = 'rgba(200,225,235,0.28)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.ellipse(L.bowlX, bowlTop + 8, bowlW * 0.99, bowlW * 0.085, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 玻璃高光弧
+    ctx.strokeStyle = 'rgba(235,245,250,0.35)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(L.bowlX - bowlW * 0.52, L.bowlY - bowlH * 0.18, bowlW * 0.16, bowlH * 0.42, 0.25, Math.PI * 0.9, Math.PI * 1.5);
+    ctx.stroke();
+    // 缸底托
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.beginPath();
+    ctx.ellipse(L.bowlX, L.waterBot + 8, bowlW * 0.72, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('食 ' + fedCount, w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && fedCount === 0) {
+      ctx.fillStyle = 'rgba(208,168,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住缸口，撒食', L.cx, L.waterBot + 40);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__goldfish = {
+    fed: function () { return fedCount; },
+    inWater: function () { return feed.filter(function (f) { return !f.eaten; }).length; },
+    fishes: function () { return fishes.length; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

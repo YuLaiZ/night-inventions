@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打鸣</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #b09468; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #756a52; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b09468;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #756a52;
+    text-decoration: none;
+    border-bottom: 1px dotted #756a52;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b09468; border-color: #b09468; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>打鸣</h1>
+  <p>天亮这件事，归它管。<br>按住蓄力，松手打鸣——三声之后，太阳就该来了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var charge = 0;        // 蓄力 0-1
+  var crows = 0;         // 完整打鸣次数 0-3
+  var sunRise = 0;       // 太阳升起 0-1
+  var crowT = -1;        // 打鸣演出 0-1，-1 闲置
+  var waves = [];        // 声浪
+  var saidStart = false;
+  var half = false;      // 哑火提示
+  var resting = false;
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var fenceLines = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 8; i++) fenceLines.push({ x: rng(), a: 0.08 + rng() * 0.08 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.45;
+    L.groundY = L.h * 0.72;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 145);
+    L.roosterX = L.cx;
+    L.roosterY = L.groundY - L.R * 0.5;
+    L.horizon = L.groundY - L.R * 0.1;
+    L.sunX = L.w * 0.78;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      crows = 0; sunRise = 0; resting = false;
+      say('又一场天亮，接着叫。');
+      return;
+    }
+    if (hold || crows >= 3) return;
+    hold = true;
+    charge = 0;
+    if (!saidStart) { saidStart = true; say('蓄够一口气，叫得才透。'); }
+  }
+  function endPress() {
+    if (!hold) return;
+    hold = false;
+    if (crows >= 3) return;
+    if (charge >= 0.85) {
+      crowT = 0;
+      crows++;
+      for (var i = 0; i < 3; i++) {
+        waves.push({ r: L.R * 0.3, life: 1, delay: i * 0.12 });
+      }
+      sunRise = Math.min(1, crows / 3);
+      if (crows === 1) say('第一声，远处的狗跟着应了。');
+      if (crows === 2) say('第二声，谁家的灯亮了。');
+      if (crows === 3) say('叫醒了整条街，也包括你。', true);
+    } else {
+      half = true;
+      say('气不够——咯了半声。再来。');
+      setTimeout(function () { half = false; }, 1200);
+    }
+    charge = 0;
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    if (hold && crows < 3) charge = Math.min(1, charge + dt * 0.85); // 约 1.2 秒蓄满
+    if (crowT >= 0) { crowT += dt * 1.4; if (crowT > 1) crowT = -1; }
+    for (var v = waves.length - 1; v >= 0; v--) {
+      var wv = waves[v];
+      if (wv.delay > 0) { wv.delay -= dt; continue; }
+      wv.r += dt * L.R * 1.4;
+      wv.life -= dt * 0.8;
+      if (wv.life <= 0) waves.splice(v, 1);
+    }
+
+    // ── 背景：黎明三段天色 ──
+    var lit = sunRise;
+    var sky = ctx.createLinearGradient(0, 0, 0, L.horizon);
+    sky.addColorStop(0, 'rgb(' + Math.round(13 + lit * 40) + ',' + Math.round(18 + lit * 40) + ',' + Math.round(24 + lit * 50) + ')');
+    sky.addColorStop(0.7, 'rgb(' + Math.round(18 + lit * 90) + ',' + Math.round(26 + lit * 70) + ',' + Math.round(30 + lit * 50) + ')');
+    sky.addColorStop(1, 'rgb(' + Math.round(24 + lit * 180) + ',' + Math.round(30 + lit * 120) + ',' + Math.round(36 + lit * 40) + ')');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, L.horizon);
+    // 地面
+    ctx.fillStyle = '#14110d';
+    ctx.fillRect(0, L.horizon, w, h - L.horizon);
+    ctx.fillStyle = 'rgba(210,190,160,0.06)';
+    ctx.fillRect(0, L.horizon, w, 2);
+
+    // ── 太阳（三声后升起）──
+    if (sunRise > 0) {
+      var sy = L.horizon - sunRise * L.R * 0.5 + L.R * 0.14;
+      ctx.fillStyle = 'rgba(250,214,140,0.95)';
+      ctx.beginPath();
+      ctx.arc(L.sunX, sy, L.R * 0.16, 0, Math.PI * 2);
+      ctx.fill();
+      var sg = ctx.createRadialGradient(L.sunX, sy, 0, L.sunX, sy, L.R * 0.7);
+      sg.addColorStop(0, 'rgba(250,214,140,' + 0.3 * sunRise + ')');
+      sg.addColorStop(1, 'rgba(250,214,140,0)');
+      ctx.fillStyle = sg;
+      ctx.beginPath();
+      ctx.arc(L.sunX, sy, L.R * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 几颗残星
+      var rng = mulberry(7);
+      for (var st = 0; st < 5; st++) {
+        var sxx = rng() * w, syy = rng() * L.horizon * 0.5;
+        ctx.fillStyle = 'rgba(220,222,228,' + (0.35 - lit * 0.35) + ')';
+        ctx.beginPath();
+        ctx.arc(sxx, syy, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // ── 栅栏 ──
+    ctx.strokeStyle = 'rgba(90,80,60,0.5)';
+    ctx.lineWidth = 3;
+    for (var f = 0; f < 6; f++) {
+      var fx = w * (0.08 + f * 0.17);
+      ctx.beginPath();
+      ctx.moveTo(fx, L.groundY - L.R * 0.42);
+      ctx.lineTo(fx, L.groundY);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(0, L.groundY - L.R * 0.3);
+    ctx.lineTo(w, L.groundY - L.R * 0.34);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,250,235,1)';
+    for (var fl = 0; fl < fenceLines.length; fl++) {
+      ctx.globalAlpha = fenceLines[fl].a;
+      ctx.fillRect(fenceLines[fl].x * w, L.groundY - L.R * 0.32, 1.5, L.R * 0.32);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 声浪 ──
+    for (var q = 0; q < waves.length; q++) {
+      var wq = waves[q];
+      if (wq.delay > 0) continue;
+      ctx.strokeStyle = 'rgba(230,210,160,' + (0.45 * wq.life) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(L.roosterX + L.R * 0.35, L.roosterY - L.R * 0.28, wq.r, Math.PI * 1.62, Math.PI * 2.08);
+      ctx.stroke();
+    }
+
+    // ── 公鸡（剪影+红冠）──
+    var rx = L.roosterX, ry = L.roosterY;
+    var crowLift = crowT >= 0 ? Math.sin(crowT * Math.PI) * 5 : 0;
+    var chest = hold ? charge : 0; // 蓄力挺胸
+    ctx.save();
+    ctx.translate(rx, ry - crowLift);
+    // 尾羽（弧线几根）
+    ctx.strokeStyle = '#242018';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    for (var t2 = 0; t2 < 3; t2++) {
+      ctx.beginPath();
+      ctx.moveTo(-L.R * 0.12, -L.R * 0.16);
+      ctx.quadraticCurveTo(-L.R * (0.5 + t2 * 0.1), -L.R * (0.42 + t2 * 0.16), -L.R * (0.62 + t2 * 0.12), -L.R * (0.16 + t2 * 0.3));
+      ctx.stroke();
+    }
+    // 身体
+    ctx.fillStyle = '#2e2820';
+    ctx.beginPath();
+    ctx.ellipse(-L.R * 0.02, -L.R * 0.14 + chest * 2, L.R * 0.24, L.R * 0.15 + chest * 3, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    // 胸口红（蓄力）
+    if (chest > 0.1) {
+      ctx.fillStyle = 'rgba(190,80,60,' + (0.35 + chest * 0.4) + ')';
+      ctx.beginPath();
+      ctx.ellipse(L.R * 0.1, -L.R * 0.1, L.R * 0.09, L.R * 0.07 + chest * 3, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 颈与头
+    ctx.strokeStyle = '#2e2820';
+    ctx.lineWidth = L.R * 0.09;
+    ctx.beginPath();
+    ctx.moveTo(L.R * 0.1, -L.R * 0.18);
+    ctx.quadraticCurveTo(L.R * 0.2, -L.R * 0.3, L.R * 0.26, -L.R * 0.42);
+    ctx.stroke();
+    ctx.fillStyle = '#2e2820';
+    ctx.beginPath();
+    ctx.arc(L.R * 0.28, -L.R * 0.44, L.R * 0.075, 0, Math.PI * 2);
+    ctx.fill();
+    // 红冠
+    ctx.fillStyle = '#b04038';
+    for (var cm = 0; cm < 3; cm++) {
+      ctx.beginPath();
+      ctx.arc(L.R * (0.24 + cm * 0.045), -L.R * (0.53 + (cm === 1 ? 0.03 : 0)), L.R * 0.028, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 喙（打鸣时张开）
+    ctx.fillStyle = '#c8a04e';
+    ctx.beginPath();
+    var openB = crowT >= 0 ? Math.sin(crowT * Math.PI) * 4 : 0;
+    ctx.moveTo(L.R * 0.34, -L.R * 0.46);
+    ctx.lineTo(L.R * 0.44, -L.R * 0.45 - openB * 0.4);
+    ctx.lineTo(L.R * 0.44, -L.R * 0.43 + openB * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    // 打鸣声线（嘴前三道短弧）
+    if (crowT >= 0) {
+      for (var cl = 1; cl <= 3; cl++) {
+        ctx.strokeStyle = 'rgba(240,220,170,' + (0.6 - crowT * 0.5) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(L.R * 0.36, -L.R * 0.45, cl * 9, -0.5, 0.5);
+        ctx.stroke();
+      }
+    }
+    // 腿
+    ctx.strokeStyle = '#242018';
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(-L.R * 0.04, -L.R * 0.02);
+    ctx.lineTo(-L.R * 0.04, L.R * 0.04);
+    ctx.moveTo(L.R * 0.06, -L.R * 0.02);
+    ctx.lineTo(L.R * 0.06, L.R * 0.04);
+    ctx.stroke();
+    ctx.restore();
+
+    // ── 蓄力计（按住时显示在公鸡上方）──
+    if (hold && crows < 3) {
+      ctx.fillStyle = 'rgba(30,26,20,0.7)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx - L.R * 0.4, ry - L.R * 0.95, L.R * 0.8, 8, 4);
+      else ctx.rect(rx - L.R * 0.4, ry - L.R * 0.95, L.R * 0.8, 8);
+      ctx.fill();
+      ctx.fillStyle = charge >= 0.85 ? 'rgba(240,214,140,0.95)' : 'rgba(190,120,80,0.9)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx - L.R * 0.4 + 2, ry - L.R * 0.95 + 2, (L.R * 0.8 - 4) * charge, 4, 2);
+      else ctx.rect(rx - L.R * 0.4 + 2, ry - L.R * 0.95 + 2, (L.R * 0.8 - 4) * charge, 4);
+      ctx.fill();
+    }
+    if (half) {
+      ctx.fillStyle = 'rgba(220,180,140,0.7)';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('咯……', rx + L.R * 0.5, ry - L.R * 0.5);
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(crows + ' / 3 声', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 完成 ──
+    if (!saidStart && crows === 0 && !hold) {
+      ctx.fillStyle = 'rgba(176,148,104,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住蓄力，松手打鸣', L.cx, L.groundY + 34);
+    }
+    if (crows >= 3) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，叫醒下一个天亮', L.cx, L.groundY + 34);
+      resting = true;
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__rooster = {
+    charge: function () { return +charge.toFixed(2); },
+    crows: function () { return crows; },
+    sunRise: function () { return +sunRise.toFixed(2); },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

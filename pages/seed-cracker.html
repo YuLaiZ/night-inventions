@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>嗑瓜子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #b09a62; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6c6552; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b09a62;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6c6552;
+    text-decoration: none;
+    border-bottom: 1px dotted #6c6552;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b09a62; border-color: #b09a62; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>嗑瓜子</h1>
+  <p>深夜的东西，瓜子最经吃。<br>按住盘子嗑——壳归壳，仁归仁。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var HANDFUL = 46;      // 一把的颗数
+  var hueSet = 0;        // 0 葵花子 / 1 西瓜子 / 2 南瓜子
+  var doneCount = 0;     // 嗑完几把
+  var eaten = 0;         // 本把已嗑
+  var hold = false, holdTimer = null;
+  var resting = false;
+  var saidStart = false;
+  var pops = [];         // 壳飞行动画 {x, y, vx, vy, rot, vr, side, t, life}
+  var wobble = 0;        // 当前被嗑那颗的抖动
+
+  // 三种瓜子壳色
+  var HUES = [
+    { shell: [58, 52, 44], stripe: [212, 202, 176], kernel: [222, 198, 130], name: '葵花子' },
+    { shell: [38, 36, 40], stripe: [88, 84, 92], kernel: [206, 182, 120], name: '西瓜子' },
+    { shell: [226, 218, 196], stripe: [186, 200, 160], kernel: [214, 190, 122], name: '南瓜子' }
+  ];
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // 预生成：盘里瓜子的位置与姿态、桌面纹
+  var plateSeeds = [], grain = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < HANDFUL; i++) {
+      var a = rng() * Math.PI * 2, rr = Math.sqrt(rng());
+      plateSeeds.push({ x: Math.cos(a) * rr * 0.82, y: Math.sin(a) * rr * 0.7, rot: rng() * Math.PI, flip: rng() > 0.5 ? 1 : -1 });
+    }
+    for (var k = 0; k < 40; k++) grain.push({ x: rng(), y: rng(), a: 0.03 + rng() * 0.05 });
+  })();
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.counterY = L.h * 0.68;
+    L.R = Math.min(L.w * 0.24, L.h * 0.2, 150);
+    L.plateX = L.cx;
+    L.plateY = L.counterY + (L.h - L.counterY) * 0.42;
+    L.plateR = L.R;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function crackOne() {
+    if (resting || eaten >= HANDFUL) return;
+    eaten++;
+    wobble = 1;
+    // 两片壳分别飞向左右壳堆
+    var side = Math.random() > 0.5 ? 1 : -1;
+    for (var s = -1; s <= 1; s += 2) {
+      pops.push({
+        x: L.plateX + (Math.random() - 0.5) * L.R * 0.5,
+        y: L.plateY - L.R * 0.24,
+        vx: s * (55 + Math.random() * 70),
+        vy: -90 - Math.random() * 70,
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 12,
+        t: 0, life: 1
+      });
+    }
+    if (eaten === Math.floor(HANDFUL / 2)) say('半把了。嗑瓜子最怕停下来。');
+    if (eaten >= HANDFUL) {
+      resting = true;
+      doneCount++;
+      if (hold) { hold = false; if (holdTimer) { clearInterval(holdTimer); holdTimer = null; } }
+      if (doneCount === 1) say('一把嗑完，指尖都是香的。再按一下，再抓一把。', true);
+      else say('又一把。今晚的嘴没闲着。', true);
+    }
+  }
+
+  function startPress() {
+    if (resting) {
+      eaten = 0; resting = false;
+      hueSet = (hueSet + 1) % HUES.length;
+      pops = [];
+      say('换一把。手比脑子先学会了。');
+      return;
+    }
+    if (hold) return;
+    hold = true;
+    crackOne();
+    if (!saidStart) { saidStart = true; say('嗑——壳往两边飞，仁留在嘴里。'); }
+    if (!holdTimer && eaten < HANDFUL) {
+      holdTimer = setInterval(function () {
+        if (!hold || eaten >= HANDFUL || resting) { clearInterval(holdTimer); holdTimer = null; return; }
+        crackOne();
+      }, 340);
+    }
+  }
+  function endPress() {
+    hold = false;
+    if (holdTimer) { clearInterval(holdTimer); holdTimer = null; }
+  }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  function seedShape(x, y, rot, scale, C, cracked) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.scale(scale, scale);
+    // 壳身：饱满的尖椭圆
+    ctx.fillStyle = 'rgb(' + C.shell.join(',') + ')';
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.bezierCurveTo(9, -9, 8.5, 8.5, 0, 12);
+    ctx.bezierCurveTo(-8.5, 8.5, -9, -9, 0, -12);
+    ctx.closePath();
+    ctx.fill();
+    if (!cracked) {
+      ctx.strokeStyle = 'rgba(' + C.stripe.join(',') + ',0.75)';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(0, -10);
+      ctx.quadraticCurveTo(2.6, 0, 0, 10.5);
+      ctx.moveTo(-3, -8.5);
+      ctx.quadraticCurveTo(-4.2, 0, -3, 9.2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,250,0.16)';
+      ctx.beginPath();
+      ctx.ellipse(-2.2, -4.5, 1.8, 3.8, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 嗑开的缝
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, -8);
+      ctx.lineTo(0.6, 8);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+    var C = HUES[hueSet];
+
+    wobble = Math.max(0, wobble - dt * 5);
+    for (var p = pops.length - 1; p >= 0; p--) {
+      var pp = pops[p];
+      pp.t += dt;
+      pp.vy += 380 * dt;
+      pp.x += pp.vx * dt;
+      pp.y += pp.vy * dt;
+      pp.rot += pp.vr * dt;
+      if (pp.t > 1.1) pops.splice(p, 1);
+    }
+
+    // ── 背景：深夜桌面 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.counterY);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#131a20');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.counterY);
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    var glow = ctx.createRadialGradient(L.cx, L.counterY, 0, L.cx, L.counterY, L.R * 3.4);
+    glow.addColorStop(0, 'rgba(214,186,130,0.1)');
+    glow.addColorStop(1, 'rgba(214,186,130,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, L.counterY, w, h - L.counterY);
+    ctx.fillStyle = 'rgba(210,190,160,0.08)';
+    ctx.fillRect(0, L.counterY, w, 2);
+
+    // 桌面细纹
+    ctx.fillStyle = 'rgba(255,250,235,1)';
+    for (var g = 0; g < grain.length; g++) {
+      ctx.globalAlpha = grain[g].a;
+      ctx.fillRect(grain[g].x * w, L.counterY + grain[g].y * (h - L.counterY), 1.4, 1.4);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 盘子 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.plateX, L.plateY + L.R * 0.18, L.R * 1.04, L.R * 0.26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#23292f';
+    ctx.beginPath();
+    ctx.ellipse(L.plateX, L.plateY, L.R * 1.02, L.R * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2e353c';
+    ctx.beginPath();
+    ctx.ellipse(L.plateX, L.plateY - L.R * 0.03, L.R * 0.94, L.R * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 盘里的瓜子（嗑掉的不画）──
+    var left = HANDFUL - eaten;
+    for (var i = 0; i < plateSeeds.length; i++) {
+      if (i >= left) break;
+      var sd = plateSeeds[i];
+      var wob = (i === left - 1) ? wobble * 3 * (Math.random() - 0.5) : 0;
+      seedShape(
+        L.plateX + sd.x * L.R * 0.72 + wob,
+        L.plateY - L.R * 0.06 + sd.y * L.R * 0.3 + Math.abs(wob),
+        sd.rot + (sd.flip > 0 ? sd.rot * 0.2 : -0.2),
+        1.5, C, false
+      );
+    }
+
+    // ── 壳堆（两侧，紧凑上摞）──
+    var pileN = eaten;
+    var leftN = Math.ceil(pileN / 2), rightN = pileN - leftN;
+    var pileBaseY = L.counterY + (h - L.counterY) * 0.3;
+    function drawPile(side, n) {
+      if (n <= 0) return;
+      var rng = mulberry(77 + side * 5 + hueSet * 100);
+      var baseX = L.plateX + side * (L.R * 1.5);
+      for (var k = 0; k < n; k++) {
+        var row = Math.floor(k / 4), col = k % 4;
+        var px = baseX + (col - 1.5) * 17 + (rng() - 0.5) * 9;
+        var py = pileBaseY - row * 7 + (rng() - 0.5) * 5;
+        seedShape(px, py, (rng() - 0.5) * 2.6, 1, C, true);
+      }
+    }
+    drawPile(-1, leftN);
+    drawPile(1, rightN);
+
+    // ── 飞行的壳 ──
+    for (var q = 0; q < pops.length; q++) {
+      var fq = pops[q];
+      ctx.save();
+      ctx.translate(fq.x, fq.y);
+      ctx.rotate(fq.rot);
+      ctx.scale(1.05, 1.05);
+      ctx.fillStyle = 'rgb(' + Math.round(C.shell[0] * 1.25) + ',' + Math.round(C.shell[1] * 1.25) + ',' + Math.round(C.shell[2] * 1.25) + ')';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 8, 4.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(eaten + ' / ' + HANDFUL, w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 / 满把提示 ──
+    if (!saidStart && !resting && eaten === 0) {
+      ctx.fillStyle = 'rgba(176,154,98,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住盘子，嗑', L.cx, L.plateY + L.R * 0.62);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，再抓一把', L.cx, L.counterY + 34);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 crackOne/startPress/endPress）
+  window.__seeds = {
+    eaten: function () { return eaten; },
+    resting: function () { return resting; },
+    hue: function () { return hueSet; },
+    pops: function () { return pops.length; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>

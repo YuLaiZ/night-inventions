@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卷帘门</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #b0a084; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6e6554; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #b0a084;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6e6554;
+    text-decoration: none;
+    border-bottom: 1px dotted #6e6554;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #b0a084; border-color: #b0a084; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>卷帘门</h1>
+  <p>天蒙蒙亮，该开门了。<br>按住门底往上推——哗啦一声，跟天亮一起。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var hold = false;
+  var prog = 0;          // 卷起进度 0-1
+  var resting = false;
+  var saidStart = false;
+  var times = 0;         // 卷起次数
+  var rattle = 0;        // 哗啦抖动相位
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var steamPuffs = [];
+  (function () {
+    var rng = mulberry(20260915);
+    for (var i = 0; i < 5; i++) steamPuffs.push({ x: rng(), ph: rng() * Math.PI * 2 });
+  })();
+
+  function mulberry(seed) {
+    return function () {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.cx = L.w * 0.5;
+    L.R = Math.min(L.w * 0.3, L.h * 0.3, 190);
+    L.doorW = L.R * 1.7;
+    L.doorTop = L.h * 0.3;
+    L.doorBottom = L.h * 0.78;
+    L.doorH = L.doorBottom - L.doorTop;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function startPress() {
+    if (resting) {
+      prog = 0;
+      resting = false;
+      times = 0;
+      say('打烊了，再把门拉下来。守着这声哗啦。');
+      return;
+    }
+    if (hold || prog >= 1) return;
+    hold = true;
+    if (!saidStart) { saidStart = true; say('抓住门底，往上送——哗啦。'); }
+  }
+  function endPress() { hold = false; }
+
+  canvas.addEventListener('pointerdown', function () { startPress(); });
+  window.addEventListener('pointerup', function () { endPress(); });
+  window.addEventListener('pointercancel', function () { endPress(); });
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = window.innerWidth, h = window.innerHeight;
+
+    // ── 状态推进 ──
+    if (hold && prog < 1) {
+      prog = Math.min(1, prog + dt * 0.2); // 约 5 秒推到顶
+      rattle += dt * 30;
+      if (prog >= 1) {
+        hold = false;
+        resting = true;
+        times++;
+        if (times === 1) say('哗啦——门开了，跟天亮一起。', true);
+        else say('又开一次。这声哗啦，百听不腻。', true);
+      }
+    }
+
+    // ── 背景：清晨街道 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#141a24');
+    bg.addColorStop(0.6, '#1a222c');
+    bg.addColorStop(1, '#171310');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 鱼肚白（天将亮）
+    var dawn = ctx.createLinearGradient(0, h * 0.1, 0, L.doorTop);
+    dawn.addColorStop(0, 'rgba(210,200,180,0)');
+    dawn.addColorStop(1, 'rgba(214,204,178,' + (0.1 + prog * 0.16) + ')');
+    ctx.fillStyle = dawn;
+    ctx.fillRect(0, h * 0.1, w, L.doorTop - h * 0.1);
+
+    var dL = L.cx - L.doorW / 2, dR = L.cx + L.doorW / 2;
+
+    // ── 门框 ──
+    ctx.fillStyle = '#241e16';
+    ctx.fillRect(dL - 14, L.doorTop - 16, L.doorW + 28, L.doorH + 22);
+
+    // ── 店内（露出的部分）──
+    var rollH = L.doorH * prog;             // 已卷起的高度
+    var curtainBottom = L.doorBottom - rollH;
+    if (rollH > 2) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dL, L.doorTop, L.doorW, L.doorH);
+      ctx.clip();
+      // 店内暖光
+      var inG = ctx.createLinearGradient(0, L.doorTop, 0, L.doorBottom);
+      inG.addColorStop(0, '#4a3820');
+      inG.addColorStop(1, '#2e2416');
+      ctx.fillStyle = inG;
+      ctx.fillRect(dL, L.doorTop, L.doorW, L.doorH);
+      // 吊灯
+      ctx.strokeStyle = 'rgba(20,16,10,0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(L.cx, L.doorTop);
+      ctx.lineTo(L.cx, L.doorTop + L.doorH * 0.22);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(250,220,140,' + (0.5 + prog * 0.4) + ')';
+      ctx.beginPath();
+      ctx.moveTo(L.cx - 16, L.doorTop + L.doorH * 0.28);
+      ctx.lineTo(L.cx + 16, L.doorTop + L.doorH * 0.28);
+      ctx.lineTo(L.cx + 9, L.doorTop + L.doorH * 0.22);
+      ctx.lineTo(L.cx - 9, L.doorTop + L.doorH * 0.22);
+      ctx.closePath();
+      ctx.fill();
+      var lightG = ctx.createRadialGradient(L.cx, L.doorTop + L.doorH * 0.3, 0, L.cx, L.doorTop + L.doorH * 0.3, L.doorH * 0.5);
+      lightG.addColorStop(0, 'rgba(250,220,140,' + 0.28 * prog + ')');
+      lightG.addColorStop(1, 'rgba(250,220,140,0)');
+      ctx.fillStyle = lightG;
+      ctx.fillRect(dL, L.doorTop, L.doorW, L.doorH);
+      // 蒸笼塔剪影
+      ctx.fillStyle = 'rgba(24,18,10,0.85)';
+      for (var st = 0; st < 4; st++) {
+        var sw = L.doorW * (0.34 - st * 0.045);
+        var sh = L.doorH * 0.1;
+        var sx = L.cx - sw / 2 + L.doorW * 0.16;
+        var sy = L.doorBottom - sh * (st + 1) - 6;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(sx, sy, sw, sh, 4);
+        else ctx.rect(sx, sy, sw, sh);
+        ctx.fill();
+      }
+      // 蒸汽
+      for (var sp2 = 0; sp2 < steamPuffs.length; sp2++) {
+        var spf = steamPuffs[sp2];
+        var ph = Math.sin(now / 800 + spf.ph);
+        ctx.fillStyle = 'rgba(240,232,210,' + (0.1 + 0.08 * ph) + ')';
+        ctx.beginPath();
+        ctx.arc(L.cx + L.doorW * 0.16 + spf.x * 30 - 15 + ph * 6, L.doorTop + L.doorH * 0.3 - ph * 20, 8 + ph * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 台面
+      ctx.fillStyle = 'rgba(60,46,28,0.9)';
+      ctx.fillRect(dL, L.doorBottom - L.doorH * 0.14, L.doorW, L.doorH * 0.14);
+      ctx.restore();
+    }
+
+    // ── 卷帘（剩余未卷部分 + 顶部卷筒）──
+    if (prog < 1) {
+      var curtainTop = L.doorTop;
+      var cb = curtainBottom;
+      var slatH = L.doorH / 16;
+      ctx.fillStyle = '#565c64';
+      ctx.fillRect(dL, curtainTop, L.doorW, cb - curtainTop);
+      // 板条横纹
+      ctx.strokeStyle = 'rgba(20,24,30,0.55)';
+      ctx.lineWidth = 2;
+      var firstSlat = Math.ceil((curtainTop - L.doorTop) / slatH);
+      for (var sl3 = firstSlat; sl3 <= 16; sl3++) {
+        var sy2 = L.doorTop + sl3 * slatH;
+        if (sy2 > cb) break;
+        ctx.beginPath();
+        ctx.moveTo(dL, sy2);
+        ctx.lineTo(dR, sy2);
+        ctx.stroke();
+      }
+      // 底部卷帘横杆与把手位置
+      ctx.fillStyle = '#3d434b';
+      ctx.fillRect(dL, cb - 8, L.doorW, 10);
+      // 锁（初始可见，卷起后随门走）
+      if (prog < 0.2) {
+        ctx.fillStyle = '#8f959c';
+        ctx.beginPath();
+        ctx.arc(L.cx, cb - 26, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 哗啦抖动
+      if (hold && prog > 0.02 && prog < 1) {
+        ctx.strokeStyle = 'rgba(220,230,240,0.14)';
+        ctx.lineWidth = 1;
+        for (var rt = 1; rt <= 3; rt++) {
+          ctx.beginPath();
+          ctx.moveTo(dL, cb - 8 - rt * 9 + Math.sin(rattle + rt) * 1.5);
+          ctx.lineTo(dR, cb - 8 - rt * 9 + Math.sin(rattle + rt * 1.3) * 1.5);
+          ctx.stroke();
+        }
+      }
+      // 顶部卷筒（随进度变粗）
+      var rollerR = 8 + prog * 22;
+      ctx.fillStyle = '#48505a';
+      ctx.beginPath();
+      ctx.arc(L.cx, L.doorTop + 4, rollerR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(20,24,30,0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(L.cx, L.doorTop + 4, rollerR * 0.62, 0.4, 2.6);
+      ctx.stroke();
+    } else {
+      // 全开：顶部一卷，藏在卷帘盒里
+      ctx.fillStyle = '#48505a';
+      ctx.beginPath();
+      ctx.arc(L.cx, L.doorTop + 4, 30, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#241e16';
+      ctx.fillRect(dL - 14, L.doorTop - 16, L.doorW + 28, 20);
+    }
+
+    // ── 地面晨光 ──
+    var streetG = ctx.createLinearGradient(0, L.doorBottom, 0, h);
+    streetG.addColorStop(0, 'rgba(214,196,150,' + (0.06 + prog * 0.1) + ')');
+    streetG.addColorStop(1, 'rgba(214,196,150,0)');
+    ctx.fillStyle = streetG;
+    ctx.fillRect(0, L.doorBottom, w, h - L.doorBottom);
+    if (prog >= 1) {
+      // 店内光洒到街上
+      var spillG = ctx.createLinearGradient(L.cx, L.doorBottom, L.cx, h);
+      spillG.addColorStop(0, 'rgba(250,220,140,0.14)');
+      spillG.addColorStop(1, 'rgba(250,220,140,0)');
+      ctx.fillStyle = spillG;
+      ctx.beginPath();
+      ctx.moveTo(dL + 10, L.doorBottom);
+      ctx.lineTo(dR - 10, L.doorBottom);
+      ctx.lineTo(dR + 30, h);
+      ctx.lineTo(dL - 30, h);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── 右上角等宽刻度 ──
+    ctx.fillStyle = 'rgba(190,196,180,0.6)';
+    ctx.font = '12px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(prog * 100) + ' %', w - 22, 34);
+    ctx.textAlign = 'left';
+
+    // ── 引导 ──
+    if (!saidStart && prog === 0 && !resting) {
+      ctx.fillStyle = 'rgba(176,160,132,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住门底，往上推', L.cx, L.doorBottom + 40);
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再按一下，打烊拉门', L.cx, L.doorBottom + 40);
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用 startPress/endPress）
+  window.__shutter = {
+    prog: function () { return +prog.toFixed(2); },
+    resting: function () { return resting; },
+    press: function () { startPress(); },
+    release: function () { endPress(); }
+  };
+})();
+</script>
+</body>
+</html>
