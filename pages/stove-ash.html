@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>倒炉灰</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>倒炉灰</h1>
+  <p>天亮前炉膛积了一夜的灰。点开炉门，接一灰斗——<br>端去倒进花盆：炉灰垫底，开春花肥就有了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var state = 0;        // 0 点炉门 / 1 灰落入斗动画 / 2 端斗可拖 / 3 done 倒完
+  var doorT = 0;        // 炉门开合 0→1
+  var fallT = 0;        // 灰落下进度
+  var bucketFill = 0;   // 斗里灰量 0→1
+  var drag = false;
+  var bucket = { x: 0, y: 0 };
+  var tilt = 0;         // 倒灰倾角 0→1
+  var pourT = 0;        // 倒灰进度
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var grains = [];      // 灰粒
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.8;
+    L.sx = L.w * 0.3;
+    L.sR = Math.min(L.w * 0.11, L.h * 0.11, 88);
+    L.sy = L.floorY - L.sR * 1.05;
+    L.b0 = { x: L.sx + L.sR * 2.4, y: L.floorY - L.sR * 0.42 };  // 灰斗原位
+    bucket = { x: L.b0.x, y: L.b0.y };
+    L.pot = { x: Math.max(L.w * 0.12, L.sx - L.sR * 2.6), y: L.floorY - L.sR * 0.28 };
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var st = state;
+    layout();
+    state = st;
+  });
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      state = 0; doorT = 0; fallT = 0; bucketFill = 0; tilt = 0; pourT = 0;
+      grains = [];
+      bucket = { x: L.b0.x, y: L.b0.y };
+      saidStart = false;
+      return;
+    }
+    if (state === 0) {
+      // 点炉门
+      var dx = ev.clientX - L.sx, dy = ev.clientY - (L.sy + L.sR * 0.4);
+      if (dx * dx + dy * dy < Math.pow(L.sR * 1.4, 2)) {
+        state = 1;
+        if (!saidStart) { saidStart = true; say('炉门一开，灰自己往下走——接稳了。'); }
+      }
+    } else if (state === 2) {
+      var bx = ev.clientX - bucket.x, by = ev.clientY - bucket.y;
+      if (bx * bx + by * by < Math.pow(L.sR * 0.8, 2)) drag = true;
+    }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (drag && state === 2) { bucket.x = ev.clientX; bucket.y = ev.clientY; }
+  });
+  window.addEventListener('pointerup', function () {
+    if (drag && state === 2) {
+      drag = false;
+      var dx = Math.abs(bucket.x - L.pot.x), dy = Math.abs(bucket.y - (L.pot.y - L.sR * 0.6));
+      if (dx < L.sR && dy < L.sR) {
+        state = 3;
+        say('炉灰垫了盆底。开春翻土，花会记得这盆暖。', true);
+        resting = true;
+      } else {
+        bucket = { x: L.b0.x, y: L.b0.y };
+      }
+    }
+  });
+  window.addEventListener('pointercancel', function () {
+    if (drag) { drag = false; bucket = { x: L.b0.x, y: L.b0.y }; }
+  });
+
+  function drawBucket(x, y, fill, t) {
+    ctx.save();
+    ctx.translate(x, y);
+    var w = L.sR * 0.72, hh = L.sR * 0.5;
+    // 斗身（簸箕形）
+    ctx.fillStyle = '#5a6068';
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -hh);
+    ctx.lineTo(w / 2, -hh);
+    ctx.lineTo(w / 2 - hh * 0.5, 0);
+    ctx.lineTo(-w / 2 + hh * 0.5, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#34383e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // 斗里的灰
+    if (fill > 0) {
+      ctx.fillStyle = '#3a3d40';
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + hh * 0.5, -hh * fill * 0.8);
+      ctx.quadraticCurveTo(0, -hh * fill * 0.8 - hh * 0.25, w / 2 - hh * 0.5, -hh * fill * 0.8);
+      ctx.lineTo(w / 2 - hh * 0.5, 0);
+      ctx.lineTo(-w / 2 + hh * 0.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      // 灰面余烬两点
+      ctx.fillStyle = 'rgba(220,110,50,' + (0.35 * fill) + ')';
+      ctx.beginPath();
+      ctx.arc(-w * 0.14, -hh * fill * 0.8 - 2, 1.6, 0, Math.PI * 2);
+      ctx.arc(w * 0.1, -hh * fill * 0.8 - 1, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (state === 1) {
+      doorT = Math.min(1, doorT + dt * 3);
+      if (doorT >= 1) fallT += dt * 0.5;
+      // 灰粒落下
+      if (fallT > 0 && fallT < 0.75 && Math.random() < 0.7) {
+        grains.push({
+          x: L.sx - L.sR * 0.24 + Math.random() * L.sR * 0.48,
+          y: L.sy + L.sR * 0.55,
+          vy: 60 + Math.random() * 80,
+          vx: (Math.random() - 0.5) * 10
+        });
+      }
+      bucketFill = Math.min(1, fallT * 1.2);
+      if (fallT >= 0.9) {
+        state = 2;
+        say('端起来，倒进那盆过冬的花。');
+      }
+    }
+    for (var gi = grains.length - 1; gi >= 0; gi--) {
+      var gp = grains[gi];
+      gp.y += gp.vy * dt; gp.x += gp.vx * dt;
+      if (gp.y > L.b0.y - L.sR * 0.2) grains.splice(gi, 1);
+    }
+    if (state === 3 && pourT < 1) {
+      pourT = Math.min(1, pourT + dt * 1.4);
+      tilt = Math.sin(Math.min(1, pourT) * Math.PI) * 1.2;
+      if (Math.random() < 0.5) {
+        grains.push({
+          x: bucket.x + L.sR * 0.3,
+          y: bucket.y - L.sR * 0.1,
+          vx: 40 + Math.random() * 30,
+          vy: 10 + Math.random() * 20,
+          toPot: true
+        });
+      }
+    }
+    for (var gj = grains.length - 1; gj >= 0; gj--) {
+      var gq = grains[gj];
+      if (gq.toPot) {
+        gq.x += gq.vx * dt; gq.y += (gq.vy + 140 * dt * 4) * dt;
+        if (gq.y > L.pot.y - L.sR * 0.1) grains.splice(gj, 1);
+      }
+    }
+
+    // ── 背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c1016');
+    bg.addColorStop(1, '#12141a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 晨前一点微光
+    var dg = ctx.createRadialGradient(w * 0.2, h * 0.15, 0, w * 0.2, h * 0.15, w * 0.5);
+    dg.addColorStop(0, 'rgba(190,200,225,0.05)');
+    dg.addColorStop(1, 'rgba(190,200,225,0)');
+    ctx.fillStyle = dg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 炉子 ──
+    var sx = L.sx, sy = L.sy, sR = L.sR;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(sx, L.floorY + sR * 0.06, sR * 1.2, sR * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var bg2 = ctx.createLinearGradient(sx - sR, 0, sx + sR, 0);
+    bg2.addColorStop(0, '#26282c');
+    bg2.addColorStop(0.45, '#3d4046');
+    bg2.addColorStop(1, '#22242a');
+    ctx.fillStyle = bg2;
+    ctx.beginPath();
+    ctx.moveTo(sx - sR * 0.92, sy - sR * 1.05);
+    ctx.lineTo(sx - sR, sy + sR * 0.95);
+    ctx.lineTo(sx + sR, sy + sR * 0.95);
+    ctx.lineTo(sx + sR * 0.92, sy - sR * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    // 炉沿
+    ctx.fillStyle = '#4a4e55';
+    ctx.beginPath();
+    ctx.ellipse(sx, sy - sR * 1.05, sR * 1.06, sR * 0.18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#1c1e22';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // 炉膛余温
+    ctx.fillStyle = '#131417';
+    ctx.beginPath();
+    ctx.ellipse(sx, sy - sR * 1.08, sR * 0.8, sR * 0.13, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(220,110,50,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(sx, sy - sR * 1.08, sR * 0.5, sR * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 炉门（可滑开）
+    var doorX = sx - sR * 0.3 - doorT * sR * 0.66;
+    ctx.fillStyle = '#17181c';
+    ctx.fillRect(sx - sR * 0.3, sy + sR * 0.32, sR * 0.6, sR * 0.42);
+    ctx.fillStyle = '#2c2f34';
+    ctx.fillRect(doorX, sy + sR * 0.32, sR * 0.6, sR * 0.42);
+    ctx.fillStyle = '#565b62';
+    ctx.fillRect(doorX + sR * 0.52, sy + sR * 0.5, sR * 0.06, sR * 0.08);
+    // 门内暗腔与积灰堆
+    if (doorT > 0.3) {
+      ctx.fillStyle = '#0e0f12';
+      ctx.fillRect(sx - sR * 0.3, sy + sR * 0.36, sR * 0.6, sR * 0.38);
+      ctx.fillStyle = '#3a3d40';
+      ctx.beginPath();
+      ctx.ellipse(sx, sy + sR * 0.72, sR * 0.26, sR * (0.05 + fallT * 0.03), 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (state === 0) {
+        var pul = 0.5 + 0.5 * Math.sin(now / 480);
+        ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.strokeRect(sx - sR * 0.3 - 5, sy + sR * 0.32 - 5, sR * 0.7, sR * 0.52);
+      }
+    }
+    // 落灰粒子
+    ctx.fillStyle = 'rgba(120,124,128,0.7)';
+    for (var pi = 0; pi < grains.length; pi++) {
+      if (!grains[pi].toPot) ctx.fillRect(grains[pi].x, grains[pi].y, 2, 2);
+    }
+
+    // ── 花盆 ──
+    var px = L.pot.x, py = L.pot.y;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(px, py + L.sR * 0.05, L.sR * 0.45, L.sR * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#6b4a32';
+    ctx.beginPath();
+    ctx.moveTo(px - L.sR * 0.34, py - L.sR * 0.34);
+    ctx.lineTo(px + L.sR * 0.34, py - L.sR * 0.34);
+    ctx.lineTo(px + L.sR * 0.26, py);
+    ctx.lineTo(px - L.sR * 0.26, py);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#7a563a';
+    ctx.fillRect(px - L.sR * 0.4, py - L.sR * 0.42, L.sR * 0.8, L.sR * 0.1);
+    // 盆里的绿（水仙/蒜苗）
+    ctx.strokeStyle = '#5f7a3e';
+    ctx.lineWidth = 3;
+    for (var sc = -2; sc <= 2; sc++) {
+      ctx.beginPath();
+      ctx.moveTo(px + sc * L.sR * 0.07, py - L.sR * 0.4);
+      ctx.quadraticCurveTo(px + sc * L.sR * 0.16, py - L.sR * 0.62, px + sc * L.sR * 0.24, py - L.sR * (0.72 - Math.abs(sc) * 0.06));
+      ctx.stroke();
+    }
+    // 盆口灰层（倒完后）
+    if (pourT >= 1) {
+      ctx.fillStyle = 'rgba(90,94,98,' + Math.min(0.85, pourT) + ')';
+      ctx.beginPath();
+      ctx.ellipse(px, py - L.sR * 0.4, L.sR * 0.3, L.sR * 0.06, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 灰斗 ──
+    if (state < 3) {
+      drawBucket(bucket.x, bucket.y, bucketFill, now);
+      if (state === 2 && !drag) {
+        var pul2 = 0.5 + 0.5 * Math.sin(now / 480);
+        ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul2) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(bucket.x, bucket.y, L.sR * 0.62, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      // 倒灰：斗悬在盆上方倾斜
+      var dx = bucket.x + (L.pot.x + L.sR * 0.4 - bucket.x) * Math.min(1, pourT * 2);
+      var dy2 = bucket.y + (L.pot.y - L.sR * 0.95 - bucket.y) * Math.min(1, pourT * 2);
+      ctx.save();
+      ctx.translate(dx, dy2);
+      ctx.rotate(tilt);
+      ctx.translate(-dx, -dy2);
+      drawBucket(dx, dy2, 1 - pourT, now);
+      ctx.restore();
+    }
+    // 倒出的灰粒
+    ctx.fillStyle = 'rgba(120,124,128,0.6)';
+    for (var pj = 0; pj < grains.length; pj++) {
+      if (grains[pj].toPot) ctx.fillRect(grains[pj].x, grains[pj].y, 2, 2);
+    }
+
+    // 引导
+    if (!saidStart && state === 0) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一下炉门', sx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+    if (resting && state === 3) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再倒一斗', sx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用状态机）
+  window.__ash = {
+    stage: function () { return state; },
+    done: function () { return state === 3 && pourT >= 1; },
+    tapDoor: function () { if (state === 0) state = 1; },
+    grab: function () { if (state === 2) drag = true; },
+    move: function (x, y) { if (drag && state === 2) { bucket.x = x; bucket.y = y; } },
+    drop: function () {
+      if (!drag || state !== 2) return;
+      drag = false;
+      var dx = Math.abs(bucket.x - L.pot.x), dy = Math.abs(bucket.y - (L.pot.y - L.sR * 0.6));
+      if (dx < L.sR && dy < L.sR) { state = 3; resting = true; say('炉灰垫了盆底。开春翻土，花会记得这盆暖。', true); }
+      else bucket = { x: L.b0.x, y: L.b0.y };
+    },
+    bucketHome: function () { return { x: Math.round(L.b0.x), y: Math.round(L.b0.y) }; },
+    potTop: function () { return { x: Math.round(L.pot.x), y: Math.round(L.pot.y - L.sR * 0.6) }; }
+  };
+})();
+</script>
+</body>
+</html>

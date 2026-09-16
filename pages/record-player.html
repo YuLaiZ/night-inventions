@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电唱机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>电唱机</h1>
+  <p>唱片在套里睡了很久了。<br>先上盘，再落针——听一段老摇篮曲，屋里就软了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var state = 0;        // 0 上盘 / 1 已上盘待落针 / 2 放音 / 3 抬臂停
+  var discDrop = 0;     // 上盘落下动画 0→1
+  var armT = 0;         // 唱臂起落 0(抬)→1(落)
+  var discSpin = 0;     // 转盘角度
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.8;
+    L.px = L.w * 0.44;
+    L.py = L.h * 0.6;                        // 唱机中心
+    L.pR = Math.min(L.w * 0.21, L.h * 0.19, 190);   // 转盘半径
+    L.sleeveX = Math.min(L.w - L.pR * 0.8, L.px + L.pR * 1.75);
+    L.sleeveY = L.py - L.pR * 0.2;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 摇篮曲（勃拉姆斯主题，简谱转频率；0=休止）──
+  // 3 5 5- | 3 5 5- | 3 5 7. 6 5 | 1 6 5-
+  var MELODY = [
+    [64, 1], [67, 1], [67, 2],
+    [64, 1], [67, 1], [67, 2],
+    [64, 1], [67, 1], [71, 1.5], [69, 0.5], [67, 2],
+    [72, 1], [69, 1], [67, 2],
+    [77, 2], [71, 1], [71, 1],
+    [76, 2], [69, 1], [69, 1],
+    [75, 1], [71, 1], [74, 1.5], [71, 0.5], [67, 2],
+    [69, 1], [71, 1], [64, 3], [0, 1]
+  ];
+  var AC = null, noteIdx = 0, noteLeft = 0, gainNode = null;
+  function audioInit() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      gainNode = AC.createGain();
+      gainNode.gain.value = 0;
+      gainNode.connect(AC.destination);
+    } catch (e) { AC = null; }
+  }
+  function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function playTick() {
+    if (!AC || state !== 2) return;
+    var beat = 0.42;
+    var dt2 = 1 / 60;
+    noteLeft -= dt2;
+    if (noteLeft <= 0) {
+      var n = MELODY[noteIdx % MELODY.length];
+      noteIdx++;
+      noteLeft = n[1] * beat;
+      if (n[0] > 0 && gainNode) {
+        var osc = AC.createOscillator();
+        var g2 = AC.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = midiHz(n[0]);
+        var t0 = AC.currentTime;
+        g2.gain.setValueAtTime(0, t0);
+        g2.gain.linearRampToValueAtTime(0.085, t0 + 0.03);
+        g2.gain.exponentialRampToValueAtTime(0.012, t0 + Math.max(0.25, n[1] * beat * 0.92));
+        osc.connect(g2); g2.connect(gainNode);
+        osc.start(t0); osc.stop(t0 + Math.max(0.3, n[1] * beat));
+        // 低八度衬底（每小节头一个音）
+        if (noteLeft >= 0.6) {
+          var osc2 = AC.createOscillator();
+          var g3 = AC.createGain();
+          osc2.type = 'sine';
+          osc2.frequency.value = midiHz(n[0] - 12);
+          g3.gain.setValueAtTime(0.0001, t0);
+          g3.gain.linearRampToValueAtTime(0.05, t0 + 0.04);
+          g3.gain.exponentialRampToValueAtTime(0.008, t0 + n[1] * beat * 0.9);
+          osc2.connect(g3); g3.connect(gainNode);
+          osc2.start(t0); osc2.stop(t0 + n[1] * beat);
+        }
+      }
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    audioInit();
+    if (resting) {
+      resting = false;
+      state = 0; discDrop = 0; armT = 0; noteIdx = 0; noteLeft = 0;
+      saidStart = false;
+      if (gainNode) gainNode.gain.value = 0;
+      return;
+    }
+    if (state === 0) {
+      // 点唱片套：上盘
+      var dx = ev.clientX - L.sleeveX, dy = ev.clientY - L.sleeveY;
+      if (dx * dx + dy * dy < Math.pow(L.pR * 0.9, 2)) {
+        state = 1;
+        discDrop = 0.001;
+        if (!saidStart) { saidStart = true; say('盘上好了，纹路朝上——再点唱臂落针。'); }
+      }
+    } else if (state === 1) {
+      // 点唱臂/转盘：落针
+      var dx2 = ev.clientX - L.px, dy2 = ev.clientY - L.py;
+      if (dx2 * dx2 + dy2 * dy2 < Math.pow(L.pR * 1.15, 2)) {
+        state = 2;
+        say('针落下了。听——屋子软下来了。', true);
+      }
+    } else if (state === 2) {
+      var dx3 = ev.clientX - L.px, dy3 = ev.clientY - L.py;
+      if (dx3 * dx3 + dy3 * dy3 < Math.pow(L.pR * 1.15, 2)) {
+        state = 3;
+        resting = true;
+        if (gainNode) gainNode.gain.linearRampToValueAtTime(0, (AC ? AC.currentTime : 0) + 0.4);
+        say('一曲终了。盘先转着，夜还长。', true);
+      }
+    }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (discDrop > 0 && discDrop < 1) discDrop = Math.min(1, discDrop + dt * 2);
+    var target = state === 2 ? 1 : (state === 3 ? 0 : armT);
+    armT += (target - armT) * Math.min(1, dt * 3);
+    if (state === 2) { discSpin += dt * 1.05; playTick(); }
+    if (gainNode && state === 2) {
+      gainNode.gain.value = 1;
+    }
+
+    // ── 背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c0f14');
+    bg.addColorStop(1, '#131118');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    var tableY = L.py + L.pR * 0.62;
+    var tg = ctx.createLinearGradient(0, tableY, 0, h);
+    tg.addColorStop(0, '#241c12');
+    tg.addColorStop(1, '#191410');
+    ctx.fillStyle = tg;
+    ctx.fillRect(0, tableY, w, h - tableY);
+    ctx.fillStyle = 'rgba(200,170,120,0.14)';
+    ctx.fillRect(0, tableY, w, 2);
+
+    // ── 唱机柜体 ──
+    var kx = L.px, ky = L.py, pR = L.pR;
+    var boxW = pR * 2.5, boxH = pR * 0.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(kx, tableY + 8, boxW * 0.62, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var bg2 = ctx.createLinearGradient(kx - boxW / 2, 0, kx + boxW / 2, 0);
+    bg2.addColorStop(0, '#4a3620');
+    bg2.addColorStop(0.5, '#634a2c');
+    bg2.addColorStop(1, '#3d2d1a');
+    ctx.fillStyle = bg2;
+    ctx.fillRect(kx - boxW / 2, ky + pR * 0.3, boxW, boxH);
+    ctx.fillStyle = 'rgba(200,170,120,0.25)';
+    ctx.fillRect(kx - boxW / 2, ky + pR * 0.3, boxW, 3);
+    // 柜脚两枚旋钮
+    ctx.fillStyle = '#2c2f34';
+    ctx.beginPath();
+    ctx.arc(kx - boxW * 0.32, ky + pR * 0.3 + boxH * 0.5, pR * 0.06, 0, Math.PI * 2);
+    ctx.arc(kx + boxW * 0.28, ky + pR * 0.3 + boxH * 0.5, pR * 0.06, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── 转盘与唱片 ──
+    // 转盘底
+    ctx.fillStyle = '#2c2f34';
+    ctx.beginPath();
+    ctx.ellipse(kx, ky, pR * 1.04, pR * 0.36, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (state >= 1) {
+      var drop = state === 1 ? discDrop : 1;
+      var dr = pR * (0.35 + 0.65 * drop);
+      var tilt = 1 - drop * 0.72;   // 落下过程椭圆压扁过渡
+      ctx.save();
+      ctx.translate(kx, ky);
+      ctx.scale(1, tilt * 0.38 + 0.001);
+      ctx.rotate(discSpin);
+      // 唱片
+      var dg = ctx.createRadialGradient(0, 0, dr * 0.18, 0, 0, dr);
+      dg.addColorStop(0, '#1a1c20');
+      dg.addColorStop(0.72, '#20232a');
+      dg.addColorStop(0.78, '#2a2e36');
+      dg.addColorStop(0.8, '#1a1c20');
+      dg.addColorStop(1, '#14161a');
+      ctx.fillStyle = dg;
+      ctx.beginPath();
+      ctx.arc(0, 0, dr, 0, Math.PI * 2);
+      ctx.fill();
+      // 纹路高光（旋转可见）
+      ctx.strokeStyle = 'rgba(180,190,205,0.08)';
+      ctx.lineWidth = 1;
+      for (var gr = 0; gr < 3; gr++) {
+        ctx.beginPath();
+        ctx.arc(0, 0, dr * (0.4 + gr * 0.2), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // 标贴
+      ctx.fillStyle = state === 2 ? '#c88a6a' : '#8a6f48';
+      ctx.beginPath();
+      ctx.arc(0, 0, dr * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#14161a';
+      ctx.beginPath();
+      ctx.arc(0, 0, dr * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 唱臂（从右上支点落针）
+      var pivotX = kx + pR * 1.18, pivotY = ky - pR * 0.62;
+      ctx.strokeStyle = '#9aa2ab';
+      ctx.lineWidth = 4;
+      var angBase = 0.55 + (state >= 2 ? armT : 0) * 0.62;
+      var ex2 = pivotX - Math.cos(angBase) * pR * 1.18;
+      var ey2 = pivotY + Math.sin(angBase) * pR * 0.5 + pR * 0.28;
+      ctx.beginPath();
+      ctx.moveTo(pivotX, pivotY);
+      ctx.lineTo(ex2, ey2);
+      ctx.stroke();
+      ctx.fillStyle = '#c8ccd2';
+      ctx.beginPath();
+      ctx.arc(pivotX, pivotY, pR * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      // 针头
+      ctx.fillStyle = '#d8dce2';
+      ctx.beginPath();
+      ctx.arc(ex2, ey2, pR * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 唱片套（state 0 立着；上盘后空套斜靠）──
+    var slT = state >= 1 ? 1 : 0;
+    var slX = L.sleeveX + slT * L.pR * 0.24;
+    var slY = L.sleeveY + slT * L.pR * 0.06;
+    ctx.save();
+    ctx.translate(slX, slY);
+    ctx.rotate(slT * 0.1);
+    var sw = pR * 0.82, sh = pR * 0.82;
+    ctx.fillStyle = '#5a4630';
+    ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+    ctx.strokeStyle = '#3d2d1a';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-sw / 2, -sh / 2, sw, sh);
+    // 套面画一弯月
+    ctx.fillStyle = 'rgba(220,210,180,0.55)';
+    ctx.beginPath();
+    ctx.arc(-sw * 0.08, -sh * 0.06, sw * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5a4630';
+    ctx.beginPath();
+    ctx.arc(sw * 0.06, -sh * 0.12, sw * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    if (state === 0) {
+      var pul = 0.5 + 0.5 * Math.sin(now / 480);
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(slX, slY, pR * 0.72, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 音符泡泡（放音时从唱臂飘出）
+    if (state === 2 && Math.random() < 0.05) {
+      flour.push({
+        x: kx + pR * 1.1, y: ky - pR * 0.8,
+        vx: 8 + Math.random() * 8, vy: -22 - Math.random() * 10,
+        life: 1.6, note: true
+      });
+    }
+    ctx.font = '13px system-ui, sans-serif';
+    for (var fi = flour.length - 1; fi >= 0; fi--) {
+      var fq = flour[fi];
+      fq.x += fq.vx * dt; fq.y += fq.vy * dt; fq.life -= dt;
+      if (fq.life <= 0) { flour.splice(fi, 1); continue; }
+      ctx.globalAlpha = Math.min(0.7, fq.life * 0.5);
+      ctx.fillStyle = '#d8cba8';
+      ctx.fillText(fq.note ? '♪' : '', fq.x, fq.y);
+    }
+    ctx.globalAlpha = 1;
+
+    // 引导
+    if (!saidStart && state === 0) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点唱片套，上盘', slX, slY - pR * 0.85);
+      ctx.textAlign = 'left';
+    }
+    if (state === 1) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点唱臂落针', kx, ky + pR * 1.05);
+      ctx.textAlign = 'left';
+    }
+    if (resting && state === 3) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('换一张，再来', kx, tableY + 40);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  var flour = [];
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实点击共用判定）
+  window.__player = {
+    state: function () { return state; },
+    done: function () { return resting; },
+    tap: function () {
+      audioInit();
+      if (resting) { resting = false; state = 0; discDrop = 0; armT = 0; return; }
+      if (state === 0) { state = 1; discDrop = 0.001; saidStart = true; }
+      else if (state === 1) { state = 2; }
+      else if (state === 2) { state = 3; resting = true; }
+    }
+  };
+})();
+</script>
+</body>
+</html>

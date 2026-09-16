@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>挂棉门帘</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>挂棉门帘</h1>
+  <p>炉子一生，屋里就存得住暖了——<br>再挂上棉帘：按住往外掀掀看，风就进不来了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var NEED = 3;         // 掀透三次，帘子服帖
+  var lifts = 0;        // 已掀透次数
+  var ang = 0;          // 当前掀角（0=垂落，1=全掀）
+  var vel = 0;          // 角速度
+  var holding = false;
+  var holdX = 0;
+  var curPeak = 0;      // 本次按住的峰值
+  var done = false;
+  var catT = -1;        // 猫穿场动画进度（<0 不在场）
+  var saidStart = false;
+  var saidCat = false;
+  var resting = false;
+  var seed = 20260916;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.doorW = Math.min(L.w * 0.4, L.h * 0.42, 380);
+    L.doorH = L.doorW * 1.45;
+    L.dx = (L.w - L.doorW) / 2;
+    L.dy = Math.max(130, L.h * 0.5 - L.doorH * 0.35);
+    L.rodY = L.dy + 6;                  // 帘杆贴门洞顶
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      lifts = 0; ang = 0; vel = 0; done = false;
+      catT = -1; saidStart = false; saidCat = false;
+      seed = (seed * 16807 + 7) % 2147483647;
+      return;
+    }
+    if (done) return;
+    holding = true;
+    holdX = ev.clientX;
+    curPeak = 0;
+    if (!saidStart) { saidStart = true; say('按住帘子往外掀——让夜瞧一眼炉火。'); }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (holding && !done) {
+      // 向左拖=往外掀（0→1）
+      var target = Math.max(0, Math.min(1, (holdX - ev.clientX) / (L.doorW * 0.8)));
+      ang = ang * 0.6 + target * 0.4;
+      if (ang > curPeak) curPeak = ang;
+    }
+  });
+  window.addEventListener('pointerup', function () {
+    if (holding) {
+      holding = false;
+      vel = -ang * 3.2;   // 松手回落（负=摆回）
+      if (curPeak > 0.55 && !done) {
+        lifts++;
+        if (lifts === 1) say('夜里就这点好——掀一下，月亮先进来。');
+        if (lifts === 2 && !saidCat) {
+          saidCat = true;
+          catT = 0.001;
+          say('咦，一只夜猫子。');
+        }
+        if (lifts === 3) {
+          done = true;
+          vel = 0;
+          ang = 0.08;     // 服帖微垂
+          say('帘子服帖了。炉子的暖，锁在屋里跑不了。', true);
+          resting = true;
+        } else if (lifts < 3) {
+          vel = -ang * 3.2;
+        }
+      }
+    }
+  });
+  window.addEventListener('pointercancel', function () {
+    if (holding) { holding = false; vel = -ang * 3.2; }
+  });
+
+  // ── 门外：冷夜 ──
+  function drawOutside(now, reveal) {
+    // 门洞内：夜色 + 月光斜条 + 地上冷光
+    var gx = L.dx + 2, gy = L.dy + 2;
+    var gw = L.doorW - 4, gh = L.doorH - 4;
+    var og = ctx.createLinearGradient(0, gy, 0, gy + gh);
+    og.addColorStop(0, '#0a0e16');
+    og.addColorStop(1, '#0e1420');
+    ctx.fillStyle = og;
+    ctx.fillRect(gx, gy, gw, gh);
+    // 月光斜带
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(gx, gy, gw, gh);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(205,215,235,' + 0.06 * reveal + ')';
+    ctx.beginPath();
+    ctx.moveTo(gx + gw * 0.55, gy);
+    ctx.lineTo(gx + gw * 0.95, gy);
+    ctx.lineTo(gx + gw * 0.5, gy + gh);
+    ctx.lineTo(gx + gw * 0.15, gy + gh);
+    ctx.closePath();
+    ctx.fill();
+    // 地上冷光
+    var cg = ctx.createRadialGradient(gx + gw * 0.5, gy + gh * 0.85, 0, gx + gw * 0.5, gy + gh * 0.85, gw * 0.7);
+    cg.addColorStop(0, 'rgba(190,205,230,' + 0.1 * reveal + ')');
+    cg.addColorStop(1, 'rgba(190,205,230,0)');
+    ctx.fillStyle = cg;
+    ctx.fillRect(gx, gy, gw, gh);
+    // 猫影穿场
+    if (catT >= 0) {
+      var ct = catT;
+      var catX = gx + gw * (1.15 - ct * 1.5);
+      var catY = gy + gh * 0.82;
+      var bob = Math.sin(ct * 22) * 2;
+      ctx.fillStyle = '#05070a';
+      ctx.beginPath();
+      ctx.ellipse(catX, catY - 10 + bob, 15, 8, 0, 0, Math.PI * 2);          // 身
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(catX + 14, catY - 18 + bob, 6.5, 0, Math.PI * 2);               // 头
+      ctx.fill();
+      ctx.beginPath();                                                        // 耳
+      ctx.moveTo(catX + 10, catY - 22 + bob);
+      ctx.lineTo(catX + 12, catY - 28 + bob);
+      ctx.lineTo(catX + 15, catY - 22 + bob);
+      ctx.fill();
+      ctx.strokeStyle = '#05070a';
+      ctx.lineWidth = 3.4;
+      ctx.beginPath();                                                        // 尾
+      ctx.moveTo(catX - 14, catY - 10 + bob);
+      ctx.quadraticCurveTo(catX - 26, catY - 16 + bob, catX - 22, catY - 26 + bob);
+      ctx.stroke();
+      ctx.lineWidth = 2.6;                                                    // 腿
+      for (var lg = 0; lg < 4; lg++) {
+        var lx = catX - 10 + lg * 8 + Math.sin(ct * 26 + lg) * 2.4;
+        ctx.beginPath();
+        ctx.moveTo(lx, catY - 6 + bob);
+        ctx.lineTo(lx, catY + 2 + bob);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  // ── 棉帘（2.5D 掀角）──
+  function drawCurtain(now) {
+    var cx = L.dx + L.doorW / 2;
+    var topY = L.rodY;
+    var fullH = L.dy + L.doorH * 0.98 - topY;
+    var fullW = L.doorW * 0.94;
+    var a = Math.max(0, Math.min(1, ang));
+    var k = done ? 0.08 : a;
+    // 底边偏移与压缩（掀=底部向左上提）
+    var bw = fullW * (1 - k * 0.3);
+    var bh = fullH * (1 - k * 0.12);
+    var ox = -k * fullW * 0.34;
+    var oy = -k * fullH * 0.06;
+    var topX0 = cx - fullW / 2, topX1 = cx + fullW / 2;
+    var botX0 = topX0 + ox + (fullW - bw) / 2;
+    var botX1 = botX0 + bw;
+    var botY = topY + bh + oy;
+    // 帘身（藏蓝棉布）
+    var cg = ctx.createLinearGradient(topX0, 0, topX1, 0);
+    cg.addColorStop(0, '#253044');
+    cg.addColorStop(0.5, '#2e3a4e');
+    cg.addColorStop(1, '#222c3d');
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.moveTo(topX0, topY);
+    ctx.lineTo(topX1, topY);
+    ctx.lineTo(botX1, botY);
+    ctx.lineTo(botX0, botY);
+    ctx.closePath();
+    ctx.fill();
+    // 布面波纹（掀动时）
+    if (k > 0.05) {
+      ctx.strokeStyle = 'rgba(160,175,200,0.14)';
+      ctx.lineWidth = 2;
+      for (var wv = 1; wv <= 3; wv++) {
+        var wx = topX0 + (topX1 - topX0) * wv / 4;
+        ctx.beginPath();
+        ctx.moveTo(wx, topY + bh * 0.08);
+        ctx.quadraticCurveTo(wx + Math.sin(now / 200 + wv) * k * 14, topY + bh * 0.5, wx - k * fullW * 0.05, botY - 4);
+        ctx.stroke();
+      }
+    }
+    // 绗缝横线
+    ctx.strokeStyle = 'rgba(150,165,190,0.18)';
+    ctx.lineWidth = 1.4;
+    for (var st = 1; st <= 4; st++) {
+      var sy = topY + bh * st / 5;
+      var halfW = (topX1 - topX0) / 2 * (1 - (sy - topY) / bh * 0);
+      ctx.beginPath();
+      ctx.moveTo(topX0 + (botX0 - topX0) * st / 5, sy);
+      ctx.lineTo(topX1 + (botX1 - topX1) * st / 5, sy);
+      ctx.stroke();
+    }
+    // 白布滚边（左右+底）
+    ctx.strokeStyle = '#cfc8b4';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(topX0 + 4, topY);
+    ctx.lineTo(botX0 + 4, botY);
+    ctx.moveTo(topX1 - 4, topY);
+    ctx.lineTo(botX1 - 4, botY);
+    ctx.moveTo(botX0 + 4, botY - 3);
+    ctx.lineTo(botX1 - 4, botY - 3);
+    ctx.stroke();
+    // 顶杆与环扣
+    ctx.strokeStyle = '#8a6f48';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(L.dx - 10, L.rodY);
+    ctx.lineTo(L.dx + L.doorW + 10, L.rodY);
+    ctx.stroke();
+    ctx.fillStyle = '#b89a6a';
+    for (var ring = 0; ring < 5; ring++) {
+      var rx = topX0 + (topX1 - topX0) * ring / 4;
+      ctx.beginPath();
+      ctx.arc(rx, L.rodY, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (catT >= 0) {
+      catT += dt * 1.3;
+      if (catT >= 1) catT = -1;
+    }
+    // 松手后的回落摆动（阻尼弹簧）
+    if (!holding && !done) {
+      ang += vel * dt;
+      vel += (-ang * 14 - vel * 2.6) * dt;
+      if (ang < 0) { ang = 0; vel = Math.abs(vel) * 0.3; }
+    }
+
+    // ── 屋内暖底 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#12100e');
+    bg.addColorStop(1, '#181310');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 炉光晕（屋内一侧）
+    var fg = ctx.createRadialGradient(w * 0.18, h * 0.75, 0, w * 0.18, h * 0.75, Math.min(w, h) * 0.55);
+    fg.addColorStop(0, 'rgba(224,150,80,0.13)');
+    fg.addColorStop(1, 'rgba(224,150,80,0)');
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.dy + L.doorH * 0.98, w, h - (L.dy + L.doorH * 0.98));
+    ctx.fillStyle = 'rgba(122,96,62,0.3)';
+    ctx.fillRect(0, L.dy + L.doorH * 0.98, w, 2);
+
+    // ── 门框与门洞 ──
+    ctx.fillStyle = '#241b12';
+    ctx.fillRect(L.dx - 14, L.dy - 14, L.doorW + 28, L.doorH + 14);
+    // 门洞（掀开才透出外景：按帘角控制「露出度」）
+    var reveal = done ? 0.15 : Math.max(0.12, ang);
+    drawOutside(now, reveal);
+    // 门楣
+    ctx.fillStyle = '#2c2115';
+    ctx.fillRect(L.dx - 14, L.dy - 14, L.doorW + 28, 12);
+
+    // ── 帘 ──
+    drawCurtain(now);
+
+    // 掀透进度（右上小月牙，掀一次亮一牙）——无数字
+    if (!done) {
+      for (var m = 0; m < NEED; m++) {
+        ctx.fillStyle = m < lifts ? 'rgba(210,215,230,0.75)' : 'rgba(210,215,230,0.18)';
+        ctx.beginPath();
+        ctx.arc(w - 34 - m * 20, 34, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住棉帘，往外掀', L.dx + L.doorW / 2, L.dy + L.doorH + 40);
+      ctx.textAlign = 'left';
+    }
+    if (resting && done) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再掀一回', L.dx + L.doorW / 2, L.dy + L.doorH + 40);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用判定）
+  window.__curtain = {
+    lifts: function () { return lifts; },
+    done: function () { return done; },
+    ang: function () { return Math.round(ang * 100) / 100; },
+    begin: function (x) { holding = true; holdX = x; curPeak = 0; saidStart = true; },
+    drag: function (x) {
+      if (holding && !done) {
+        var target = Math.max(0, Math.min(1, (holdX - x) / (L.doorW * 0.8)));
+        ang = ang * 0.6 + target * 0.4;
+        if (ang > curPeak) curPeak = ang;
+      }
+    },
+    end: function () {
+      if (!holding) return;
+      holding = false;
+      if (curPeak > 0.55 && !done) {
+        lifts++;
+        if (lifts === 1) say('夜里就这点好——掀一下，月亮先进来。');
+        if (lifts === 2) { catT = 0.001; say('咦，一只夜猫子。'); }
+        if (lifts === 3) { done = true; vel = 0; ang = 0.08; resting = true; say('帘子服帖了。炉子的暖，锁在屋里跑不了。', true); }
+        else vel = -ang * 3.2;
+      } else {
+        vel = -ang * 3.2;
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

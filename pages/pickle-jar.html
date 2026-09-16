@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>腌雪里蕻</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>腌雪里蕻</h1>
+  <p>霜降前的雪里蕻最肥。粗盐、清水、一块压缸石——<br>封上坛口，冬天就有了下饭菜。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 3;
+  var dropped = 0;      // 已入坛的菜把
+  var falling = null;   // 正在下落的一把 {x, y, vy, sway}
+  var salting = -1;     // 撒盐进度 0→1（<0 为未开始）
+  var salted = false;
+  var stoneOn = false;  // 压缸石已封坛
+  var stoneLift = false;// 石头被拿起
+  var stonePos = { x: 0, y: 0 };
+  var settleT = 0;      // 封坛落定动画
+  var dust = [];        // 封坛尘粒
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260915;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.78;
+    L.jx = L.w * 0.46;              // 坛中心
+    L.jR = Math.min(L.w * 0.16, L.h * 0.17, 130);  // 坛肚半径
+    L.jy = L.floorY - L.jR * 0.92;  // 坛肚中心
+    L.stone0 = { x: L.jx + L.jR * 2.1, y: L.floorY - L.jR * 0.34 }; // 石头原位
+    stonePos = { x: L.stone0.x, y: L.stone0.y };
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var on = stoneOn, lift = stoneLift;
+    layout();
+    stoneOn = on; stoneLift = lift;
+  });
+
+  // 待点菜把（左边地上三把，位置固定随机）
+  var bundles = [];
+  (function () {
+    var rng = mulberry(seed);
+    for (var i = 0; i < TOTAL; i++) {
+      bundles.push({
+        x: L ? 0 : 0,
+        slot: i / (TOTAL - 1) * 0.78 + rng() * 0.04,  // 坛左侧空档内的横向位置（0~1）
+        oy: 0.14 + (i % 2) * 0.24 + rng() * 0.06,
+        s: 0.9 + rng() * 0.25,
+        rot: rng() * 0.5 - 0.25,
+        taken: false
+      });
+    }
+  })();
+
+  function bundleXY(b) {
+    // 三把菜在「左屏缘与坛之间」散开，任何屏宽都不出界
+    var leftEdge = Math.max(30, L.jx - L.jR * 2.6);
+    var span = Math.max(L.jR * 0.9, L.jx - L.jR * 0.6 - 34 - leftEdge);
+    return { x: leftEdge + b.slot * span, y: L.floorY + b.oy * L.jR * 0.4 };
+  }
+
+  // ── 交互 ──
+  function pickBundle(x, y) {
+    var best = -1, bestD = 1e9;
+    for (var i = 0; i < bundles.length; i++) {
+      if (bundles[i].taken) continue;
+      var p = bundleXY(bundles[i]);
+      var dx = p.x - x, dy = p.y - y;
+      var d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return bestD < Math.pow(L.jR * 0.55, 2) ? best : -1;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    var x = ev.clientX, y = ev.clientY;
+    if (resting) {
+      resting = false; dropped = 0; salting = -1; salted = false;
+      stoneOn = false; stoneLift = false; settleT = 0; dust = [];
+      for (var i = 0; i < bundles.length; i++) bundles[i].taken = false;
+      seed = (seed * 16807 + 7) % 2147483647;
+      saidStart = false;
+      return;
+    }
+    if (stoneOn) return;
+    // 拿石头（盐撒完之后）
+    if (salted) {
+      var dxs = stonePos.x - x, dys = stonePos.y - y;
+      if (dxs * dxs + dys * dys < Math.pow(L.jR * 0.55, 2)) {
+        stoneLift = true;
+        return;
+      }
+    }
+    // 点菜
+    if (!salted && !falling) {
+      var idx = pickBundle(x, y);
+      if (idx >= 0) {
+        var b = bundles[idx];
+        b.taken = true;
+        var p = bundleXY(b);
+        falling = { x: p.x, y: p.y, vy: 0, sway: b.rot, s: b.s, ti: 0 };
+        if (!saidStart) { saidStart = true; say('整把下坛，别切碎——腌透了才脆。'); }
+      }
+    }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (stoneLift) { stonePos.x = ev.clientX; stonePos.y = ev.clientY; }
+  });
+  window.addEventListener('pointerup', function () {
+    if (stoneLift) {
+      stoneLift = false;
+      var dx = Math.abs(stonePos.x - L.jx), dy = Math.abs(stonePos.y - (L.jy - L.jR * 1.18));
+      if (dx < L.jR * 0.7 && dy < L.jR * 0.9) {
+        stoneOn = true;
+        stonePos = { x: L.jx, y: L.jy - L.jR * 1.18 };
+        settleT = 0.001;
+        for (var d = 0; d < 10; d++) {
+          dust.push({
+            x: L.jx + (Math.random() - 0.5) * L.jR * 0.8,
+            y: L.jy - L.jR * 1.15 + (Math.random() - 0.5) * 8,
+            vx: (Math.random() - 0.5) * 60, vy: -Math.random() * 30 - 10,
+            life: 0.7 + Math.random() * 0.5
+          });
+        }
+        say('封好了。等它变酸，冬天就到了。', true);
+        resting = true;
+      } else {
+        stonePos = { x: L.stone0.x, y: L.stone0.y };
+      }
+    }
+  });
+  window.addEventListener('pointercancel', function () {
+    if (stoneLift) { stoneLift = false; stonePos = { x: L.stone0.x, y: L.stone0.y }; }
+  });
+
+  // ── 绘制 ──
+  var salts = [];   // 盐粒子
+  var last = Date.now();
+
+  function drawBundle(x, y, s, rot) {
+    // 一把雪里蕻：几根茎 + 缕叶
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.scale(s, s);
+    for (var i = 0; i < 5; i++) {
+      var a = -Math.PI / 2 + (i - 2) * 0.3;
+      var len = 30 + (i % 2) * 9;
+      // 茎
+      ctx.strokeStyle = '#cfd6b8';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(Math.cos(a) * len * 0.5, Math.sin(a) * len * 0.6, Math.cos(a) * len, Math.sin(a) * len);
+      ctx.stroke();
+      // 叶
+      ctx.fillStyle = i % 2 ? '#5f7a3e' : '#71893f';
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * len, Math.sin(a) * len, 9, 4.5, a + Math.PI / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 扎把的草绳
+    ctx.strokeStyle = '#8a6f48';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(-7, -2); ctx.lineTo(7, 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawStone(x, y, s) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    var rng = mulberry(7);
+    ctx.fillStyle = '#7d7f7a';
+    ctx.beginPath();
+    var n = 8;
+    for (var i = 0; i <= n; i++) {
+      var a = i / n * Math.PI * 2;
+      var rr = 26 + rng() * 8;
+      var px = Math.cos(a) * rr * 1.25, py = Math.sin(a) * rr * 0.72;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(210,214,206,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(-8, -10, 13, 5, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 菜把下落
+    if (falling) {
+      falling.ti += dt;
+      falling.vy += 900 * dt;
+      falling.y += falling.vy * dt;
+      falling.x += Math.sin(falling.ti * 14) * 12 * dt;
+      var targetY = L.jy - L.jR * 1.12 + dropped * L.jR * 0.055;
+      if (falling.y >= targetY) {
+        falling = null;
+        dropped++;
+        if (dropped >= TOTAL) {
+          salting = 0;
+          say('粗盐撒匀——压得住腥，出得来酸。');
+        }
+      }
+    }
+    // 撒盐
+    if (salting >= 0 && salting < 1) {
+      salting = Math.min(1, salting + dt * 0.55);
+      for (var ns = 0; ns < 3; ns++) {
+        if (Math.random() < 0.8) {
+          salts.push({
+            x: L.jx + (Math.random() - 0.5) * L.jR * 0.9,
+            y: L.jy - L.jR * 1.35,
+            vy: 120 + Math.random() * 90,
+            vx: (Math.random() - 0.5) * 24
+          });
+        }
+      }
+      if (salting >= 1) { salted = true; say('请出压缸石——压紧，封坛。'); }
+    }
+    for (var si = salts.length - 1; si >= 0; si--) {
+      var sp = salts[si];
+      sp.y += sp.vy * dt; sp.x += sp.vx * dt;
+      if (sp.y > L.jy - L.jR * 1.16 + Math.random() * 6) salts.splice(si, 1);
+    }
+    if (settleT > 0 && settleT < 1) settleT = Math.min(1, settleT + dt * 3);
+    for (var di = dust.length - 1; di >= 0; di--) {
+      var dp = dust[di];
+      dp.x += dp.vx * dt; dp.y += dp.vy * dt; dp.vy += 60 * dt; dp.life -= dt;
+      if (dp.life <= 0) dust.splice(di, 1);
+    }
+
+    // ── 背景：屋角夜色 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1218');
+    bg.addColorStop(1, '#141117');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙上一点灯光晕
+    var glow = ctx.createRadialGradient(L.jx, L.jy - L.jR * 1.6, 0, L.jx, L.jy - L.jR * 1.6, L.jR * 3.4);
+    glow.addColorStop(0, 'rgba(224,184,120,0.10)');
+    glow.addColorStop(1, 'rgba(224,184,120,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 待腌的菜把 ──
+    for (var i = 0; i < bundles.length; i++) {
+      var b = bundles[i];
+      if (b.taken) continue;
+      var p = bundleXY(b);
+      drawBundle(p.x, p.y, b.s * 0.8, b.rot);
+    }
+
+    // ── 陶坛 ──
+    var jx = L.jx, jy = L.jy, jR = L.jR;
+    // 坛影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(jx, L.floorY + jR * 0.1, jR * 1.15, jR * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 坛身（肚大口小）
+    var jg = ctx.createLinearGradient(jx - jR, 0, jx + jR, 0);
+    jg.addColorStop(0, '#4a3322');
+    jg.addColorStop(0.4, '#6b4a32');
+    jg.addColorStop(0.75, '#5d3f2a');
+    jg.addColorStop(1, '#3c2a1c');
+    ctx.fillStyle = jg;
+    ctx.beginPath();
+    ctx.moveTo(jx - jR * 0.34, jy - jR * 1.12);                       // 口左
+    ctx.bezierCurveTo(jx - jR * 0.42, jy - jR * 0.8, jx - jR * 1.06, jy - jR * 0.5, jx - jR * 1.02, jy + jR * 0.18);
+    ctx.bezierCurveTo(jx - jR * 0.98, jy + jR * 0.86, jx - jR * 0.4, jy + jR * 1.02, jx, jy + jR * 1.02);
+    ctx.bezierCurveTo(jx + jR * 0.4, jy + jR * 1.02, jx + jR * 0.98, jy + jR * 0.86, jx + jR * 1.02, jy + jR * 0.18);
+    ctx.bezierCurveTo(jx + jR * 1.06, jy - jR * 0.5, jx + jR * 0.42, jy - jR * 0.8, jx + jR * 0.34, jy - jR * 1.12);
+    ctx.closePath();
+    ctx.fill();
+    // 坛口内沿
+    ctx.fillStyle = '#241811';
+    ctx.beginPath();
+    ctx.ellipse(jx, jy - jR * 1.12, jR * 0.36, jR * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 坛内菜层（已入坛的，从坛口满上来，画在口内）
+    for (var lv = 0; lv < dropped; lv++) {
+      var ly = jy - jR * 1.14 + (TOTAL - 1 - lv) * jR * 0.055;
+      ctx.fillStyle = lv % 2 ? '#6a8344' : '#7a9250';
+      ctx.beginPath();
+      ctx.ellipse(jx, ly, jR * 0.27, jR * 0.05, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 叶尖露出
+      ctx.strokeStyle = '#8aa35a';
+      ctx.lineWidth = 1.6;
+      for (var lvv = 0; lvv < 4; lvv++) {
+        var la = -0.6 + lvv * 0.4 + lv;
+        ctx.beginPath();
+        ctx.moveTo(jx + Math.cos(la) * jR * 0.16, ly - jR * 0.02);
+        ctx.lineTo(jx + Math.cos(la) * jR * 0.24, ly - jR * 0.1);
+        ctx.stroke();
+      }
+    }
+    // 盐霜
+    if (salting > 0) {
+      ctx.fillStyle = 'rgba(230,232,226,' + (0.4 * salting) + ')';
+      ctx.beginPath();
+      ctx.ellipse(jx, jy - jR * 1.17, jR * 0.24 * salting, jR * 0.045, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 坛口沿唇
+    ctx.strokeStyle = '#7a563a';
+    ctx.lineWidth = jR * 0.07;
+    ctx.beginPath();
+    ctx.ellipse(jx, jy - jR * 1.12, jR * 0.38, jR * 0.11, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 箍纹
+    ctx.strokeStyle = 'rgba(30,20,12,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(jx, jy + jR * 0.42, jR * 0.99, jR * 0.16, 0, Math.PI * 0.06, Math.PI * 0.94);
+    ctx.stroke();
+    // 坛身高光
+    ctx.fillStyle = 'rgba(224,184,120,0.14)';
+    ctx.beginPath();
+    ctx.ellipse(jx - jR * 0.42, jy - jR * 0.28, jR * 0.16, jR * 0.5, 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 盐粒
+    ctx.fillStyle = 'rgba(238,240,234,0.9)';
+    for (var pi = 0; pi < salts.length; pi++) {
+      ctx.fillRect(salts[pi].x, salts[pi].y, 1.8, 1.8);
+    }
+    // 下落中的菜把
+    if (falling) drawBundle(falling.x, falling.y, falling.s * 0.8, falling.sway + Math.sin(falling.ti * 10) * 0.15);
+    // 坛口冒的小气泡暗示（封坛后的时间感）
+    if (stoneOn && settleT >= 1) {
+      var bt = (now / 2400) % 1;
+      ctx.fillStyle = 'rgba(200,210,190,' + (0.5 * (1 - bt)) + ')';
+      ctx.beginPath();
+      ctx.arc(jx + Math.sin(bt * 9) * 6, jy - jR * 1.3 - bt * jR * 0.5, 2 + bt * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 压缸石 ──
+    if (!stoneOn) {
+      var sc = stoneLift ? 1.06 : 1;
+      drawStone(stonePos.x, stonePos.y, sc);
+      if (salted && !stoneLift) {
+        var pul = 0.5 + 0.5 * Math.sin(now / 480);
+        ctx.strokeStyle = 'rgba(200,138,106,' + (0.25 + 0.3 * pul) + ')';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(stonePos.x, stonePos.y, L.jR * 0.5 + 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      var settle = 1 + Math.sin(Math.min(1, settleT) * Math.PI) * 0.12 * (1 - settleT);
+      drawStone(jx, jy - jR * 1.18, settle);
+      // 封泥环
+      if (settleT >= 1) {
+        ctx.strokeStyle = '#3c2f20';
+        ctx.lineWidth = jR * 0.09;
+        ctx.beginPath();
+        ctx.ellipse(jx, jy - jR * 1.06, jR * 0.44, jR * 0.13, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // 尘粒
+    ctx.fillStyle = 'rgba(190,180,160,0.5)';
+    for (var dj = 0; dj < dust.length; dj++) {
+      ctx.globalAlpha = Math.max(0, dust[dj].life);
+      ctx.fillRect(dust[dj].x, dust[dj].y, 2.2, 2.2);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 引导 ──
+    if (!saidStart && dropped === 0 && !falling && !resting) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      var b0 = bundleXY(bundles[0]);
+      ctx.fillText('点一把菜，下坛', b0.x + L.jR * 0.6, b0.y - L.jR * 0.7);
+      ctx.textAlign = 'left';
+    }
+    if (resting && stoneOn) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再腌一坛', jx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用判定）
+  window.__pickle = {
+    step: function () { return stoneOn ? 3 : (salted ? 2 : dropped); },
+    done: function () { return stoneOn; },
+    dropCount: function () { return dropped; },
+    tapBundle: function (i) {
+      if (salted || falling || stoneOn) return;
+      var b = bundles[i];
+      if (!b || b.taken) return;
+      b.taken = true;
+      var p = bundleXY(b);
+      falling = { x: p.x, y: p.y, vy: 0, sway: b.rot, s: b.s, ti: 0 };
+    },
+    skipSalt: function () { salting = 0.99; },
+    grabStone: function () { if (salted && !stoneOn) stoneLift = true; },
+    moveStone: function (x, y) { if (stoneLift) { stonePos.x = x; stonePos.y = y; } },
+    dropStone: function () {
+      if (!stoneLift) return;
+      stoneLift = false;
+      var dx = Math.abs(stonePos.x - L.jx), dy = Math.abs(stonePos.y - (L.jy - L.jR * 1.18));
+      if (dx < L.jR * 0.7 && dy < L.jR * 0.9) {
+        stoneOn = true;
+        settleT = 0.001;
+        resting = true;
+        say('封好了。等它变酸，冬天就到了。', true);
+      } else {
+        stonePos = { x: L.stone0.x, y: L.stone0.y };
+      }
+    },
+    stoneHome: function () { return { x: Math.round(L.stone0.x), y: Math.round(L.stone0.y) }; },
+    jarMouth: function () { return { x: Math.round(L.jx), y: Math.round(L.jy - L.jR * 1.18) }; }
+  };
+})();
+</script>
+</body>
+</html>

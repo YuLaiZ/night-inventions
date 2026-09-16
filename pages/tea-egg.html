@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>煮茶叶蛋</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>煮茶叶蛋</h1>
+  <p>好好的蛋，先敲裂了才入味——听着不像好话，其实是老规矩。<br>点蛋敲三下，下锅卤到天亮。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 3;
+  var eggs = [];        // {ox, cracks:[], state:0待敲/1入锅, dye, seed}
+  var tapping = -1;     // 正在敲的索引
+  var inPot = 0;
+  var dye = 0;          // 卤色浸染 0→1
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var bubbles = [];
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.8;
+    L.potX = L.w * 0.46;
+    L.potY = L.h * 0.62;
+    L.potR = Math.min(L.w * 0.19, L.h * 0.16, 150);
+    L.rawX = L.w * 0.85;
+    L.rawY = L.floorY - L.h * 0.02;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  (function () {
+    var rng = mulberry(seed);
+    for (var i = 0; i < TOTAL; i++) {
+      var cs = [];
+      for (var c = 0; c < 5; c++) {
+        var a1 = rng() * Math.PI * 2, a2 = a1 + 0.8 + rng() * 1.6;
+        cs.push([a1, a2, 0.3 + rng() * 0.45]);
+      }
+      eggs.push({ idx: i, cracks: cs, taps: 0, state: 0, dye: 0, bx: L.rawX, by: L.rawY });
+    }
+  })();
+
+  function rawXY(i) {
+    var b = eggs[i];
+    return { x: L.rawX - 60 + i * 48, y: L.rawY - (i % 2) * 10 };
+  }
+
+  function drawEgg(x, y, r, taps, cracks, dyeLevel, rot) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot || 0);
+    // 蛋身：米白 → 卤褐
+    var base = dyeLevel > 0
+      ? ['rgb(' + Math.round(238 - dyeLevel * 90) + ',' + Math.round(228 - dyeLevel * 118) + ',' + Math.round(205 - dyeLevel * 120) + ')', 'rgb(' + Math.round(214 - dyeLevel * 96) + ',' + Math.round(196 - dyeLevel * 110) + ',' + Math.round(168 - dyeLevel * 110) + ')']
+      : ['#f2ecdc', '#ddd2b8'];
+    var g = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.15, 0, 0, r * 1.1);
+    g.addColorStop(0, base[0]);
+    g.addColorStop(1, base[1]);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 0.82, r, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 裂纹（敲击后）
+    if (taps > 0) {
+      var rng = mulberry(seed + taps * 17);
+      ctx.strokeStyle = 'rgba(74,58,40,' + (0.45 + Math.min(0.4, dyeLevel * 0.5)) + ')';
+      ctx.lineWidth = 1.3;
+      for (var ci = 0; ci < Math.min(taps, cracks.length); ci++) {
+        var cr = cracks[ci];
+        ctx.beginPath();
+        var px2 = Math.cos(cr[0]) * r * 0.15, py2 = Math.sin(cr[0]) * r * 0.15;
+        ctx.moveTo(px2, py2);
+        var steps = 4;
+        for (var st = 1; st <= steps; st++) {
+          var ta = cr[0] + (cr[1] - cr[0]) * (st / steps) + (rng() - 0.5) * 0.5;
+          var tr = r * cr[2] * (st / steps);
+          ctx.lineTo(Math.cos(ta) * tr, Math.sin(ta) * tr);
+        }
+        ctx.stroke();
+      }
+    }
+    // 高光
+    ctx.fillStyle = 'rgba(255,250,238,' + (0.45 - dyeLevel * 0.3) + ')';
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.28, -r * 0.38, r * 0.2, r * 0.11, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      for (var i = 0; i < eggs.length; i++) { eggs[i].taps = 0; eggs[i].state = 0; eggs[i].dye = 0; }
+      inPot = 0; dye = 0; tapping = -1;
+      bubbles = [];
+      saidStart = false;
+      seed = (seed * 16807 + 7) % 2147483647;
+      var rng2 = mulberry(seed);
+      for (var j = 0; j < eggs.length; j++) {
+        var cs2 = [];
+        for (var c = 0; c < 5; c++) {
+          var a1 = rng2() * Math.PI * 2, a2 = a1 + 0.8 + rng2() * 1.6;
+          cs2.push([a1, a2, 0.3 + rng2() * 0.45]);
+        }
+        eggs[j].cracks = cs2;
+      }
+      return;
+    }
+    // 敲蛋
+    if (tapping < 0 && inPot < TOTAL) {
+      for (var k = 0; k < eggs.length; k++) {
+        if (eggs[k].state !== 0) continue;
+        var p = rawXY(k);
+        var dx = ev.clientX - p.x, dy = ev.clientY - p.y;
+        if (dx * dx + dy * dy < Math.pow(46, 2)) {
+          tapping = k;
+          if (!saidStart) { saidStart = true; say('台面上一磕——要裂得匀，别敲散了。'); }
+        }
+      }
+    }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 敲蛋节奏：选中后每 0.5s 敲一下，共 3 下
+    if (tapping >= 0) {
+      var e = eggs[tapping];
+      e.tapClock = (e.tapClock || 0) + dt;
+      if (e.tapClock > 0.55) {
+        e.tapClock = 0;
+        e.taps++;
+        if (e.taps === 2) say('裂了——缝里才进味。');
+        if (e.taps >= 3) {
+          e.state = 1;
+          inPot++;
+          tapping = -1;
+          if (inPot >= TOTAL) say('全下锅。卤到天亮，早上正好。');
+          else say('下一颗。');
+        }
+      }
+    }
+    // 卤染
+    if (inPot >= TOTAL) {
+      dye = Math.min(1, dye + dt * 0.09);
+      if (Math.random() < 0.3) {
+        bubbles.push({
+          x: L.potX + (Math.random() - 0.5) * L.potR * 1.3,
+          y: L.potY - L.potR * 0.1,
+          vy: -14 - Math.random() * 10,
+          life: 1 + Math.random() * 0.5
+        });
+      }
+      if (dye >= 1 && !resting) {
+        resting = true;
+        say('入味了。壳一剥，纹路像地图。', true);
+      }
+    }
+    for (var bi = bubbles.length - 1; bi >= 0; bi--) {
+      var bp = bubbles[bi];
+      bp.y += bp.vy * dt;
+      bp.life -= dt;
+      if (bp.life <= 0) bubbles.splice(bi, 1);
+    }
+
+    // ── 背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1014');
+    bg.addColorStop(1, '#141117');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 灶火余光
+    var fg = ctx.createRadialGradient(L.potX, L.floorY, 0, L.potX, L.floorY, L.potR * 2.2);
+    fg.addColorStop(0, 'rgba(224,150,80,0.08)');
+    fg.addColorStop(1, 'rgba(224,150,80,0)');
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, 0, w, h);
+    // 台面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 卤锅 ──
+    var px2 = L.potX, py2 = L.potY, pR = L.potR;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(px2, L.floorY + 4, pR * 1.05, pR * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var pg = ctx.createLinearGradient(px2 - pR, 0, px2 + pR, 0);
+    pg.addColorStop(0, '#3a2c1c');
+    pg.addColorStop(0.5, '#543d24');
+    pg.addColorStop(1, '#332415');
+    ctx.fillStyle = pg;
+    ctx.fillRect(px2 - pR, py2, pR * 2, L.floorY - py2);
+    // 锅沿
+    ctx.fillStyle = '#2a1e12';
+    ctx.beginPath();
+    ctx.ellipse(px2, py2, pR * 1.03, pR * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 卤汤
+    var broth = ctx.createRadialGradient(px2, py2, pR * 0.1, px2, py2, pR * 0.98);
+    broth.addColorStop(0, '#4a3018');
+    broth.addColorStop(1, '#2e1d0e');
+    ctx.fillStyle = broth;
+    ctx.beginPath();
+    ctx.ellipse(px2, py2, pR * 0.96, pR * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 卤里的蛋（入锅后可见壳纹与染色）
+    for (var ei = 0; ei < eggs.length; ei++) {
+      var eg = eggs[ei];
+      if (eg.state !== 1) continue;
+      var ex = px2 - pR * 0.5 + eg.idx * pR * 0.48;
+      var ey = py2 + Math.sin(now / 700 + ei * 2) * 2;
+      drawEgg(ex, ey, pR * 0.17, 3, eg.cracks, Math.max(eg.dye, dye), ei * 0.6);
+      eg.dye = dye;
+    }
+    // 气泡
+    for (var bj = 0; bj < bubbles.length; bj++) {
+      ctx.globalAlpha = Math.max(0, bubbles[bj].life * 0.6);
+      ctx.strokeStyle = '#d8c9a0';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(bubbles[bj].x, bubbles[bj].y, 2.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 待敲的生蛋 ──
+    for (var ri = 0; ri < eggs.length; ri++) {
+      var rg = eggs[ri];
+      if (rg.state !== 0) continue;
+      var rp = rawXY(ri);
+      var isNext = ri === tapping || (tapping < 0 && ri === inPot);
+      drawEgg(rp.x, rp.y, 24, rg.taps, rg.cracks, 0, 0);
+      if (isNext && tapping !== ri) {
+        var pul = 0.5 + 0.5 * Math.sin(now / 480);
+        ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(rp.x, rp.y, 34, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // 敲击中的蛋（跳一下）
+    if (tapping >= 0) {
+      var te = eggs[tapping];
+      var tp = rawXY(tapping);
+      var hop = Math.abs(Math.sin(now / 120)) * 6 * (te.taps < 3 ? 1 : 0);
+      drawEgg(tp.x, tp.y - hop, 24, te.taps, te.cracks, 0, 0);
+      // 敲击线
+      if (te.taps < 3) {
+        ctx.strokeStyle = 'rgba(216,203,168,' + (0.4 + 0.3 * Math.abs(Math.sin(now / 120))) + ')';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(tp.x - 16, tp.y - 52 - hop);
+        ctx.lineTo(tp.x + 16, tp.y - 34 - hop);
+        ctx.stroke();
+      }
+    }
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      var first = rawXY(inPot);
+      ctx.fillText('点一颗蛋，敲三下', first.x - 40, first.y - 52);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再卤一锅', L.potX, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实点击共用判定）
+  window.__egg = {
+    inPot: function () { return inPot; },
+    dye: function () { return Math.round(dye * 100) / 100; },
+    done: function () { return resting; },
+    tap: function (i) {
+      if (resting || tapping >= 0) return;
+      if (eggs[i] && eggs[i].state === 0 && i === inPot) { tapping = i; eggs[i].tapClock = 0.4; saidStart = true; }
+    }
+  };
+})();
+</script>
+</body>
+</html>

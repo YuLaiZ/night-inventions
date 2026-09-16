@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>火漆印</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>火漆印</h1>
+  <p>信写好了，口还开着。<br>点蜡滴一滴，章压下去——漆一冷，信就守口如瓶了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var state = 0;        // 0 点蜡 / 1 滴蜡动画 / 2 可盖章 / 3 已盖
+  var waxDrop = 0;      // 蜡滴落下 0→1
+  var waxPool = 0;      // 蜷饼成形 0→1
+  var stampT = 0;       // 盖章下压 0→1（1=按住位）
+  var stamped = false;
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var waxBubbles = [];
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.8;
+    L.ex = L.w * 0.44;                       // 信封中心
+    L.ey = L.h * 0.56;
+    L.eW = Math.min(L.w * 0.34, L.h * 0.3, 380);
+    L.eH = L.eW * 0.64;
+    L.candleX = L.w * 0.82;
+    L.candleY = L.floorY - L.h * 0.1;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 信封封口盖（上盖折下来盖住顶部）
+  function envelopeTop() { return L.ey - L.eH * 0.36; }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      state = 0; waxDrop = 0; waxPool = 0; stampT = 0; stamped = false;
+      waxBubbles = [];
+      saidStart = false;
+      return;
+    }
+    if (state === 0) {
+      // 点蜡烛/蜡条：滴蜡
+      var dx = ev.clientX - L.candleX, dy = ev.clientY - (L.candleY - L.h * 0.12);
+      if (dx * dx + dy * dy < Math.pow(L.h * 0.16, 2)) {
+        state = 1;
+        waxDrop = 0.001;
+        if (!saidStart) { saidStart = true; say('蜡滴在封口上——趁它没干。'); }
+      }
+    } else if (state === 2 && !stamped) {
+      // 点章压印
+      stamped = true;
+      stampT = 0.001;
+      if (saidStart) say('章压下去——按住数三个数。');
+    }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (state === 1) {
+      waxDrop = Math.min(1, waxDrop + dt * 1.1);
+      if (waxDrop >= 1 && waxPool < 1) {
+        waxPool = Math.min(1, waxPool + dt * 1.6);
+        if (waxPool >= 1) {
+          state = 2;
+          say('章拿好——对准了压下去。');
+        }
+      }
+    }
+    if (stamped && stampT < 1) stampT = Math.min(1, stampT + dt * 1.4);
+    if (state < 3 && stamped && stampT >= 1) {
+      state = 3;
+      resting = true;
+      say('漆冷了。这封信守口如瓶，连风都拆不开。', true);
+    }
+
+    // ── 背景：夜桌烛光 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d0f13');
+    bg.addColorStop(1, '#15120e');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 烛光晕
+    var cg = ctx.createRadialGradient(L.candleX, L.candleY - L.h * 0.12, 0, L.candleX, L.candleY - L.h * 0.12, L.h * 0.5);
+    var flick = 1 + Math.sin(now / 90) * 0.04;
+    cg.addColorStop(0, 'rgba(232,176,104,' + 0.16 * flick + ')');
+    cg.addColorStop(1, 'rgba(232,176,104,0)');
+    ctx.fillStyle = cg;
+    ctx.fillRect(0, 0, w, h);
+    // 桌面
+    ctx.fillStyle = '#1e1710';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 蜡烛（右侧）──
+    var cx2 = L.candleX, cy2 = L.candleY;
+    ctx.fillStyle = '#d8cba8';
+    ctx.fillRect(cx2 - 14, cy2 - L.h * 0.12, 28, L.h * 0.12);
+    // 烛泪
+    ctx.fillStyle = '#e8dfc4';
+    ctx.beginPath();
+    ctx.moveTo(cx2 - 14, cy2 - L.h * 0.12 + 6);
+    ctx.quadraticCurveTo(cx2 - 20, cy2 - L.h * 0.1, cx2 - 16, cy2 - L.h * 0.06);
+    ctx.lineTo(cx2 - 12, cy2 - L.h * 0.1);
+    ctx.fill();
+    // 火苗
+    var fs = 10 * flick;
+    var fx2 = cx2, fy2 = cy2 - L.h * 0.12 - 6;
+    ctx.fillStyle = 'rgba(226,120,52,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(fx2, fy2 + 6);
+    ctx.bezierCurveTo(fx2 - fs * 0.7, fy2, fx2 - fs * 0.4, fy2 - fs * 1.5, fx2 + Math.sin(now / 90) * 2, fy2 - fs * 2);
+    ctx.bezierCurveTo(fx2 + fs * 0.4, fy2 - fs * 1.5, fx2 + fs * 0.7, fy2, fx2, fy2 + 6);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(250,232,180,0.95)';
+    ctx.beginPath();
+    ctx.ellipse(fx2, fy2 - fs * 0.5, fs * 0.3, fs * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 火漆蜡条（蜡烛旁）
+    ctx.fillStyle = '#8a3a3a';
+    ctx.beginPath();
+    ctx.ellipse(cx2 + 44, cy2 - 6, 22, 8, 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,40,40,0.6)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(cx2 + 28, cy2 - 9);
+    ctx.quadraticCurveTo(cx2 + 44, cy2 - 16, cx2 + 62, cy2 - 5);
+    ctx.stroke();
+
+    // ── 信封 ──
+    var ex = L.ex, ey = L.ey, eW = L.eW, eH = L.eH;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(ex, ey + eH / 2 + 4, eW * 0.55, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 信封身
+    var eg2 = ctx.createLinearGradient(0, ey - eH / 2, 0, ey + eH / 2);
+    eg2.addColorStop(0, '#d9cfae');
+    eg2.addColorStop(1, '#c8bc98');
+    ctx.fillStyle = eg2;
+    ctx.fillRect(ex - eW / 2, ey - eH / 2, eW, eH);
+    // 封口盖（V 形折下来）
+    ctx.fillStyle = '#cfc4a0';
+    ctx.beginPath();
+    ctx.moveTo(ex - eW / 2, ey - eH / 2);
+    ctx.lineTo(ex, envelopeTop() + eH * 0.34);
+    ctx.lineTo(ex + eW / 2, ey - eH / 2);
+    ctx.lineTo(ex + eW / 2, ey - eH / 2 + 2);
+    ctx.lineTo(ex, envelopeTop() + eH * 0.34 + 2);
+    ctx.lineTo(ex - eW / 2, ey - eH / 2 + 2);
+    ctx.closePath();
+    ctx.fill();
+    // 底部折角线
+    ctx.strokeStyle = 'rgba(120,100,70,0.3)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(ex - eW / 2, ey + eH / 2);
+    ctx.lineTo(ex, ey - eH * 0.05);
+    ctx.lineTo(ex + eW / 2, ey + eH / 2);
+    ctx.stroke();
+    // 收信字样（左上淡淡的）
+    ctx.fillStyle = 'rgba(110,90,60,0.5)';
+    ctx.font = '13px "Kaiti SC", "STKaiti", KaiTi, serif';
+    ctx.fillText('致 明早的自己', ex - eW * 0.4, ey - eH * 0.22);
+
+    // ── 蜡滴与蜡饼（封口中点）──
+    var waxX = ex, waxY = envelopeTop() + eH * 0.34;
+    if (state >= 1) {
+      // 蜡滴下落
+      if (waxDrop < 1) {
+        var dy2 = waxDrop * (waxY - (cy2 - L.h * 0.06));
+        ctx.fillStyle = '#a03838';
+        ctx.beginPath();
+        ctx.ellipse(waxX, cy2 - L.h * 0.06 + dy2, 5, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 蜡饼（堆积成形）
+      if (waxPool > 0) {
+        var poolR = 26 * waxPool;
+        var poolH = 9 * waxPool;
+        var wg = ctx.createRadialGradient(waxX - poolR * 0.3, waxY - 4, 2, waxX, waxY, poolR);
+        wg.addColorStop(0, '#b84848');
+        wg.addColorStop(1, '#7e2c2c');
+        ctx.fillStyle = wg;
+        ctx.beginPath();
+        ctx.ellipse(waxX, waxY, poolR, poolR * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // 边缘不规则（蜡液堆）
+        ctx.fillStyle = 'rgba(142,44,44,0.7)';
+        ctx.beginPath();
+        ctx.ellipse(waxX - poolR * 0.5, waxY + 2, poolR * 0.3, poolR * 0.2, 0.4, 0, Math.PI * 2);
+        ctx.ellipse(waxX + poolR * 0.55, waxY + 1, poolR * 0.26, poolR * 0.18, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        // 未盖章前的亮面
+        if (!stamped) {
+          ctx.fillStyle = 'rgba(220,130,130,0.4)';
+          ctx.beginPath();
+          ctx.ellipse(waxX - poolR * 0.2, waxY - poolR * 0.12, poolR * 0.3, poolR * 0.12, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // 盖章：铜章压下 + 章纹
+      if (stamped) {
+        var press = Math.sin(Math.min(1, stampT) * Math.PI) * 0.5 + Math.min(1, stampT) * 0.5;
+        var stX = waxX, stY = waxY - (1 - press) * 60;
+        // 章纹（压进蜡里的凹陷纹）
+        if (stampT > 0.6) {
+          ctx.strokeStyle = 'rgba(110,30,30,0.85)';
+          ctx.lineWidth = 2.2;
+          var r2 = 14;
+          ctx.beginPath();
+          ctx.arc(waxX, waxY, r2, 0, Math.PI * 2);
+          ctx.stroke();
+          // 纹心：小月牙
+          ctx.beginPath();
+          ctx.arc(waxX - 2, waxY, r2 * 0.55, 0.6, Math.PI * 1.6);
+          ctx.stroke();
+        }
+        // 铜章体（压印过程中可见，压完即拿开）
+        if (stampT < 1) {
+          var press2 = stampT;
+          var stX = waxX, stY = waxY - (1 - press2) * 60;
+          ctx.save();
+          ctx.translate(stX, stY);
+          var kg = ctx.createLinearGradient(-24, 0, 24, 0);
+          kg.addColorStop(0, '#7a5a2e');
+          kg.addColorStop(0.5, '#b08c48');
+          kg.addColorStop(1, '#6b4e26');
+          ctx.fillStyle = kg;
+          ctx.fillRect(-24, -18, 48, 22);
+          ctx.fillStyle = '#8a6a38';
+          ctx.fillRect(-20, -34, 40, 18);
+          ctx.restore();
+        }
+      }
+    }
+
+    // 引导
+    if (state === 0) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点蜡烛，滴一滴火漆', cx2 - 20, cy2 + 40);
+      ctx.textAlign = 'left';
+    }
+    if (state === 2 && !stamped) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点蜡饼，盖章', ex, waxY + 52);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再封一封', L.ex, L.floorY + 36);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实点击共用状态机）
+  window.__wax = {
+    state: function () { return state; },
+    done: function () { return resting; },
+    tap: function () {
+      if (state === 0) { state = 1; waxDrop = 0.001; saidStart = true; }
+      else if (state === 2 && !stamped) { stamped = true; stampT = 0.001; }
+    }
+  };
+})();
+</script>
+</body>
+</html>

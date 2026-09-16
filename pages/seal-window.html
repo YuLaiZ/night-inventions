@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>封窗缝</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>封窗缝</h1>
+  <p>入冬前最后一件事。风从北边来，一夜比一夜紧。<br>按住纸条，沿着窗缝走一圈——封一寸，风声就小一寸。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var STEP = 7;           // 缝上采样点间距（px）
+  var SNAP = 24;          // 纸条吸附距离（px）
+  var pts = [];           // 缝路径采样点 {x,y,sealed,nx,ny}
+  var sealedDirty = true;
+  var coverage = 0;
+  var wind = 1;           // 当前风强（平滑跟随 1-coverage）
+  var done = false;
+  var doneT = 0;          // 完成后淡入计时
+  var saidStart = false;
+  var dragging = false;
+  var seed = 20260915;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  // 离屏缓存：缝底 + 纸条层
+  var seamCv = document.createElement('canvas');
+  var seamCtx = seamCv.getContext('2d');
+  // 霜花缓存（完成态淡入）
+  var frostCv = document.createElement('canvas');
+  var frostCtx = frostCv.getContext('2d');
+
+  function buildSeam() {
+    // 窗玻璃内沿一圈，顺时针：上边→右边→下边→左边
+    pts = [];
+    var x0 = L.winX, y0 = L.winY, x1 = L.winX + L.winW, y1 = L.winY + L.winH;
+    function push(x, y, nx, ny) { pts.push({ x: x, y: y, sealed: false, nx: nx, ny: ny }); }
+    var i, t, n;
+    n = Math.max(2, Math.round(L.winW / STEP));
+    for (i = 0; i < n; i++) { t = i / (n - 1); push(x0 + (x1 - x0) * t, y0, 0, 1); }
+    n = Math.max(2, Math.round(L.winH / STEP));
+    for (i = 0; i < n; i++) { t = (i + 1) / n; push(x1, y0 + (y1 - y0) * t, -1, 0); }
+    n = Math.max(2, Math.round(L.winW / STEP));
+    for (i = 0; i < n; i++) { t = 1 - (i + 1) / n; push(x0 + (x1 - x0) * t, y1, 0, -1); }
+    n = Math.max(2, Math.round(L.winH / STEP));
+    for (i = 0; i < n; i++) { t = 1 - (i + 1) / n; push(x0, y0 + (y1 - y0) * t, 1, 0); }
+    coverage = 0;
+    sealedDirty = true;
+  }
+
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    var portrait = L.h > L.w;
+    L.winW = Math.min(L.w * (portrait ? 0.62 : 0.5), portrait ? 340 : 540);
+    L.winH = portrait ? L.winW * 1.15 : Math.min(L.h * 0.46, L.winW * 0.78);
+    L.winX = (L.w - L.winW) / 2;
+    L.winY = Math.max(L.h * 0.385 - L.winH * 0.42, 154);
+    buildSeam();
+    seamCv.width = L.w * DPR;
+    seamCv.height = L.h * DPR;
+    frostCv.width = L.w * DPR;
+    frostCv.height = L.h * DPR;
+    paintFrost();
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 纸条吸附贴贴 ──
+  function sealNear(x, y) {
+    var changed = false;
+    for (var pass = 0; pass < 3; pass++) {
+      var best = -1, bestD = SNAP * SNAP;
+      for (var i = 0; i < pts.length; i++) {
+        if (pts[i].sealed) continue;
+        var dx = pts[i].x - x, dy = pts[i].y - y;
+        var d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (best < 0) break;
+      var r = Math.max(2, Math.round(STEP * 1.2));
+      for (var k = best - r; k <= best + r; k++) {
+        var p = pts[(k + pts.length) % pts.length];
+        if (!p.sealed) { p.sealed = true; changed = true; }
+      }
+    }
+    if (changed) sealedDirty = true;
+  }
+
+  function countCoverage() {
+    var s = 0;
+    for (var i = 0; i < pts.length; i++) if (pts[i].sealed) s++;
+    return s / pts.length;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    audioOn();
+    if (done) {
+      // 撕掉旧纸条，再封一夜
+      seed = (seed * 16807 + 7) % 2147483647;
+      for (var i = 0; i < pts.length; i++) pts[i].sealed = false;
+      done = false; doneT = 0; coverage = 0;
+      sealedDirty = true;
+      paintFrost();
+      say('又起风了。纸条备好——');
+      return;
+    }
+    dragging = true;
+    sealNear(ev.clientX, ev.clientY);
+    if (!saidStart) { saidStart = true; say('贴着缝走，手别抖——封一段，风就小一截。'); }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (dragging && !done) sealNear(ev.clientX, ev.clientY);
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+  window.addEventListener('pointercancel', function () { dragging = false; });
+
+  // ── 风（Web Audio 白噪声，音量随风强）──
+  var AC = null, windGain = null;
+  function audioOn() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate * 2;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      var rng = mulberry(99);
+      for (var i = 0; i < len; i++) d[i] = rng() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var lp = AC.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = 0.6;
+      windGain = AC.createGain();
+      windGain.gain.value = 0;
+      src.connect(lp); lp.connect(windGain); windGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+
+  // ── 霜花（完成态淡入，一次画进离屏）──
+  function paintFrost() {
+    var c = frostCtx;
+    c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    c.clearRect(0, 0, L.w, L.h);
+    var rng = mulberry(seed + 5);
+    var fx0 = L.winX + 4, fy0 = L.winY + 4;
+    var fx1 = L.winX + L.winW - 4, fy1 = L.winY + L.winH - 4;
+    function clampIn(x, y) {
+      return [Math.max(fx0, Math.min(fx1, x)), Math.max(fy0, Math.min(fy1, y))];
+    }
+    var corners = [
+      [L.winX + 10, L.winY + 10, 1, 1],
+      [L.winX + L.winW - 10, L.winY + 10, -1, 1],
+      [L.winX + 10, L.winY + L.winH - 10, 1, -1],
+      [L.winX + L.winW - 10, L.winY + L.winH - 10, -1, -1]
+    ];
+    c.strokeStyle = 'rgba(215,230,240,0.9)';
+    c.lineWidth = 1.1;
+    for (var ci = 0; ci < corners.length; ci++) {
+      var cx = corners[ci][0], cy = corners[ci][1], sx = corners[ci][2], sy = corners[ci][3];
+      var arms = 5 + Math.floor(rng() * 3);
+      for (var a = 0; a < arms; a++) {
+        var ang = (a + rng() * 0.6) * Math.PI / (arms * 0.55);
+        var len = (14 + rng() * 30) * (0.5 + 0.5 * (1 - a / arms));
+        var ec = clampIn(cx + Math.cos(ang) * len * sx, cy + Math.sin(ang) * len * sy);
+        var ex = ec[0], ey = ec[1];
+        c.beginPath();
+        c.moveTo(cx, cy);
+        var mc = clampIn(cx + (ex - cx) * 0.5 + (rng() - 0.5) * 8, cy + (ey - cy) * 0.5 + (rng() - 0.5) * 8);
+        c.quadraticCurveTo(mc[0], mc[1], ex, ey);
+        c.stroke();
+        // 侧枝
+        for (var br = 0; br < 3; br++) {
+          var bt = 0.35 + br * 0.22;
+          var bc = clampIn(cx + (ex - cx) * bt, cy + (ey - cy) * bt);
+          var bx = bc[0], by = bc[1];
+          var bl = (1 - bt) * 8 + 3;
+          var ec2 = clampIn(bx + (rng() - 0.5) * bl * 2, by + (rng() > 0.5 ? 1 : -1) * bl);
+          c.beginPath();
+          c.moveTo(bx, by);
+          c.lineTo(ec2[0], ec2[1]);
+          c.stroke();
+        }
+      }
+    }
+  }
+
+  // ── 缝底 + 纸条层（sealed 变化时重绘）──
+  function paintSeam(w, gustT) {
+    var c = seamCtx;
+    c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    c.clearRect(0, 0, L.w, L.h);
+    // 未封的缝：漏进的风与月光丝
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (p.sealed) continue;
+      var flick = 0.5 + 0.5 * Math.sin(w * 9 + i * 0.35 + gustT);
+      c.fillStyle = 'rgba(205,215,235,' + (0.1 + 0.18 * flick) + ')';
+      c.fillRect(p.x - 1.8, p.y - 1.8, 3.6, 3.6);
+    }
+    // 纸条：连续段
+    c.lineCap = 'round';
+    c.strokeStyle = '#c9b788';
+    c.lineWidth = 11;
+    var run = [];
+    function flushRun() {
+      if (run.length < 2) { run = []; return; }
+      c.beginPath();
+      c.moveTo(run[0].x, run[0].y);
+      for (var j = 1; j < run.length; j++) c.lineTo(run[j].x, run[j].y);
+      c.stroke();
+      run = [];
+    }
+    for (var i2 = 0; i2 < pts.length; i2++) {
+      var p2 = pts[i2];
+      if (p2.sealed) run.push(p2); else flushRun();
+    }
+    flushRun();
+    // 纸条毛边与浆糊点（固定随机，不闪）
+    var rng = mulberry(seed + 11);
+    for (var i3 = 0; i3 < pts.length; i3++) {
+      var p3 = pts[i3];
+      if (!p3.sealed) continue;
+      if (rng() < 0.30) {
+        c.fillStyle = 'rgba(201,183,136,0.55)';
+        c.fillRect(p3.x + (rng() - 0.5) * 12, p3.y + (rng() - 0.5) * 12, 2, 2);
+      }
+      if (rng() < 0.06) {
+        c.fillStyle = 'rgba(240,232,205,0.5)';
+        c.beginPath();
+        c.arc(p3.x, p3.y, 1.6 + rng(), 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+  }
+
+  var particles = [];
+  var last = Date.now();
+  var gust = 0; // 阵风包络
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    coverage = countCoverage();
+    var full = coverage >= 0.995;
+    if (full && !done) {
+      done = true;
+      dragging = false;
+      say('封好了。风在窗外，灯在屋里。', true);
+    }
+    if (done && doneT < 1) doneT = Math.min(1, doneT + dt * 0.5);
+    if (!done && doneT > 0) { doneT = Math.max(0, doneT - dt * 2); if (doneT === 0) paintFrost(); }
+
+    var target = done ? 0 : Math.max(0, 1 - coverage) * (0.9 + 0.1);
+    wind += (target - wind) * Math.min(1, dt * 2.2);
+    // 阵风：夜里风一阵一阵
+    gust = Math.max(0, gust - dt * 0.8);
+    var gustAmbient = 0.5 + 0.5 * Math.sin(now / 3700) * Math.sin(now / 1100 + 1.7);
+    if (gustAmbient > 0.93 && !done && gust < 0.01) gust = 0.6;
+    var windEff = Math.min(1, wind + gust * 0.35);
+    if (windGain) windGain.gain.value = windEff * 0.1;
+
+    // ── 夜空背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0b1016');
+    bg.addColorStop(1, '#12161a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── 窗 ──
+    var wx = L.winX, wy = L.winY, ww = L.winW, wh = L.winH;
+    // 窗外深空
+    ctx.fillStyle = '#0a0e14';
+    ctx.fillRect(wx, wy, ww, wh);
+    // 月亮（风大时被云掠过）
+    var mx = wx + ww * 0.74, my = wy + wh * 0.24, mr = Math.min(ww, wh) * 0.09;
+    var cloudDrift = (now / 90) % (ww * 2.2) - ww * 0.6;
+    var cloudX = wx + cloudDrift * (0.4 + windEff * 0.9);
+    var cloudA = Math.max(0, 1 - Math.abs(cloudX - mx) / (ww * 0.34)) * (0.35 + windEff * 0.45);
+    var mg = ctx.createRadialGradient(mx, my, mr * 0.2, mx, my, mr * 2.6);
+    mg.addColorStop(0, 'rgba(232,226,204,0.9)');
+    mg.addColorStop(0.4, 'rgba(232,226,204,0.28)');
+    mg.addColorStop(1, 'rgba(232,226,204,0)');
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(mx, my, mr * 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e8e2cc';
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(180,172,148,0.35)';
+    ctx.beginPath(); ctx.arc(mx - mr * 0.32, my - mr * 0.2, mr * 0.13, 0, Math.PI * 2); ctx.fill();
+    if (cloudA > 0.02) {
+      ctx.fillStyle = 'rgba(13,16,22,' + Math.min(0.85, cloudA) + ')';
+      ctx.beginPath();
+      ctx.ellipse(cloudX, my + mr * 0.35, ww * 0.2, mr * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 窗外树影（随风摇）
+    var rngT = mulberry(seed + 31);
+    ctx.strokeStyle = 'rgba(6,8,10,' + (0.45 + windEff * 0.2) + ')';
+    ctx.lineWidth = 2;
+    for (var br2 = 0; br2 < 5; br2++) {
+      var bx0 = wx + ww * (0.06 + rngT() * 0.3);
+      var by0 = wy + wh * (0.72 + rngT() * 0.2);
+      var bl2 = wh * (0.1 + rngT() * 0.16);
+      var sway = Math.sin(now / (620 + br2 * 90)) * windEff * bl2 * 0.34;
+      ctx.beginPath();
+      ctx.moveTo(bx0, by0);
+      ctx.quadraticCurveTo(bx0 + sway * 0.6, by0 - bl2 * 0.55, bx0 + sway, by0 - bl2);
+      ctx.stroke();
+    }
+
+    // 完成后：月光整片透进玻璃（安静版）
+    if (doneT > 0) {
+      var moonIn = ctx.createLinearGradient(wx, wy, wx + ww * 0.3, wy + wh);
+      moonIn.addColorStop(0, 'rgba(220,218,190,' + 0.16 * doneT + ')');
+      moonIn.addColorStop(1, 'rgba(220,218,190,0)');
+      ctx.fillStyle = moonIn;
+      ctx.fillRect(wx, wy, ww, wh);
+      ctx.globalAlpha = doneT * 0.8;
+      ctx.drawImage(frostCv, 0, 0, L.w, L.h);
+      ctx.globalAlpha = 1;
+    }
+
+    // 玻璃压暗 + 窗格
+    ctx.fillStyle = 'rgba(14,20,28,0.42)';
+    ctx.fillRect(wx, wy, ww, wh);
+    ctx.strokeStyle = '#3c2f20';
+    ctx.lineWidth = Math.max(6, ww * 0.028);
+    ctx.strokeRect(wx, wy, ww, wh);
+    ctx.lineWidth = Math.max(3, ww * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh);
+    ctx.moveTo(wx, wy + wh * 0.44); ctx.lineTo(wx + ww, wy + wh * 0.44);
+    ctx.stroke();
+    // 木框高光
+    ctx.strokeStyle = 'rgba(122,96,62,0.55)';
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(wx - Math.max(6, ww * 0.028) / 2 - 1, wy - Math.max(6, ww * 0.028) / 2 - 1,
+                   ww + Math.max(6, ww * 0.028) + 2, wh + Math.max(6, ww * 0.028) + 2);
+
+    // ── 缝与纸条 ──
+    if (sealedDirty) { paintSeam(w, now / 1000); sealedDirty = false; }
+    ctx.drawImage(seamCv, 0, 0, L.w, L.h);
+
+    // ── 漏进来的风粒 ──
+    if (!done) {
+      var want = Math.floor(windEff * 1.6);
+      for (var np = 0; np < want; np++) {
+        if (Math.random() < windEff * 0.3) {
+          var un = [];
+          for (var ui = 0; ui < pts.length; ui++) if (!pts[ui].sealed) un.push(pts[ui]);
+          if (un.length) {
+            var up = un[Math.floor(Math.random() * un.length)];
+            particles.push({
+              x: up.x, y: up.y,
+              vx: (up.nx * 0.4 + 0.55) * (26 + Math.random() * 40),
+              vy: (up.ny * 0.4 + 0.28) * (22 + Math.random() * 30),
+              life: 1.6 + Math.random()
+            });
+          }
+        }
+      }
+    }
+    ctx.fillStyle = 'rgba(205,215,235,0.5)';
+    for (var pi = particles.length - 1; pi >= 0; pi--) {
+      var pp = particles[pi];
+      pp.x += pp.vx * dt; pp.y += pp.vy * dt;
+      pp.vy += 26 * dt;
+      pp.life -= dt;
+      if (pp.life <= 0) { particles.splice(pi, 1); continue; }
+      ctx.globalAlpha = Math.min(0.65, pp.life * 0.4);
+      ctx.fillRect(pp.x, pp.y, 1.8, 1.8);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 屋内：窗台 + 桌灯（风大灯影晃）──
+    var sillY = wy + wh + Math.max(6, ww * 0.028) / 2;
+    ctx.fillStyle = '#241c12';
+    ctx.fillRect(0, sillY, w, h - sillY);
+    ctx.fillStyle = 'rgba(122,96,62,0.4)';
+    ctx.fillRect(0, sillY, w, 2);
+    // 灯（窗台下偏左）
+    var lampX = Math.max(w * 0.16, wx - ww * 0.18);
+    var lampY = sillY + (h - sillY) * 0.52;
+    var flick = 1 + Math.sin(now / 90) * 0.012 * windEff + (Math.random() - 0.5) * 0.05 * windEff;
+    var lampR = Math.min(w, h) * (0.30 + windEff * 0.03) * flick;
+    var lg = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, lampR);
+    lg.addColorStop(0, 'rgba(224,184,120,' + (0.34 - windEff * 0.07) * flick + ')');
+    lg.addColorStop(0.35, 'rgba(224,184,120,' + 0.13 * flick + ')');
+    lg.addColorStop(1, 'rgba(224,184,120,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(0, sillY, w, h - sillY);
+    // 灯座剪影
+    ctx.fillStyle = '#1a140c';
+    ctx.beginPath();
+    ctx.moveTo(lampX - 16, lampY + 12);
+    ctx.lineTo(lampX + 16, lampY + 12);
+    ctx.lineTo(lampX + 9, lampY - 6);
+    ctx.lineTo(lampX - 9, lampY - 6);
+    ctx.closePath(); ctx.fill();
+    ctx.fillRect(lampX - 2.4, lampY - 26, 4.8, 20);
+    ctx.beginPath();
+    ctx.moveTo(lampX - 14, lampY - 26);
+    ctx.lineTo(lampX + 14, lampY - 26);
+    ctx.lineTo(lampX + 8, lampY - 44);
+    ctx.lineTo(lampX - 8, lampY - 44);
+    ctx.closePath();
+    ctx.fillStyle = '#2e2314';
+    ctx.fill();
+    ctx.fillStyle = 'rgba(240,204,140,' + (0.75 - windEff * 0.15) + ')';
+    ctx.fillRect(lampX - 6, lampY - 42, 12, 14);
+
+    // ── 进度提示（无数字，看纸条）──
+    if (!saidStart && !done) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住纸条，沿窗缝走一圈', wx + ww / 2, sillY + 34);
+      ctx.textAlign = 'left';
+    }
+    if (done) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再封一夜', wx + ww / 2, sillY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用吸附判定）
+  window.__seal = {
+    coverage: function () { return Math.round(coverage * 1000) / 1000; },
+    done: function () { return done; },
+    wind: function () { return Math.round(wind * 100) / 100; },
+    rect: function () { return { x: Math.round(L.winX), y: Math.round(L.winY), w: Math.round(L.winW), h: Math.round(L.winH) }; },
+    begin: function () { dragging = true; },
+    drag: function (x, y) { if (!done) sealNear(x, y); },
+    end: function () { dragging = false; }
+  };
+})();
+</script>
+</body>
+</html>

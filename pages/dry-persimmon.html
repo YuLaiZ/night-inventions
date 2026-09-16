@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>削柿饼</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>削柿饼</h1>
+  <p>霜降前的硬柿最涩，削了皮才甜得成。<br>点一颗，按住转着削——皮薄不断，挂上绳等风来。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 3;
+  var persimmons = [];  // 筐里的 {ox,oy,s,rot,hue,taken}
+  var holding = null;   // 正在削的 {rot, peel, cx, cy}
+  var hung = [];        // 挂上绳的 {slot, sway, drop}
+  var peels = [];       // 落下的果皮条 {y, len, drift}
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.82;
+    L.ropeY = L.h * 0.335;                 // 麻绳高度
+    L.ropeX0 = L.w * 0.18;
+    L.ropeX1 = L.w * 0.82;
+    L.bx = L.w * 0.5;                      // 筐中心
+    L.by = L.floorY - L.h * 0.045;
+    L.bR = Math.min(L.w * 0.2, L.h * 0.14, 150);
+    L.peakX = L.w * 0.5;                   // 削皮特写位
+    L.peakY = L.h * 0.52;
+    L.peakR = Math.min(L.w * 0.13, L.h * 0.11, 92);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  (function () {
+    var rng = mulberry(seed);
+    for (var i = 0; i < TOTAL; i++) {
+      persimmons.push({
+        ox: (i - 1) * 0.42 + (rng() - 0.5) * 0.14,
+        oy: (rng() - 0.5) * 0.2,
+        s: 0.94 + rng() * 0.16,
+        rot: rng() * Math.PI,
+        hue: rng() * 10 - 5,
+        taken: false
+      });
+    }
+  })();
+
+  function pXY(p) {
+    return { x: L.bx + p.ox * L.bR, y: L.by + p.oy * L.bR * 0.4 };
+  }
+
+  function pickP(x, y) {
+    var best = -1, bestD = 1e9;
+    for (var i = 0; i < persimmons.length; i++) {
+      if (persimmons[i].taken) continue;
+      var p = pXY(persimmons[i]);
+      var dx = p.x - x, dy = p.y - y;
+      var d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return bestD < Math.pow(L.bR * 0.34, 2) ? best : -1;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      hanging = false;
+      hung = [];
+      peels = [];
+      seed = (seed * 16807 + 7) % 2147483647;
+      var rng = mulberry(seed);
+      for (var i = 0; i < persimmons.length; i++) {
+        persimmons[i].taken = false;
+        persimmons[i].rot = rng() * Math.PI;
+      }
+      saidStart = false;
+      return;
+    }
+    if (holding || hung.length + 1 > TOTAL) return;
+    var idx = pickP(ev.clientX, ev.clientY);
+    if (idx >= 0) {
+      persimmons[idx].taken = true;
+      holding = { idx: idx, rot: 0, peel: 0, hue: persimmons[idx].hue };
+      if (!saidStart) { saidStart = true; say('按住别松——转着圈削，皮要一根到底。'); }
+    }
+  });
+  window.addEventListener('pointerup', function () {
+    // 中途松手：削皮进度保留（宽容），可继续按（简化：直接判定松手即完成当前颗）
+    if (holding) {
+      finishHold();
+    }
+  });
+  window.addEventListener('pointercancel', function () {
+    if (holding) finishHold();
+  });
+  // 持续削：按住期间不断推进
+  var lastHold = null;
+  canvas.addEventListener('pointermove', function (ev) { lastHold = { x: ev.clientX, y: ev.clientY }; });
+
+  function finishHold() {
+    var slot = hung.length;
+    hung.push({ slot: slot, sway: Math.random() * Math.PI, drop: 0.001 });
+    holding = null;
+    var n = hung.length;
+    if (n >= TOTAL) {
+      resting = true;
+      say('挂满了。风一夜一夜过，等到上霜，甜得能拉丝。', true);
+    } else {
+      say('挂好一颗。还剩 ' + (TOTAL - n) + ' 颗。');
+    }
+  }
+
+  function drawFruit(x, y, r, hue, rot, peelRatio, isRaw) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot * 0.15);
+    // 果蒂萼片
+    ctx.fillStyle = '#4a5a34';
+    for (var lv = 0; lv < 4; lv++) {
+      var la = rot * 0.5 + lv * Math.PI / 2;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(la) * r * 0.3, -r * 0.82 + Math.sin(la) * r * 0.1, r * 0.2, r * 0.09, la, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 果身
+    var topCol = isRaw ? 'rgb(244,' + Math.round(150 + hue) + ',60)' : 'rgb(238,196,120)';
+    var botCol = isRaw ? 'rgb(206,' + Math.round(92 + hue * 0.6) + ',34)' : 'rgb(206,168,96)';
+    var g = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.1, 0, 0, r * 1.05);
+    g.addColorStop(0, topCol);
+    g.addColorStop(1, botCol);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    // 柿形：扁圆微方
+    ctx.moveTo(0, -r * 0.78);
+    ctx.bezierCurveTo(r * 0.75, -r * 0.85, r * 0.95, -r * 0.1, r * 0.82, r * 0.3);
+    ctx.bezierCurveTo(r * 0.7, r * 0.75, -r * 0.7, r * 0.75, -r * 0.82, r * 0.3);
+    ctx.bezierCurveTo(-r * 0.95, -r * 0.1, -r * 0.75, -r * 0.85, 0, -r * 0.78);
+    ctx.fill();
+    // 削过的露肉部分（底部渐起，随 peelRatio 扩大）
+    if (peelRatio > 0) {
+      ctx.fillStyle = 'rgba(238,200,130,0.95)';
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.82, r * 0.3);
+      ctx.bezierCurveTo(-r * 0.7, r * (0.75 - peelRatio * 0.2), r * 0.7, r * (0.75 - peelRatio * 0.2), r * 0.82, r * 0.3);
+      ctx.bezierCurveTo(r * 0.7, r * 0.75, -r * 0.7, r * 0.75, -r * 0.82, r * 0.3);
+      ctx.fill();
+      // 削痕弧线
+      ctx.strokeStyle = 'rgba(190,150,90,0.5)';
+      ctx.lineWidth = 1.4;
+      var lines = Math.ceil(peelRatio * 4);
+      for (var ln = 1; ln <= lines; ln++) {
+        ctx.beginPath();
+        ctx.ellipse(0, r * (0.72 - ln * 0.07), r * (0.8 - ln * 0.05), r * 0.1, 0, 0.2, Math.PI - 0.2);
+        ctx.stroke();
+      }
+    }
+    // 高光
+    ctx.fillStyle = 'rgba(255,235,200,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.3, -r * 0.3, r * 0.18, r * 0.1, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (holding) {
+      holding.rot += dt * 4.2;
+      holding.peel = Math.min(1, holding.peel + dt * 0.42);
+      // 皮条落下
+      if (Math.random() < 0.4) {
+        peels.push({
+          y: L.peakY + L.peakR * 0.6,
+          x: L.peakX + (Math.random() - 0.5) * L.peakR,
+          vy: 40 + Math.random() * 40,
+          len: 8 + Math.random() * 10,
+          life: 1.4
+        });
+      }
+      if (holding.peel >= 1) finishHold();
+    }
+    for (var pi2 = peels.length - 1; pi2 >= 0; pi2--) {
+      var pp = peels[pi2];
+      pp.y += pp.vy * dt; pp.x += Math.sin(pp.y / 20) * 0.6; pp.life -= dt;
+      if (pp.life <= 0 || pp.y > L.floorY + 6) peels.splice(pi2, 1);
+    }
+    for (var hi = 0; hi < hung.length; hi++) {
+      var hp = hung[hi];
+      if (hp.drop < 1) hp.drop = Math.min(1, hp.drop + dt * 3);
+    }
+
+    // ── 背景：屋檐下的夜 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c0f15');
+    bg.addColorStop(1, '#131217');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 檐上月光
+    var mg = ctx.createRadialGradient(w * 0.78, L.ropeY - L.h * 0.16, 0, w * 0.78, L.ropeY - L.h * 0.16, w * 0.4);
+    mg.addColorStop(0, 'rgba(220,218,190,0.08)');
+    mg.addColorStop(1, 'rgba(220,218,190,0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 麻绳与挂着的柿 ──
+    ctx.strokeStyle = '#8a6f48';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(L.ropeX0, L.ropeY);
+    ctx.quadraticCurveTo(L.w * 0.5, L.ropeY + 10, L.ropeX1, L.ropeY);
+    ctx.stroke();
+    var slotX = function (i2) { return L.w * (0.34 + i2 * 0.16); };
+    for (var hi2 = 0; hi2 < hung.length; hi2++) {
+      var hn = hung[hi2];
+      var sx2 = slotX(hn.slot);
+      var sw = Math.sin(now / 900 + hn.sway) * 0.06 * hn.drop;
+      var drop2 = hn.drop;
+      var oy2 = -14 * (1 - drop2);
+      ctx.save();
+      ctx.translate(sx2, L.ropeY + 4 + oy2);
+      ctx.rotate(sw);
+      // 系绳
+      ctx.strokeStyle = '#a08a5e';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(0, -2);
+      ctx.lineTo(0, 12);
+      ctx.stroke();
+      drawFruit(0, 12 + L.peakR * 0.55, L.peakR * 0.62, 0, 0, 0.75, false);
+      ctx.restore();
+    }
+
+    // ── 筐与待削的柿 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(L.bx, L.by + L.bR * 0.42, L.bR * 1.05, L.bR * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#7a6040';
+    ctx.beginPath();
+    ctx.moveTo(L.bx - L.bR, L.by - L.bR * 0.18);
+    ctx.lineTo(L.bx + L.bR, L.by - L.bR * 0.18);
+    ctx.lineTo(L.bx + L.bR * 0.84, L.by + L.bR * 0.4);
+    ctx.lineTo(L.bx - L.bR * 0.84, L.by + L.bR * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(52,38,22,0.7)';
+    ctx.lineWidth = 2;
+    for (var wv = 1; wv <= 3; wv++) {
+      var wy = L.by - L.bR * 0.18 + (L.bR * 0.58) * wv / 4;
+      ctx.beginPath();
+      ctx.moveTo(L.bx - L.bR * (1 - wv * 0.04), wy);
+      ctx.lineTo(L.bx + L.bR * (1 - wv * 0.04), wy);
+      ctx.stroke();
+    }
+    var firstFree = -1;
+    for (var i3 = 0; i3 < persimmons.length; i3++) {
+      var ps = persimmons[i3];
+      if (ps.taken) continue;
+      if (firstFree < 0) firstFree = i3;
+      var p2 = pXY(ps);
+      drawFruit(p2.x, p2.y, L.bR * 0.22 * ps.s, ps.hue, ps.rot, 0, true);
+    }
+    if (!saidStart && firstFree >= 0) {
+      var p3 = pXY(persimmons[firstFree]);
+      var pul2 = 0.5 + 0.5 * Math.sin(now / 480);
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.25 + 0.25 * pul2) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(p3.x, p3.y, L.bR * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // ── 削皮特写 ──
+    if (holding) {
+      drawFruit(L.peakX, L.peakY, L.peakR, holding.hue, holding.rot, holding.peel, holding.peel < 1);
+      // 刀（随旋转贴边）
+      var ka = holding.rot % (Math.PI * 2);
+      var kx = L.peakX + Math.cos(ka) * L.peakR * 0.98;
+      var ky = L.peakY + Math.sin(ka) * L.peakR * 0.98;
+      ctx.save();
+      ctx.translate(kx, ky);
+      ctx.rotate(ka + Math.PI / 2 + 0.5);
+      ctx.fillStyle = '#c8ccd2';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(L.peakR * 0.55, -L.peakR * 0.1);
+      ctx.lineTo(L.peakR * 0.58, L.peakR * 0.04);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#6a4a2e';
+      ctx.fillRect(L.peakR * 0.5, L.peakR * 0.02, L.peakR * 0.34, L.peakR * 0.09);
+      ctx.restore();
+      // 进度：柿蒂旁小月牙
+      ctx.strokeStyle = 'rgba(230,210,170,0.8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(L.peakX, L.peakY, L.peakR * 1.3, -Math.PI / 2, -Math.PI / 2 + holding.peel * Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 落下的皮条
+    ctx.strokeStyle = 'rgba(214,110,50,0.65)';
+    ctx.lineWidth = 1.8;
+    for (var pj = 0; pj < peels.length; pj++) {
+      ctx.globalAlpha = Math.min(1, peels[pj].life);
+      ctx.beginPath();
+      ctx.moveTo(peels[pj].x, peels[pj].y);
+      ctx.quadraticCurveTo(peels[pj].x + 4, peels[pj].y + peels[pj].len / 2, peels[pj].x, peels[pj].y + peels[pj].len);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // 引导
+    if (!saidStart && !holding) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一颗柿子', L.bx, L.by - L.bR * 0.5);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再削一挂', L.bx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实点击共用判定）
+  window.__psm = {
+    hung: function () { return hung.length; },
+    done: function () { return resting; },
+    holding: function () { return holding ? Math.round(holding.peel * 100) / 100 : -1; },
+    tap: function (i) {
+      if (resting || holding) return;
+      if (persimmons[i] && !persimmons[i].taken) {
+        persimmons[i].taken = true;
+        holding = { idx: i, rot: 0, peel: 0, hue: persimmons[i].hue };
+        saidStart = true;
+      }
+    },
+    finish: function () { if (holding) finishHold(); }
+  };
+})();
+</script>
+</body>
+</html>

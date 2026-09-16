@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>凌晨的洒水车</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>凌晨的洒水车</h1>
+  <p>四点钟，街上没人，它准时出门。<br>点一下路面——听着那段旋律，看它把街洒湿。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var run = 0;          // 已驶过趟数
+  var truckX = -300;    // 车头位置
+  var moving = false;
+  var saidStart = false;
+  var drops = [];       // 水珠
+  var wetness = 0;      // 路面湿痕 0→1
+  var seed = 20260916;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.roadY = L.h * 0.62;
+    L.laneY = L.h * 0.74;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 旋律（洒水车同款老曲调，近似段）──
+  var MELODY = [
+    [69, 1], [64, 1], [69, 2],
+    [69, 1], [64, 1], [69, 2],
+    [71, 1], [69, 1], [67, 1], [64, 1],
+    [62, 2], [64, 2],
+    [67, 1], [64, 1], [67, 2],
+    [69, 1], [67, 1], [64, 2],
+    [62, 1], [64, 1], [67, 1], [69, 1],
+    [67, 3], [0, 1]
+  ];
+  var AC = null, gainNode = null, noteIdx = 0, noteLeft = 0;
+  function audioInit() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      gainNode = AC.createGain();
+      gainNode.gain.value = 0.9;
+      gainNode.connect(AC.destination);
+    } catch (e) { AC = null; }
+  }
+  function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function playTick() {
+    if (!AC || !moving) return;
+    var beat = 0.36;
+    noteLeft -= 1 / 60;
+    if (noteLeft <= 0) {
+      var n = MELODY[noteIdx % MELODY.length];
+      noteIdx++;
+      noteLeft = n[1] * beat;
+      if (n[0] > 0) {
+        var osc = AC.createOscillator();
+        var g2 = AC.createGain();
+        osc.type = 'square';
+        osc.frequency.value = midiHz(n[0]);
+        var t0 = AC.currentTime;
+        g2.gain.setValueAtTime(0, t0);
+        g2.gain.linearRampToValueAtTime(0.05, t0 + 0.02);
+        g2.gain.setValueAtTime(0.05, t0 + n[1] * beat * 0.7);
+        g2.gain.linearRampToValueAtTime(0, t0 + n[1] * beat * 0.92);
+        osc.connect(g2); g2.connect(gainNode);
+        osc.start(t0); osc.stop(t0 + n[1] * beat);
+      }
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function () {
+    audioInit();
+    if (moving) return;
+    moving = true;
+    truckX = -320;
+    run++;
+    if (!saidStart) { saidStart = true; say('来了——这段旋律，方圆几里都听得见。'); }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (moving) {
+      truckX += dt * 130;
+      playTick();
+      // 洒水珠
+      for (var k = 0; k < 3; k++) {
+        drops.push({
+          x: truckX - 20 - Math.random() * 60,
+          y: L.laneY - 34,
+          vx: -40 - Math.random() * 60,
+          vy: 60 + Math.random() * 60,
+          life: 0.5 + Math.random() * 0.3
+        });
+      }
+      if (truckX > w + 340) {
+        moving = false;
+        wetness = 1;
+        say('洒过了。路是湿的，天快亮了。', true);
+      }
+    }
+    // 水珠落路与涟漪
+    for (var di = drops.length - 1; di >= 0; di--) {
+      var dp = drops[di];
+      dp.x += dp.vx * dt; dp.y += dp.vy * dt; dp.vy += 160 * dt;
+      if (dp.y > L.laneY + 14) {
+        if (Math.random() < 0.3) dp.ripple = { x: dp.x, y: L.laneY + 14, r: 1 };
+        drops.splice(di, 1);
+      }
+    }
+    if (wetness > 0 && wetness < 1) wetness = Math.min(1, wetness);
+    for (var dj = drops.length - 1; dj >= 0; dj--) {
+      if (drops[dj].ripple) {
+        drops[dj].ripple.r += dt * 30;
+        if (drops[dj].ripple.r > 12) drops.splice(dj, 1);
+      }
+    }
+
+    // ── 夜街背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, L.roadY);
+    bg.addColorStop(0, '#0a0d13');
+    bg.addColorStop(1, '#11151c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, L.roadY);
+    // 远处楼影
+    var rng = mulberry(5);
+    var bx2 = 0;
+    while (bx2 < w) {
+      var bw = 60 + rng() * 90;
+      var bh = 60 + rng() * 130;
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(bx2, L.roadY - bh, bw, bh);
+      // 零星亮窗
+      if (rng() < 0.5) {
+        ctx.fillStyle = 'rgba(220,190,120,0.14)';
+        ctx.fillRect(bx2 + bw * 0.3, L.roadY - bh * 0.6, 6, 8);
+      }
+      bx2 += bw + 6;
+    }
+    // 路面
+    var rg = ctx.createLinearGradient(0, L.roadY, 0, h);
+    rg.addColorStop(0, '#1a1d22');
+    rg.addColorStop(1, '#12141a');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, L.roadY, w, h - L.roadY);
+    // 湿反光（洒过之后路面微亮）
+    if (wetness > 0) {
+      ctx.fillStyle = 'rgba(150,170,200,0.06)';
+      ctx.fillRect(0, L.roadY, w, h - L.roadY);
+    }
+    // 车道虚线
+    ctx.fillStyle = 'rgba(190,185,160,0.2)';
+    for (var dl = 0; dl < w; dl += 90) {
+      ctx.fillRect(dl, L.laneY + 22, 44, 4);
+    }
+    // 路灯两盏
+    for (var lp = 0; lp < 2; lp++) {
+      var lx2 = w * (0.22 + lp * 0.56);
+      ctx.strokeStyle = '#2e333a';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(lx2, L.roadY - 10);
+      ctx.lineTo(lx2, L.roadY - 150);
+      ctx.quadraticCurveTo(lx2, L.roadY - 165, lx2 + 26, L.roadY - 162);
+      ctx.stroke();
+      var cone = ctx.createRadialGradient(lx2 + 30, L.roadY - 158, 0, lx2 + 30, L.roadY - 158, 130);
+      cone.addColorStop(0, 'rgba(230,200,130,0.18)');
+      cone.addColorStop(1, 'rgba(230,200,130,0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(lx2 + 30, L.roadY - 158);
+      ctx.lineTo(lx2 - 55, L.roadY + 10);
+      ctx.lineTo(lx2 + 105, L.roadY + 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#e8d9a0';
+      ctx.beginPath();
+      ctx.arc(lx2 + 30, L.roadY - 158, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 洒水车 ──
+    if (moving) {
+      var tx = truckX, ty = L.laneY - 6;
+      // 水箱车身
+      ctx.fillStyle = '#3f6b5e';
+      ctx.beginPath();
+      ctx.roundRect(tx - 90, ty - 86, 130, 74, 10);
+      ctx.fill();
+      // 驾驶室
+      ctx.fillStyle = '#35594e';
+      ctx.beginPath();
+      ctx.roundRect(tx + 44, ty - 62, 56, 50, 6);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(200,220,235,0.5)';
+      ctx.fillRect(tx + 52, ty - 56, 26, 20);
+      // 罐顶口
+      ctx.fillStyle = '#2c4a41';
+      ctx.beginPath();
+      ctx.ellipse(tx - 30, ty - 86, 26, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 车轮
+      ctx.fillStyle = '#15171a';
+      for (var wi = 0; wi < 3; wi++) {
+        ctx.beginPath();
+        ctx.arc(tx - 62 + wi * 56, ty - 4, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#3a3e44';
+        ctx.beginPath();
+        ctx.arc(tx - 62 + wi * 56, ty - 4, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#15171a';
+      }
+      // 车顶喇叭
+      ctx.strokeStyle = '#8a929c';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(tx - 20, ty - 86);
+      ctx.lineTo(tx - 20, ty - 102);
+      ctx.stroke();
+      ctx.fillStyle = '#c8ccd2';
+      ctx.beginPath();
+      ctx.arc(tx - 20, ty - 106, 6, 0, Math.PI * 2);
+      ctx.fill();
+      // 尾灯
+      ctx.fillStyle = 'rgba(255,90,70,0.9)';
+      ctx.fillRect(tx - 94, ty - 50, 6, 10);
+      // 两侧水弧
+      ctx.strokeStyle = 'rgba(160,200,230,0.5)';
+      ctx.lineWidth = 2;
+      for (var arc2 = 0; arc2 < 3; arc2++) {
+        ctx.beginPath();
+        ctx.moveTo(tx - 60, ty - 30);
+        ctx.quadraticCurveTo(tx - 120 - arc2 * 14, ty - 10, tx - 150 - arc2 * 20, ty + 12);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(tx + 20, ty - 30);
+        ctx.quadraticCurveTo(tx + 90 + arc2 * 14, ty - 10, tx + 130 + arc2 * 20, ty + 12);
+        ctx.stroke();
+      }
+    }
+
+    // 水珠与涟漪
+    ctx.fillStyle = 'rgba(160,200,230,0.7)';
+    for (var wi2 = 0; wi2 < drops.length; wi2++) {
+      if (!drops[wi2].ripple) ctx.fillRect(drops[wi2].x, drops[wi2].y, 2, 3);
+    }
+    ctx.strokeStyle = 'rgba(160,200,230,0.3)';
+    ctx.lineWidth = 1;
+    for (var wj = 0; wj < drops.length; wj++) {
+      if (drops[wj].ripple) {
+        ctx.beginPath();
+        ctx.ellipse(drops[wj].ripple.x, drops[wj].ripple.y, drops[wj].ripple.r, drops[wj].ripple.r * 0.3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // 引导 / 再来一趟
+    if (!moving) {
+      var txt = run === 0 ? '点一下路面，让它出门' : '再让它洒一趟';
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(txt, L.w / 2, L.laneY - 60);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息）
+  window.__truck = {
+    moving: function () { return moving; },
+    truckX: function () { return Math.round(truckX); },
+    run: function () { return run; },
+    go: function () {
+      audioInit();
+      if (!moving) { moving = true; truckX = -320; run++; saidStart = true; }
+    }
+  };
+})();
+</script>
+</body>
+</html>

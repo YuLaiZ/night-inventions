@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>搓麻绳</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>搓麻绳</h1>
+  <p>一束散麻，两掌心焐热了。<br>按住来回搓——搓一股拧一股，绳成了，灯就有处挂了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 8;        // 搓 8 个来回
+  var twists = 0;       // 已搓来回数
+  var holding = false;
+  var lastX = 0;
+  var dir = 0;          // 本段需要的方向：1 右移 / -1 左移
+  var accum = 0;        // 当前方向累计位移
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var crumbs = [];      // 麻屑
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.78;
+    L.rx = L.w * 0.5;                     // 绳固定端（上方）
+    L.ry = L.h * 0.3;
+    L.ropeLen = L.h * 0.3;                // 完整绳长
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      twists = 0; dir = 0; accum = 0;
+      saidStart = false;
+      seed = (seed * 16807 + 7) % 2147483647;
+      return;
+    }
+    if (twists >= TOTAL) return;
+    holding = true;
+    lastX = ev.clientX;
+    dir = 0;
+    if (!saidStart) { saidStart = true; say('掌心焐热，按住来回搓——一下是一下。'); }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (!holding || twists >= TOTAL) return;
+    var dx = ev.clientX - lastX;
+    if (dir === 0) {
+      if (Math.abs(dx) > 4) dir = dx > 0 ? 1 : -1;
+      lastX = ev.clientX;
+      return;
+    }
+    if (dx * dir > 0) {
+      accum += Math.abs(dx);
+      if (accum > 46) {
+        accum = 0;
+        twists++;
+        dir = -dir;
+        if (Math.random() < 0.8) {
+          crumbs.push({
+            x: L.rx + (Math.random() - 0.5) * 30,
+            y: L.ry + (twists / TOTAL) * L.ropeLen,
+            vx: (Math.random() - 0.5) * 30,
+            vy: 20 + Math.random() * 26,
+            life: 0.9
+          });
+        }
+        if (twists === Math.floor(TOTAL / 2)) say('半截了。股与股咬得紧，才不吃力。');
+        if (twists >= TOTAL) {
+          resting = true;
+          say('绳成了。明晚挂灯——灯往哪挂，光就往哪去。', true);
+        }
+      }
+    } else {
+      accum = Math.max(0, accum - Math.abs(dx));
+    }
+    lastX = ev.clientX;
+  });
+  window.addEventListener('pointerup', function () { holding = false; });
+  window.addEventListener('pointercancel', function () { holding = false; });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    for (var ci = crumbs.length - 1; ci >= 0; ci--) {
+      var cp = crumbs[ci];
+      cp.x += cp.vx * dt; cp.y += cp.vy * dt; cp.vy += 50 * dt; cp.life -= dt;
+      if (cp.life <= 0 || cp.y > L.floorY) crumbs.splice(ci, 1);
+    }
+
+    // ── 背景：膝上夜色 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c0f14');
+    bg.addColorStop(1, '#131217');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 膝上布（下三分之一一块粗布）
+    var clothY = L.ry + L.ropeLen + L.h * 0.14;
+    var cg2 = ctx.createLinearGradient(0, clothY, 0, h);
+    cg2.addColorStop(0, '#1e1a14');
+    cg2.addColorStop(1, '#16130e');
+    ctx.fillStyle = cg2;
+    ctx.fillRect(0, clothY, w, h - clothY);
+    ctx.strokeStyle = 'rgba(160,140,105,0.08)';
+    ctx.lineWidth = 1;
+    for (var gl = 0; gl < w; gl += 26) {
+      ctx.beginPath(); ctx.moveTo(gl, clothY); ctx.lineTo(gl, h); ctx.stroke();
+    }
+
+    var segLen = L.ropeLen / TOTAL;
+    var made = twists >= TOTAL ? L.ropeLen : twists * segLen + (accum / 46) * segLen;
+
+    // ── 散麻束（顶端待搓的）──
+    var rng = mulberry(seed);
+    ctx.strokeStyle = 'rgba(176,158,120,0.55)';
+    ctx.lineWidth = 1.4;
+    for (var fb = 0; fb < 9; fb++) {
+      var fx = L.rx + (fb - 4) * 5 + rng() * 4;
+      ctx.beginPath();
+      ctx.moveTo(fx, L.ry - 4);
+      ctx.quadraticCurveTo(fx - (fb - 4) * 3, L.ry - 34, fx - (fb - 4) * 7 - 8, L.ry - 52 - rng() * 14);
+      ctx.stroke();
+    }
+
+    // ── 已搓成的绳 ──
+    if (made > 6) {
+      var endY = L.ry + made;
+      var swing = holding ? Math.sin(now / 160) * 0.05 : Math.sin(now / 900) * 0.03;
+      ctx.save();
+      ctx.translate(L.rx, L.ry);
+      ctx.rotate(swing);
+      // 绳身：两股螺旋
+      var segs = Math.max(2, Math.floor(made / 9));
+      for (var si = 0; si < segs; si++) {
+        var t0 = si / segs, t1 = (si + 1) / segs;
+        var y0 = t0 * made, y1 = t1 * made;
+        var w0 = 5 + 2.5 * (t0), w1 = 5 + 2.5 * (t1);
+        // 股 A（左旋）
+        ctx.strokeStyle = '#a08a5e';
+        ctx.lineWidth = w0 * 0.62;
+        ctx.beginPath();
+        ctx.moveTo(-w0 * 0.5, y0);
+        ctx.quadraticCurveTo(w1 * 0.55, (y0 + y1) / 2, -w1 * 0.5, y1);
+        ctx.stroke();
+        // 股 B（右旋）
+        ctx.strokeStyle = '#8a7448';
+        ctx.beginPath();
+        ctx.moveTo(w0 * 0.5, y0);
+        ctx.quadraticCurveTo(-w1 * 0.55, (y0 + y1) / 2, w1 * 0.5, y1);
+        ctx.stroke();
+      }
+      // 绳尾（未搓完的散口）
+      if (twists < TOTAL) {
+        ctx.strokeStyle = 'rgba(176,158,120,0.6)';
+        ctx.lineWidth = 1.3;
+        var fr2 = mulberry(seed + twists);
+        for (var t3 = 0; t3 < 5; t3++) {
+          ctx.beginPath();
+          ctx.moveTo(0, made - 2);
+          ctx.quadraticCurveTo((t3 - 2) * 5, made + 10, (t3 - 2) * 9, made + 18 + fr2() * 8);
+          ctx.stroke();
+        }
+      } else {
+        // 绳头扣
+        ctx.strokeStyle = '#a08a5e';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(0, made + 6, 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // ── 两掌剪影（搓动时夹绳）──
+    if (holding) {
+      var handY = L.ry + Math.min(made, L.ropeLen) - 12;
+      var spread = 26 + Math.abs(accum) * 0.15;
+      ctx.fillStyle = 'rgba(28,24,18,0.9)';
+      // 左掌
+      ctx.beginPath();
+      ctx.ellipse(L.rx - spread, handY, 20, 30, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      // 右掌
+      ctx.beginPath();
+      ctx.ellipse(L.rx + spread, handY + 6, 20, 30, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+      // 掌间麻屑光
+      ctx.fillStyle = 'rgba(176,158,120,0.25)';
+      ctx.fillRect(L.rx - 3, handY - 4, 6, 8);
+    }
+
+    // 麻屑
+    ctx.fillStyle = 'rgba(176,158,120,0.6)';
+    for (var cj = 0; cj < crumbs.length; cj++) {
+      ctx.globalAlpha = Math.max(0, crumbs[cj].life);
+      ctx.fillRect(crumbs[cj].x, crumbs[cj].y, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // 进度：右侧一列小结（搓一个亮一个）
+    for (var ni = 0; ni < TOTAL; ni++) {
+      ctx.fillStyle = ni < twists ? 'rgba(200,178,128,0.8)' : 'rgba(200,178,128,0.18)';
+      ctx.beginPath();
+      ctx.arc(w - 36, L.ry + 10 + ni * ((L.ropeLen - 20) / TOTAL), 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (!saidStart && twists === 0) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住散麻，来回搓', L.rx, L.ry - 78);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再搓一根', L.rx, clothY + 40);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实拖动共用计次逻辑）
+  window.__twine = {
+    twists: function () { return twists; },
+    done: function () { return resting; },
+    begin: function (x) { holding = true; lastX = x; dir = 0; accum = 0; saidStart = true; },
+    drag: function (x) {
+      if (!holding || twists >= TOTAL) return;
+      var dx = x - lastX;
+      if (dir === 0) {
+        if (Math.abs(dx) > 4) dir = dx > 0 ? 1 : -1;
+        lastX = x;
+        return;
+      }
+      if (dx * dir > 0) {
+        accum += Math.abs(dx);
+        if (accum > 46) {
+          accum = 0; twists++; dir = -dir;
+          if (twists >= TOTAL) { resting = true; say('绳成了。明晚挂灯——灯往哪挂，光就往哪去。', true); }
+        }
+      } else {
+        accum = Math.max(0, accum - Math.abs(dx));
+      }
+      lastX = x;
+    },
+    end: function () { holding = false; }
+  };
+})();
+</script>
+</body>
+</html>

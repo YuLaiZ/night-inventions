@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>石磨豆浆</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>石磨豆浆</h1>
+  <p>豆子泡了一夜，胖了。<br>按住推杆绕着走——磨几圈，白浆就下来了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 4;        // 推 4 圈
+  var laps = 0;         // 已推圈数
+  var curAng = -Math.PI / 2;
+  var prevAng = null;
+  var holding = false;
+  var millSpin = 0;     // 上磨盘累计转角
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var drips = [];       // 浆滴
+  var beans = [];       // 豆粒
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.78;
+    L.mx = L.w * 0.42;
+    L.my = L.h * 0.6;                        // 磨盘中心
+    L.mR = Math.min(L.w * 0.15, L.h * 0.14, 118);   // 磨盘半径
+    L.bowlX = L.mx + L.mR * 1.9;
+    L.bowlY = L.floorY - L.h * 0.02;
+    L.pushLen = L.mR * 1.55;                 // 推杆长
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function pushHandlePos() {
+    return {
+      x: L.mx + Math.cos(curAng) * L.pushLen,
+      y: L.my + Math.sin(curAng) * L.pushLen * 0.55
+    };
+  }
+
+  function angDiff(a, b) {
+    var d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      laps = 0; millSpin = 0; prevAng = null;
+      drips = []; beans = [];
+      saidStart = false;
+      return;
+    }
+    var hp = pushHandlePos();
+    var dx = ev.clientX - hp.x, dy = ev.clientY - hp.y;
+    if (dx * dx + dy * dy < Math.pow(L.mR * 0.5, 2)) {
+      holding = true;
+      prevAng = Math.atan2((ev.clientY - L.my) / 0.55, ev.clientX - L.mx);
+      if (!saidStart) { saidStart = true; say('按住推杆，绕着圈走——逆时针，磨才顺。'); }
+    }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (!holding || laps >= TOTAL) return;
+    var ang = Math.atan2((ev.clientY - L.my) / 0.55, ev.clientX - L.mx);
+    if (prevAng !== null) {
+      var d = angDiff(ang, prevAng);
+      if (d < 0) {   // 逆时针
+        millSpin += d;
+        curAng = ang;
+        if (Math.abs(millSpin) > Math.PI * 2 * (laps + 1)) {
+          laps++;
+          if (Math.random() < 0.9) {
+            beans.push({ x: L.mx + (Math.random() - 0.5) * 20, y: L.my - L.mR * 0.1, vy: 40, life: 1 });
+          }
+          if (laps === 1) say('白浆下来了——磨得越细，浆越稠。');
+          if (laps === 2) say('别急，一圈一圈走。');
+          if (laps === 3) say('盆快见底了——再一圈。');
+          if (laps >= TOTAL) {
+            resting = true;
+            say('磨好了。滤一滤，煮开就是豆浆。', true);
+          }
+        }
+      }
+    }
+    prevAng = ang;
+  });
+  window.addEventListener('pointerup', function () { holding = false; });
+  window.addEventListener('pointercancel', function () { holding = false; });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 浆滴生成（推磨中）
+    if (holding && laps < TOTAL && Math.random() < 0.25) {
+      drips.push({ x: L.mx + (Math.random() - 0.5) * 8, y: L.my + L.mR * 0.16, vy: 40, life: 1.4 });
+    }
+    for (var di = drips.length - 1; di >= 0; di--) {
+      var dp = drips[di];
+      dp.y += dp.vy * dt;
+      if (dp.y > L.bowlY - L.h * 0.06) drips.splice(di, 1);
+    }
+    for (var bi = beans.length - 1; bi >= 0; bi--) {
+      beans[bi].y += beans[bi].vy * dt;
+      if (beans[bi].y > L.my + L.mR * 0.05) beans.splice(bi, 1);
+    }
+
+    // ── 背景 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c0f14');
+    bg.addColorStop(1, '#141217');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 磨盘基座 ──
+    var mx = L.mx, my = L.my, mR = L.mR;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(mx, my + mR * 0.62, mR * 1.15, mR * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 下磨盘
+    var gBase = ctx.createRadialGradient(mx - mR * 0.3, my - mR * 0.2, mR * 0.2, mx, my, mR);
+    gBase.addColorStop(0, '#8a8378');
+    gBase.addColorStop(1, '#5f594e');
+    ctx.fillStyle = gBase;
+    ctx.beginPath();
+    ctx.ellipse(mx, my + mR * 0.14, mR, mR * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 下盘浆槽
+    ctx.strokeStyle = 'rgba(236,228,205,0.35)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(mx, my + mR * 0.14, mR * 0.8, mR * 0.32, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 磨口流浆嘴
+    ctx.fillStyle = '#6e6759';
+    ctx.beginPath();
+    ctx.moveTo(mx + mR * 0.85, my + mR * 0.1);
+    ctx.lineTo(mx + mR * 1.12, my + mR * 0.24);
+    ctx.lineTo(mx + mR * 0.82, my + mR * 0.3);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── 上磨盘（随推磨旋转）──
+    ctx.save();
+    ctx.translate(mx, my - mR * 0.16);
+    ctx.rotate(millSpin);
+    var gTop = ctx.createRadialGradient(-mR * 0.25, -mR * 0.1, mR * 0.15, 0, 0, mR * 0.95);
+    gTop.addColorStop(0, '#98917f');
+    gTop.addColorStop(1, '#6e675b');
+    ctx.fillStyle = gTop;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, mR * 0.92, mR * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 磨盘侧面
+    ctx.fillStyle = '#57503f';
+    ctx.fillRect(-mR * 0.92, 0, mR * 1.84, mR * 0.22);
+    ctx.beginPath();
+    ctx.ellipse(0, mR * 0.22, mR * 0.92, mR * 0.3, 0, 0, Math.PI);
+    ctx.fill();
+    // 磨眼（投豆口）
+    ctx.fillStyle = '#1e1b18';
+    ctx.beginPath();
+    ctx.ellipse(0, -mR * 0.02, mR * 0.13, mR * 0.06, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 推杆
+    ctx.strokeStyle = '#7a5f38';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(curAng) * L.pushLen, Math.sin(curAng) * L.pushLen * 0.55);
+    ctx.stroke();
+    ctx.restore();
+
+    // 推杆把手
+    var hp = pushHandlePos();
+    ctx.fillStyle = '#8a6f48';
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, 9, 0, Math.PI * 2);
+    ctx.fill();
+    // 可拖呼吸圈
+    if (!holding && laps < TOTAL && !resting) {
+      var pul = 0.5 + 0.5 * Math.sin(now / 480);
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(hp.x, hp.y, 22, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 豆粒落入磨眼
+    ctx.fillStyle = '#c9c07a';
+    for (var bj = 0; bj < beans.length; bj++) {
+      ctx.beginPath();
+      ctx.ellipse(beans[bj].x, beans[bj].y, 3, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── 浆滴与流下的白浆 ──
+    ctx.fillStyle = 'rgba(238,231,210,0.9)';
+    for (var dj = 0; dj < drips.length; dj++) {
+      ctx.beginPath();
+      ctx.ellipse(drips[dj].x, drips[dj].y, 2.6, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 磨嘴流浆（推磨中恒定一缕）
+    if (laps > 0 && laps < TOTAL) {
+      ctx.strokeStyle = 'rgba(238,231,210,0.75)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(mx + mR * 1.05, my + mR * 0.26);
+      ctx.quadraticCurveTo(mx + mR * 1.3, my + mR * 0.42, L.bowlX - mR * 0.3, L.bowlY - L.h * 0.045);
+      ctx.stroke();
+    }
+
+    // ── 接浆盆 ──
+    var bx2 = L.bowlX, by2 = L.bowlY;
+    var fillH = Math.min(1, laps / TOTAL);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(bx2, by2 + 4, mR * 0.62, mR * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 盆身
+    var pg = ctx.createLinearGradient(bx2 - mR * 0.6, 0, bx2 + mR * 0.6, 0);
+    pg.addColorStop(0, '#5e6b62');
+    pg.addColorStop(0.5, '#77867b');
+    pg.addColorStop(1, '#4d584f');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.moveTo(bx2 - mR * 0.6, by2 - mR * 0.18);
+    ctx.lineTo(bx2 + mR * 0.6, by2 - mR * 0.18);
+    ctx.lineTo(bx2 + mR * 0.44, by2 + mR * 0.22);
+    ctx.lineTo(bx2 - mR * 0.44, by2 + mR * 0.22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#6e7d70';
+    ctx.beginPath();
+    ctx.ellipse(bx2, by2 - mR * 0.18, mR * 0.62, mR * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 盆里已接的浆（画在口沿之上，随圈数升高）
+    if (fillH > 0) {
+      ctx.fillStyle = 'rgba(238,231,210,0.95)';
+      ctx.beginPath();
+      ctx.ellipse(bx2, by2 - mR * 0.18 - mR * 0.04 * fillH, mR * 0.5, mR * 0.07 + mR * 0.05 * fillH, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 进度：盆沿四粒豆（推一圈亮一粒）
+    for (var ni = 0; ni < TOTAL; ni++) {
+      ctx.fillStyle = ni < laps ? 'rgba(220,206,160,0.85)' : 'rgba(220,206,160,0.2)';
+      ctx.beginPath();
+      ctx.arc(bx2 - 22 + ni * 15, by2 - mR * 0.62, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (!saidStart && laps === 0) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住推杆绕圈', hp.x, hp.y + 58);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再磨一盆', L.mx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实拖动共用计圈逻辑）
+  window.__mill = {
+    laps: function () { return laps; },
+    done: function () { return resting; },
+    begin: function () { holding = true; prevAng = -Math.PI / 2; curAng = -Math.PI / 2; saidStart = true; },
+    turn: function (rad) {
+      if (!holding || laps >= TOTAL) return;
+      millSpin += rad;
+      curAng -= rad;
+      if (Math.abs(millSpin) > Math.PI * 2 * (laps + 1)) {
+        laps++;
+        if (laps >= TOTAL) { resting = true; say('磨好了。滤一滤，煮开就是豆浆。', true); }
+      }
+    },
+    end: function () { holding = false; }
+  };
+})();
+</script>
+</body>
+</html>

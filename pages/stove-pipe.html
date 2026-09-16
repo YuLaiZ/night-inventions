@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>装烟囱</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>装烟囱</h1>
+  <p>炉子有了，烟还没去处。一节一节接上去，<br>弯头穿出窗外——烟走了，火才烧得旺。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var STRAIGHT = 4;     // 直管 4 节
+  var pipes = [];       // 已装 {x, y, len, kind, drop}  kind:0 直 /1 弯头
+  var flying = null;    // 正在飞入的管
+  var placed = 0;       // 已装节数
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var smoke = [];       // 窗外烟
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.8;
+    L.sx = L.w * 0.3;
+    L.sR = Math.min(L.w * 0.1, L.h * 0.1, 80);
+    L.sy = L.floorY - L.sR * 1.05;
+    L.pipeX = L.sx + L.sR * 0.28;        // 管中心线
+    L.segLen = Math.min(L.h * 0.12, 86);
+    L.pipeR = L.sR * 0.3;
+    L.winX = L.w * 0.62;
+    L.winY = L.h * 0.3;
+    L.winW = Math.min(L.w * 0.24, 240);
+    L.winH = L.winW * 1.1;
+    // 管路：从炉口向上 STRAIGHT 节，最后弯头朝右穿窗
+    L.pathTop = L.sy - L.sR * 1.2 - STRAIGHT * L.segLen;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function targetOf(i) {
+    // 第 i 节（0 基）：i<STRAIGHT 直管，否则弯头
+    var isElbow = i >= STRAIGHT;
+    var y = L.sy - L.sR * 1.2 - (i + 1) * L.segLen;
+    return { x: L.pipeX, y: y, elbow: isElbow };
+  }
+
+  // 待装的管堆（右下角）
+  function stackXY(i) {
+    return { x: L.w * 0.55 + i * L.pipeR * 0.9, y: L.floorY - L.sR * 0.3 };
+  }
+
+  function drawPipeSeg(x, y, len, r, elbow, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (!elbow) {
+      var g = ctx.createLinearGradient(x - r, 0, x + r, 0);
+      g.addColorStop(0, '#5a6169');
+      g.addColorStop(0.4, '#828a93');
+      g.addColorStop(1, '#4b5158');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y, r * 2, len);
+      // 管箍
+      ctx.fillStyle = '#3d4248';
+      ctx.fillRect(x - r * 1.12, y + len * 0.12, r * 2.24, len * 0.14);
+    } else {
+      // 弯头：竖短段+朝右的横段
+      var g2 = ctx.createLinearGradient(x - r, 0, x + r, 0);
+      g2.addColorStop(0, '#5a6169');
+      g2.addColorStop(0.4, '#828a93');
+      g2.addColorStop(1, '#4b5158');
+      ctx.fillStyle = g2;
+      ctx.fillRect(x - r, y, r * 2, len * 0.55);
+      ctx.fillRect(x, y + len * 0.55 - r, len * 0.62, r * 2);
+      ctx.fillStyle = '#3d4248';
+      ctx.fillRect(x - r * 1.12, y + len * 0.1, r * 2.24, len * 0.13);
+      // 管口
+      ctx.fillStyle = '#22252a';
+      ctx.beginPath();
+      ctx.ellipse(x + len * 0.62, y + len * 0.55, r * 0.28, r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  canvas.addEventListener('pointerdown', function () {
+    if (resting) {
+      resting = false;
+      pipes = []; placed = 0; flying = null; smoke = [];
+      saidStart = false;
+      seed = (seed * 16807 + 7) % 2147483647;
+      return;
+    }
+    if (flying || placed >= STRAIGHT + 1) return;
+    var t = targetOf(placed);
+    var from = stackXY(placed);
+    flying = { fx: from.x, fy: from.y, tx: t.x, ty: t.y, t: 0, elbow: t.elbow };
+    if (!saidStart) { saidStart = true; say('点一节，接一节——接口要对正。'); }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (flying) {
+      flying.t += dt * 2;
+      if (flying.t >= 1) {
+        pipes.push({ x: flying.tx, y: flying.ty, len: L.segLen, kind: flying.elbow ? 1 : 0, drop: 0.001 });
+        flying = null;
+        placed++;
+        if (placed === 1) say('竖直往上，别歪——歪了倒烟。');
+        if (placed === STRAIGHT) say('最后一节弯头，穿窗出去。');
+        if (placed >= STRAIGHT + 1) {
+          resting = true;
+          say('通了。烟有去处，火有脾气，这一冬屋子都是热的。', true);
+        }
+      }
+    }
+    for (var i = 0; i < pipes.length; i++) {
+      if (pipes[i].drop < 1) pipes[i].drop = Math.min(1, pipes[i].drop + dt * 4);
+    }
+    // 完成后墙外冒烟（从补段管口）
+    if (placed >= STRAIGHT + 1 && Math.random() < 0.3) {
+      smoke.push({
+        x: L.winX + L.winW * 0.86,
+        y: L.pathTop + L.segLen * 0.55,
+        vx: 14 + Math.random() * 12,
+        vy: -18 - Math.random() * 14,
+        life: 1.4 + Math.random() * 0.6
+      });
+    }
+    for (var si = smoke.length - 1; si >= 0; si--) {
+      var sp = smoke[si];
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.life -= dt;
+      if (sp.life <= 0) smoke.splice(si, 1);
+    }
+
+    // ── 背景：屋里一侧 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1015');
+    bg.addColorStop(1, '#141217');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    var fg = ctx.createRadialGradient(L.sx, L.floorY, 0, L.sx, L.floorY, L.sR * 3);
+    fg.addColorStop(0, 'rgba(224,150,80,0.1)');
+    fg.addColorStop(1, 'rgba(224,150,80,0)');
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 窗（墙洞通户外）──
+    ctx.fillStyle = '#241b12';
+    ctx.fillRect(L.winX - 12, L.winY - 12, L.winW + 24, L.winH + 24);
+    ctx.fillStyle = '#0a0e16';
+    ctx.fillRect(L.winX, L.winY, L.winW, L.winH);
+    // 窗外远山夜色
+    ctx.fillStyle = 'rgba(30,40,55,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(L.winX, L.winY + L.winH * 0.72);
+    ctx.quadraticCurveTo(L.winX + L.winW * 0.5, L.winY + L.winH * 0.5, L.winX + L.winW, L.winY + L.winH * 0.68);
+    ctx.lineTo(L.winX + L.winW, L.winY + L.winH);
+    ctx.lineTo(L.winX, L.winY + L.winH);
+    ctx.closePath();
+    ctx.fill();
+    // 一颗星
+    ctx.fillStyle = 'rgba(220,222,230,' + (0.4 + 0.3 * Math.sin(now / 700)) + ')';
+    ctx.fillRect(L.winX + L.winW * 0.24, L.winY + L.winH * 0.16, 2, 2);
+
+    // ── 炉子 ──
+    var sx = L.sx, sy = L.sy, sR = L.sR;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(sx, L.floorY + sR * 0.05, sR * 1.2, sR * 0.11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var bg2 = ctx.createLinearGradient(sx - sR, 0, sx + sR, 0);
+    bg2.addColorStop(0, '#26282c');
+    bg2.addColorStop(0.45, '#3d4046');
+    bg2.addColorStop(1, '#22242a');
+    ctx.fillStyle = bg2;
+    ctx.beginPath();
+    ctx.moveTo(sx - sR * 0.92, sy - sR * 1.05);
+    ctx.lineTo(sx - sR, sy + sR * 0.95);
+    ctx.lineTo(sx + sR, sy + sR * 0.95);
+    ctx.lineTo(sx + sR * 0.92, sy - sR * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    // 炉膛火光（未接管前有烟从炉口冒）
+    ctx.fillStyle = 'rgba(230,120,50,' + (0.5 - placed * 0.09) + ')';
+    ctx.beginPath();
+    ctx.ellipse(sx, sy - sR * 1.05, sR * 0.55, sR * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (placed < STRAIGHT + 1 && Math.random() < 0.12) {
+      smoke.push({
+        indoor: true,
+        x: sx + (Math.random() - 0.5) * sR * 0.5,
+        y: sy - sR * 1.1,
+        vx: (Math.random() - 0.5) * 16,
+        vy: -26 - Math.random() * 18,
+        life: 1
+      });
+    }
+
+    // 已装的管
+    for (var pi = 0; pi < pipes.length; pi++) {
+      var pp = pipes[pi];
+      var pop = 1 + Math.sin(Math.min(1, pp.drop) * Math.PI) * 0.08 * (1 - pp.drop);
+      drawPipeSeg(pp.x, pp.y, pp.len * pop, L.pipeR, pp.kind === 1, 1);
+    }
+    // 穿墙补段：弯头口 → 墙外出烟口
+    if (placed >= STRAIGHT + 1) {
+      var ex2 = L.pipeX + L.segLen * 0.62;
+      var ey2 = L.pathTop + L.segLen * 0.55;
+      var exEnd = L.winX + L.winW * 0.86;
+      var hg = ctx.createLinearGradient(0, ey2 - L.pipeR, 0, ey2 + L.pipeR);
+      hg.addColorStop(0, '#828a93');
+      hg.addColorStop(0.5, '#5a6169');
+      hg.addColorStop(1, '#4b5158');
+      ctx.fillStyle = hg;
+      ctx.fillRect(ex2, ey2 - L.pipeR, exEnd - ex2, L.pipeR * 2);
+      ctx.fillStyle = '#3d4248';
+      ctx.fillRect(ex2 + (exEnd - ex2) * 0.45, ey2 - L.pipeR * 1.12, (exEnd - ex2) * 0.1, L.pipeR * 2.24);
+      ctx.fillStyle = '#22252a';
+      ctx.beginPath();
+      ctx.ellipse(exEnd, ey2, L.pipeR * 0.3, L.pipeR, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 飞入中的管
+    if (flying) {
+      var t2 = flying.t;
+      var ex = flying.fx + (flying.tx - flying.fx) * t2;
+      var ey = flying.fy + (flying.ty - flying.fy) * t2 - Math.sin(t2 * Math.PI) * L.h * 0.08;
+      drawPipeSeg(ex, ey - L.segLen / 2, L.segLen, L.pipeR, flying.elbow, 0.85);
+    }
+    // 待装的管堆
+    var remain = STRAIGHT + 1 - placed - (flying ? 1 : 0);
+    for (var st2 = 0; st2 < remain; st2++) {
+      var sp2 = stackXY(st2);
+      drawPipeSeg(sp2.x, sp2.y - L.segLen * 0.5, L.segLen * 0.72, L.pipeR, st2 === 0 && placed >= STRAIGHT, st2 === 0 ? 1 : 0.75);
+    }
+    if (remain > 0) {
+      var pul = 0.5 + 0.5 * Math.sin(now / 480);
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(stackXY(0).x, L.floorY - L.sR * 0.3, L.pipeR * 1.7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 烟（屋内呛烟 + 完成后窗外炊烟）
+    for (var pj = 0; pj < smoke.length; pj++) {
+      var pq = smoke[pj];
+      ctx.globalAlpha = Math.min(0.45, pq.life * 0.35);
+      ctx.fillStyle = pq.indoor ? '#9aa0a8' : '#b8bec8';
+      ctx.beginPath();
+      ctx.arc(pq.x, pq.y, 4 + (1.6 - pq.life) * 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 引导
+    if (!saidStart && placed === 0 && !flying) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      var s0 = stackXY(0);
+      ctx.fillText('点一节烟囱管', s0.x, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再装一回', L.sx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实点击共用逻辑）
+  window.__pipe = {
+    placed: function () { return placed; },
+    done: function () { return resting; },
+    flying: function () { return flying ? 1 : 0; },
+    tap: function () {
+      if (resting || flying || placed >= STRAIGHT + 1) return;
+      var t = targetOf(placed);
+      var from = stackXY(placed);
+      flying = { fx: from.x, fy: from.y, tx: t.x, ty: t.y, t: 0, elbow: t.elbow };
+      saidStart = true;
+    }
+  };
+})();
+</script>
+</body>
+</html>

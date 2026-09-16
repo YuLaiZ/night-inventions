@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蒸馒头</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>蒸馒头</h1>
+  <p>睡前把面发上，夜里正好蒸一锅。<br>按住揉面，揉透上屉——汽圆了再揭盖，早上干粮就有了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var state = 0;        // 0 揉面 / 1 已上屉待蒸(点盖) / 2 蒸中 / 3 done(已揭盖)
+  var knead = 0;        // 揉面进度 0→1
+  var holding = false;
+  var steamT = 0;       // 蒸汽进度 0→1，>0.85 汽圆
+  var lidOn = false;
+  var lidT = 0;         // 揭盖动画 0→1
+  var openEarly = false;
+  var buns = [];        // 三个生胚 {ox, rot}
+  var saidStart = false;
+  var saidRound = false;
+  var resting = false;
+  var seed = 20260916;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.78;
+    L.cx = L.w * 0.5;
+    L.kR = Math.min(L.w * 0.17, L.h * 0.15, 135);   // 锅半径
+    L.ky = L.floorY - L.kR * 0.55;                  // 锅口高度
+    L.doughX = L.cx - L.kR * 1.9;
+    L.doughY = L.floorY - L.h * 0.035;
+    L.dR = L.kR * 0.34;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  (function () {
+    var rng = mulberry(seed);
+    for (var i = 0; i < 3; i++) {
+      buns.push({ ox: (i - 1) * 1.25, rot: rng() * 0.4 - 0.2, s: 0.95 + rng() * 0.12 });
+    }
+  })();
+
+  var flour = [];  // 面粉粒
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      state = 0; knead = 0; steamT = 0; lidOn = false; lidT = 0; openEarly = false;
+      saidStart = false; saidRound = false;
+      flour = [];
+      return;
+    }
+    if (state === 0) {
+      var dx = ev.clientX - L.doughX, dy = ev.clientY - L.doughY;
+      if (dx * dx + dy * dy < Math.pow(L.dR * 1.8, 2)) {
+        holding = true;
+        if (!saidStart) { saidStart = true; say('按住揉——三光：面光、手光、盆光。'); }
+      }
+    } else if (state === 1) {
+      var ddx = ev.clientX - L.cx, ddy = ev.clientY - (L.ky - L.kR * 0.55);
+      if (ddx * ddx + ddy * ddy < Math.pow(L.kR * 1.1, 2)) {
+        lidOn = true;
+        state = 2;
+        steamT = 0;
+        say('汽上来得一会儿——汽圆了再揭。');
+      }
+    } else if (state === 2 && steamT > 0.4) {
+      var ddx2 = ev.clientX - L.cx, ddy2 = ev.clientY - (L.ky - L.kR * 0.55);
+      if (ddx2 * ddx2 + ddy2 * ddy2 < Math.pow(L.kR * 1.1, 2)) {
+        openEarly = steamT < 0.85;
+        lidT = 0.001;
+        state = 3;
+        if (openEarly) {
+          say('早揭了半刻，馍还欠口气——不过也是香的。', true);
+        } else {
+          say('揭盖！白胖一顿馒头，早晨的干粮就有了。', true);
+        }
+        resting = true;
+      }
+    }
+  });
+  window.addEventListener('pointerup', function () { holding = false; });
+  window.addEventListener('pointercancel', function () { holding = false; });
+
+  var last = Date.now();
+  var puff = 0;
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (holding && state === 0 && knead < 1) {
+      knead = Math.min(1, knead + dt * 0.42);
+      if (Math.random() < 0.35) {
+        flour.push({
+          x: L.doughX + (Math.random() - 0.5) * L.dR * 2,
+          y: L.doughY - L.dR * 0.5,
+          vx: (Math.random() - 0.5) * 30,
+          vy: -20 - Math.random() * 30,
+          life: 0.8
+        });
+      }
+      if (knead >= 1) {
+        state = 1;
+        say('揉透了。团成剂子上屉，点锅盖。');
+      }
+    }
+    for (var fi = flour.length - 1; fi >= 0; fi--) {
+      var fp = flour[fi];
+      fp.x += fp.vx * dt; fp.y += fp.vy * dt; fp.vy += 60 * dt; fp.life -= dt;
+      if (fp.life <= 0) flour.splice(fi, 1);
+    }
+    if (state === 2) {
+      steamT = Math.min(1, steamT + dt * 0.16);
+      if (steamT > 0.85 && !saidRound) { saidRound = true; say('汽圆了——揭盖！'); }
+    }
+    if (lidT > 0 && lidT < 1) lidT = Math.min(1, lidT + dt * 2.5);
+
+    // ── 背景：灶间 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0d1014');
+    bg.addColorStop(1, '#151217');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 灶火余光
+    var fg = ctx.createRadialGradient(L.cx + L.kR * 0.6, L.floorY, 0, L.cx + L.kR * 0.6, L.floorY, L.kR * 2.4);
+    fg.addColorStop(0, 'rgba(224,150,80,0.1)');
+    fg.addColorStop(1, 'rgba(224,150,80,0)');
+    ctx.fillStyle = fg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 蒸锅（双屉）──
+    var kx = L.cx, ky = L.ky, kR = L.kR;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(kx, L.floorY + 4, kR * 1.12, kR * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 锅身
+    var pg = ctx.createLinearGradient(kx - kR, 0, kx + kR, 0);
+    pg.addColorStop(0, '#3a3d42');
+    pg.addColorStop(0.5, '#565b62');
+    pg.addColorStop(1, '#33363b');
+    ctx.fillStyle = pg;
+    ctx.fillRect(kx - kR, ky, kR * 2, L.floorY - ky);
+    // 屉沿两道
+    ctx.fillStyle = '#454a51';
+    ctx.fillRect(kx - kR * 1.04, ky - kR * 0.1, kR * 2.08, kR * 0.14);
+    ctx.fillRect(kx - kR * 1.02, ky + kR * 0.38, kR * 2.04, kR * 0.1);
+    // 屉缝
+    ctx.strokeStyle = 'rgba(20,22,26,0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(kx - kR, ky + kR * 0.05);
+    ctx.lineTo(kx + kR, ky + kR * 0.05);
+    ctx.stroke();
+
+    // 笼内馒头/生胚（揭盖后可见；盖着时看不见）
+    var showBuns = state === 3 && lidT > 0.55;
+    if (showBuns) {
+      for (var bi = 0; bi < buns.length; bi++) {
+        var bn = buns[bi];
+        var bx2 = kx + bn.ox * kR * 0.52;
+        var by2 = ky - kR * 0.18;
+        var br = kR * 0.3 * bn.s * (1 + (openEarly ? 0 : 0.1));
+        ctx.fillStyle = openEarly ? '#e6dcbf' : '#f4ecd8';
+        ctx.beginPath();
+        ctx.ellipse(bx2, by2, br, br * 0.78, bn.rot, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,250,238,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(bx2 - br * 0.3, by2 - br * 0.3, br * 0.22, br * 0.12, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 锅盖（lidOn 或未揭开时盖着；揭盖后滑向右上停在锅边）
+    var lidY = ky - kR * 0.1 - kR * 0.16;
+    if (state === 1 || state === 2 || state === 3) {
+      var lift = state === 3 ? Math.min(1, lidT) : 0;
+      var lx = kx + lift * kR * 1.28;
+      var ly2 = lidY - lift * kR * 0.28;
+      var lrot = lift * 0.35;
+      ctx.save();
+      ctx.translate(lx, ly2);
+      ctx.rotate(lrot);
+      var cg = ctx.createLinearGradient(0, -kR * 0.34, 0, 0);
+      cg.addColorStop(0, '#4c5158');
+      cg.addColorStop(1, '#33363b');
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, kR * 1.02, kR * 0.3, 0, Math.PI, Math.PI * 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(0, 0, kR * 1.02, kR * 0.3, 0, 0, Math.PI);
+      ctx.lineTo(-kR * 1.02, -kR * 0.05);
+      ctx.ellipse(0, -kR * 0.05, kR * 1.02, kR * 0.3, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      // 盖顶提钮
+      ctx.fillStyle = '#22252a';
+      ctx.beginPath();
+      ctx.arc(0, -kR * 0.42, kR * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 蒸汽（state2 或揭盖瞬间）
+    if (state >= 2) {
+      var sAmount = state === 2 ? steamT : Math.max(0, 1 - lidT);
+      puff += dt * 2;
+      for (var st2 = 0; st2 < 3; st2++) {
+        if (Math.random() < sAmount * 0.6) {
+          flour.push({
+            steam: true,
+            x: kx + (Math.random() - 0.5) * kR * 1.4,
+            y: ky - kR * 0.4,
+            vx: (Math.random() - 0.5) * 14,
+            vy: -30 - Math.random() * 26,
+            life: 1.2 + Math.random() * 0.5
+          });
+        }
+      }
+    }
+    for (var fj = flour.length - 1; fj >= 0; fj--) {
+      var fq = flour[fj];
+      fq.x += fq.vx * dt; fq.y += fq.vy * dt;
+      if (fq.steam) fq.life -= dt;
+      if (fq.life <= 0) { flour.splice(fj, 1); continue; }
+      if (fq.steam) {
+        ctx.globalAlpha = Math.min(0.5, fq.life * 0.4);
+        ctx.fillStyle = '#e8eaee';
+        ctx.beginPath();
+        ctx.arc(fq.x, fq.y, 4 + (1.2 - fq.life) * 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = 'rgba(230,222,200,' + Math.max(0, fq.life) + ')';
+        ctx.fillRect(fq.x, fq.y, 1.8, 1.8);
+      }
+    }
+
+    // ── 面团（state 0）──
+    if (state === 0) {
+      var squash = holding ? 1 + Math.sin(now / 130) * 0.06 : 0;
+      var dRough = 1 - knead * 0.55;
+      ctx.save();
+      ctx.translate(L.doughX, L.doughY);
+      var dg = ctx.createRadialGradient(-L.dR * 0.3, -L.dR * 0.4, L.dR * 0.2, 0, 0, L.dR * 1.2);
+      dg.addColorStop(0, '#efe6cd');
+      dg.addColorStop(1, '#d9c9a4');
+      ctx.fillStyle = dg;
+      ctx.beginPath();
+      // 粗糙边缘（揉前多折角，揉后圆润）
+      var rng2 = mulberry(7);
+      var n = 14;
+      for (var vi = 0; vi <= n; vi++) {
+        var va = vi / n * Math.PI * 2;
+        var rr = L.dR * (1 + (rng2() - 0.5) * 0.3 * dRough) * (1 + squash * Math.cos(va * 2));
+        var px2 = Math.cos(va) * rr * 1.15, py2 = Math.sin(va) * rr * 0.78;
+        if (vi === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      if (knead > 0 && knead < 1) {
+        ctx.strokeStyle = 'rgba(230,210,170,0.7)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(L.doughX, L.doughY, L.dR * 1.35, -Math.PI / 2, -Math.PI / 2 + knead * Math.PI * 2);
+        ctx.stroke();
+      }
+      if (knead < 1) {
+        var pul = 0.5 + 0.5 * Math.sin(now / 480);
+        ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(L.doughX, L.doughY, L.dR * 1.7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // 案板
+      ctx.fillStyle = '#4a3a26';
+      ctx.fillRect(L.doughX - L.dR * 2.2, L.doughY + L.dR * 0.75, L.dR * 4.4, L.h * 0.016);
+    }
+
+    // ── 上屉提示的三个剂子（state 1 隐含在笼内不可见，改画屉上三团虚影）──
+    if (state === 1) {
+      for (var sj = 0; sj < buns.length; sj++) {
+        var sb = buns[sj];
+        var sx3 = kx + sb.ox * kR * 0.52;
+        var sy3 = ky - kR * 0.18;
+        ctx.fillStyle = 'rgba(239,230,205,0.25)';
+        ctx.beginPath();
+        ctx.ellipse(sx3, sy3, kR * 0.28 * sb.s, kR * 0.22 * sb.s, sb.rot, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      var pul3 = 0.5 + 0.5 * Math.sin(now / 480);
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul3) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(kx, ky - kR * 0.3, kR * 1.14, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 引导
+    if (!saidStart && state === 0) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住面团揉', L.doughX, L.doughY - L.dR * 1.9);
+      ctx.textAlign = 'left';
+    }
+    if (resting && state === 3) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再蒸一锅', L.cx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用状态机）
+  window.__buns = {
+    state: function () { return state; },
+    knead: function () { return Math.round(knead * 100) / 100; },
+    steam: function () { return Math.round(steamT * 100) / 100; },
+    done: function () { return state === 3; },
+    holdDough: function () { holding = true; },
+    release: function () { holding = false; },
+    tapLid: function () {
+      if (state === 1) { lidOn = true; state = 2; steamT = 0; }
+      else if (state === 2 && steamT > 0.4) {
+        openEarly = steamT < 0.85;
+        lidT = 0.001; state = 3; resting = true;
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>封火</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>封火</h1>
+  <p>睡前两块煤压上去，风门一关——<br>火不灭，也不闹，留个种到明早，一拨就着。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 2;
+  var coalIn = 0;       // 已压煤数
+  var flying = null;    // 飞入的煤
+  var doorClosed = 0;   // 风门闭合 0→1
+  var dragging = false;
+  var dragX = 0;
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260916;
+  var settle = 0;       // 封好后暗火呼吸
+  var sparks = [];
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.78;
+    L.sx = L.w * 0.42;
+    L.sR = Math.min(L.w * 0.12, L.h * 0.12, 92);
+    L.sy = L.floorY - L.sR * 1.05;
+    L.coal0 = { x: L.sx + L.sR * 2.3, y: L.floorY - L.sR * 0.24 };
+    L.coal1 = { x: L.sx + L.sR * 2.95, y: L.floorY - L.sR * 0.1 };
+    L.doorX = L.sx + L.sR * 0.08;      // 风门滑板左缘起始
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function coalXY(i) { return i === 0 ? L.coal0 : L.coal1; }
+
+  function drawCoal(x, y, s, glow) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(s, s);
+    var rng = mulberry(13);
+    ctx.fillStyle = glow ? '#443d38' : '#37322e';
+    ctx.beginPath();
+    for (var i = 0; i <= 8; i++) {
+      var a = i / 8 * Math.PI * 2;
+      var rr = 15 + rng() * 5;
+      var px2 = Math.cos(a) * rr, py2 = Math.sin(a) * rr * 0.8;
+      if (i === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // 煤面亮纹
+    ctx.strokeStyle = 'rgba(190,178,165,0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-8, -4); ctx.lineTo(2, -9);
+    ctx.moveTo(-2, 4); ctx.lineTo(9, 1);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    if (resting) {
+      resting = false;
+      coalIn = 0; flying = null; doorClosed = 0; settle = 0;
+      saidStart = false;
+      seed = (seed * 16807 + 7) % 2147483647;
+      return;
+    }
+    if (coalIn < TOTAL) {
+      if (flying) return;
+      var c = coalXY(coalIn);
+      var dx = ev.clientX - c.x, dy = ev.clientY - c.y;
+      if (dx * dx + dy * dy < Math.pow(L.sR * 0.55, 2)) {
+        var t = { x: L.sx, y: L.sy - L.sR * 1.15 + coalIn * L.sR * 0.18 };
+        flying = { fx: c.x, fy: c.y, tx: t.x, ty: t.y, t: 0 };
+        if (!saidStart) { saidStart = true; say('两块煤轻轻压上去——别砸散了火。'); }
+      }
+    } else if (coalIn >= TOTAL && doorClosed < 1) {
+      // 拖风门滑板
+      var ddx = ev.clientX - (L.doorX + L.sR * 0.3 + doorClosed * L.sR * 0.6);
+      var ddy = ev.clientY - (L.sy + L.sR * 0.5);
+      if (ddx * ddx + ddy * ddy < Math.pow(L.sR * 0.7, 2)) {
+        dragging = true;
+        dragX = ev.clientX;
+      }
+    }
+  });
+  window.addEventListener('pointermove', function (ev) {
+    if (dragging) {
+      doorClosed = Math.max(0, Math.min(1, doorClosed + (ev.clientX - dragX) / (L.sR * 0.9)));
+      dragX = ev.clientX;
+    }
+  });
+  window.addEventListener('pointerup', function () {
+    if (dragging) {
+      dragging = false;
+      if (doorClosed >= 1) {
+        settle = 0.001;
+        resting = true;
+        say('封好了。火里留着种，明早一拨就着。', true);
+      } else if (doorClosed > 0.3) {
+        say('再往严里关——留条缝就行，别关死了。');
+      } else {
+        doorClosed = 0;
+      }
+    }
+  });
+  window.addEventListener('pointercancel', function () {
+    if (dragging) { dragging = false; if (doorClosed < 1) doorClosed = 0; }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (flying) {
+      flying.t += dt * 1.8;
+      if (flying.t >= 1) {
+        flying = null;
+        coalIn++;
+        if (coalIn === 1) say('好——再来一块，盖严实。');
+        if (coalIn >= TOTAL) say('煤压好了。最后关风门——往右推。');
+      }
+    }
+    if (settle > 0 && settle < 1) settle = Math.min(1, settle + dt * 0.8);
+    // 封好后的暗火呼吸
+    var ember = (settle > 0 ? 1 : 0) * (1 - doorClosed * 0.2);
+
+    // ── 背景：夜与炉光 ──
+    var warmth = coalIn >= TOTAL ? (1 - settle * 0.55) : 1;  // 封后环境光渐收
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mix('#0c0f14', '#17120d', 0.5 * warmth));
+    bg.addColorStop(1, mix('#111318', '#1c150e', 0.5 * warmth));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    var glowR = Math.min(w, h) * (0.5 - settle * 0.18);
+    var flick = 1 + Math.sin(now / 87) * 0.03 * warmth;
+    var g = ctx.createRadialGradient(L.sx, L.sy, 0, L.sx, L.sy, glowR * flick);
+    var gA = (coalIn >= TOTAL ? 0.16 - settle * 0.07 : 0.24) * flick;
+    g.addColorStop(0, 'rgba(226,130,60,' + Math.max(0.05, gA) + ')');
+    g.addColorStop(1, 'rgba(226,130,60,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+
+    // ── 炉子 ──
+    var sx = L.sx, sy = L.sy, sR = L.sR;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(sx, L.floorY + sR * 0.05, sR * 1.2, sR * 0.11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var bg2 = ctx.createLinearGradient(sx - sR, 0, sx + sR, 0);
+    bg2.addColorStop(0, '#26282c');
+    bg2.addColorStop(0.45, '#3d4046');
+    bg2.addColorStop(1, '#22242a');
+    ctx.fillStyle = bg2;
+    ctx.beginPath();
+    ctx.moveTo(sx - sR * 0.92, sy - sR * 1.05);
+    ctx.lineTo(sx - sR, sy + sR * 0.95);
+    ctx.lineTo(sx + sR, sy + sR * 0.95);
+    ctx.lineTo(sx + sR * 0.92, sy - sR * 1.05);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(12,14,18,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx - sR * 0.97, sy + sR * 0.2);
+    ctx.lineTo(sx + sR * 0.97, sy + sR * 0.2);
+    ctx.stroke();
+
+    // 炉口与火
+    var mouthY = sy - sR * 1.08;
+    ctx.fillStyle = '#131417';
+    ctx.beginPath();
+    ctx.ellipse(sx, mouthY, sR * 0.8, sR * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 火势：旺（煤前）→压煤渐小→封后暗红慢燃
+    var flameLv = coalIn >= TOTAL ? Math.max(0.12, 0.7 - settle * 0.6) * (1 - doorClosed * 0.5) : (0.75 + coalIn * 0.12);
+    if (flameLv > 0.06) {
+      var fh = sR * (0.32 + flameLv * 0.9);
+      var cols = [
+        ['rgba(226,120,52,', 'rgba(240,180,80,', 'rgba(250,232,180,'],
+        ['rgba(190,80,40,', 'rgba(220,120,55,', 'rgba(240,170,90,'],
+        ['rgba(140,50,30,', 'rgba(190,80,42,', 'rgba(226,120,60,']
+      ];
+      var ci2 = coalIn >= TOTAL ? (settle > 0.7 ? 2 : 1) : 0;
+      var cs = cols[ci2];
+      for (var li = 0; li < 3; li++) {
+        var s2 = 1 - li * 0.28;
+        var wob = Math.sin(now / (110 + li * 55) + li * 2) * 0.12;
+        var tip = fh * s2 * (1.45 + wob) + Math.sin(now / 190 + li) * fh * 0.1;
+        ctx.fillStyle = cs[li] + (0.85 - li * 0.05) + ')';
+        ctx.beginPath();
+        ctx.moveTo(sx, mouthY + fh * 0.14);
+        ctx.bezierCurveTo(sx - fh * s2 * 0.6, mouthY + fh * 0.06, sx - fh * s2 * 0.36, mouthY - tip * 0.55, sx + wob * fh * 0.5, mouthY - tip);
+        ctx.bezierCurveTo(sx + fh * s2 * 0.36, mouthY - tip * 0.55, sx + fh * s2 * 0.6, mouthY + fh * 0.06, sx, mouthY + fh * 0.14);
+        ctx.fill();
+      }
+      // 炉口亮
+      ctx.fillStyle = 'rgba(250,200,110,' + (0.25 + flameLv * 0.3) + ')';
+      ctx.beginPath();
+      ctx.ellipse(sx, mouthY, sR * 0.6 * flameLv + sR * 0.2, sR * 0.06, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 火星（旺火时）
+      if (flameLv > 0.4 && Math.random() < 0.2) {
+        sparks.push({ x: sx + (Math.random() - 0.5) * sR * 0.4, y: mouthY - fh, vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 30, life: 0.6 });
+      }
+    } else {
+      // 暗火：炉口一点暗红
+      var br2 = 0.3 + 0.12 * Math.sin(now / 1300);
+      ctx.fillStyle = 'rgba(200,80,40,' + 0.4 * br2 + ')';
+      ctx.beginPath();
+      ctx.ellipse(sx, mouthY, sR * 0.4, sR * 0.08, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 压入的煤（炉口内两块，封后渐暗）
+    for (var ci3 = 0; ci3 < coalIn; ci3++) {
+      ctx.save();
+      ctx.translate(sx + (ci3 - 0.5) * sR * 0.3, mouthY + sR * 0.04);
+      ctx.scale(0.55, 0.4);
+      ctx.fillStyle = settle > 0.8 ? '#26211f' : '#2a2523';
+      ctx.beginPath();
+      var rng3 = mulberry(13 + ci3);
+      for (var vi = 0; vi <= 8; vi++) {
+        var va = vi / 8 * Math.PI * 2;
+        var rr = 15 + rng3() * 5;
+        if (vi === 0) ctx.moveTo(Math.cos(va) * rr, Math.sin(va) * rr * 0.8);
+        else ctx.lineTo(Math.cos(va) * rr, Math.sin(va) * rr * 0.8);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 风门（炉门 + 滑板）
+    var doorSlotY = sy + sR * 0.5;
+    ctx.fillStyle = '#101114';
+    ctx.fillRect(sx - sR * 0.3, doorSlotY - sR * 0.18, sR * 0.6, sR * 0.36);
+    // 风门缝里的光（开着时透亮，关上渐熄）
+    var doorGlow = (coalIn >= TOTAL ? 0.3 - settle * 0.18 : 0.55) * (1 - doorClosed * 0.85);
+    if (doorGlow > 0.02) {
+      ctx.fillStyle = 'rgba(226,110,45,' + Math.max(0.03, doorGlow) + ')';
+      ctx.fillRect(sx - sR * 0.26, doorSlotY - sR * 0.14, sR * 0.52, sR * 0.28);
+    }
+    // 滑板
+    var slideX = sx - sR * 0.3 + doorClosed * sR * 0.6;
+    ctx.fillStyle = '#3a3e44';
+    ctx.fillRect(slideX, doorSlotY - sR * 0.18, sR * 0.6, sR * 0.36);
+    ctx.fillStyle = '#565b62';
+    ctx.fillRect(slideX + sR * 0.52, doorSlotY - sR * 0.04, sR * 0.08, sR * 0.08);
+    // 可拖呼吸圈
+    if (coalIn >= TOTAL && doorClosed < 1 && !resting) {
+      var pul = 0.5 + 0.5 * Math.sin(now / 480);
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(slideX + sR * 0.3, doorSlotY, sR * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 火星
+    for (var si = sparks.length - 1; si >= 0; si--) {
+      var sp = sparks[si];
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vy += 40 * dt; sp.life -= dt;
+      if (sp.life <= 0) { sparks.splice(si, 1); continue; }
+      ctx.globalAlpha = Math.max(0, sp.life * 1.5);
+      ctx.fillStyle = '#f0a050';
+      ctx.fillRect(sp.x, sp.y, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+
+    // ── 待压的煤（地上两块）──
+    if (coalIn < TOTAL) {
+      for (var ci4 = coalIn; ci4 < TOTAL; ci4++) {
+        var cp = coalXY(ci4);
+        drawCoal(cp.x, cp.y, 1, ci4 === coalIn);
+        if (ci4 === coalIn) {
+          var pul2 = 0.5 + 0.5 * Math.sin(now / 480);
+          ctx.strokeStyle = 'rgba(200,138,106,' + (0.2 + 0.3 * pul2) + ')';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(cp.x, cp.y, sR * 0.42, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+    // 飞入中的煤
+    if (flying) {
+      var ft = flying.t;
+      var fx2 = flying.fx + (flying.tx - flying.fx) * ft;
+      var fy2 = flying.fy + (flying.ty - flying.fy) * ft - Math.sin(ft * Math.PI) * sR * 1.2;
+      drawCoal(fx2, fy2, 0.6, false);
+    }
+
+    // 引导
+    if (!saidStart && coalIn === 0 && !flying) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点一块煤，压上火', L.coal0.x - sR * 0.2, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再封一回', sx, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function mix(c1, c2, t) {
+    function px(c) { return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]; }
+    var a = px(c1), b = px(c2);
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实事件共用状态机）
+  window.__bank = {
+    stage: function () { return coalIn >= TOTAL ? (doorClosed >= 1 ? 3 : 2) : coalIn; },
+    done: function () { return resting; },
+    tapCoal: function (i) {
+      if (coalIn < TOTAL && !flying && i === coalIn) {
+        var t = { x: L.sx, y: L.sy - L.sR * 1.15 + coalIn * L.sR * 0.18 };
+        var c = coalXY(i);
+        flying = { fx: c.x, fy: c.y, tx: t.x, ty: t.y, t: 0 };
+        saidStart = true;
+      }
+    },
+    closeDoor: function () {
+      if (coalIn >= TOTAL && doorClosed < 1) {
+        doorClosed = 1;
+        settle = 0.001;
+        resting = true;
+        say('封好了。火里留着种，明早一拨就着。', true);
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

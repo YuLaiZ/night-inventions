@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>码白菜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d1218;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #4a4a44;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c88a6a; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a6250; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c88a6a;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #565a54;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a6250;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a6250;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c88a6a; border-color: #c88a6a; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>码白菜</h1>
+  <p>一夜比一夜冷，楼下的白菜垛一天比一天高。<br>点一颗，码上去——斜着的朝里放，垛才立得住。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var TOTAL = 8;
+  var placed = [];      // 已码好的 {x, y, rot, s, t(落定动画)}
+  var flying = null;    // 正在飞入的一颗 {fx, fy, tx, ty, t, rot, s}
+  var saidStart = false;
+  var resting = false;
+  var seed = 20260915;
+
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  // 垛位：下 4、中 3、上 1（相对垛中心，单位=白菜半径）
+  var SLOTS = [
+    [-1.62, -0.18], [-0.54, -0.22], [0.54, -0.2], [1.62, -0.16],
+    [-1.05, -1.06], [0, -1.1], [1.05, -1.04],
+    [0, -1.92]
+  ];
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.floorY = L.h * 0.8;
+    L.px = L.w * 0.5;               // 垛中心
+    L.R = Math.min(L.w * 0.075, L.h * 0.075, 52);  // 白菜半径基准
+    L.py = L.floorY + L.R * 0.22;   // 垛底
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  function slotXY(i) {
+    return { x: L.px + SLOTS[i][0] * L.R, y: L.py + SLOTS[i][1] * L.R };
+  }
+
+  // 待码的白菜（右侧地上两三颗待用）
+  function supplyXY(i) {
+    var bx = Math.min(L.w - L.R * 1.4, L.px + L.R * 3.6);
+    return { x: bx + (i % 2) * L.R * 0.9, y: L.floorY - L.R * 0.1 - Math.floor(i / 2) * L.R * 0.7 };
+  }
+
+  function drawCabbage(x, y, rot, s, glow) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.scale(s, s);
+    var R = L.R;
+    // 白帮（下段）
+    ctx.fillStyle = '#dfe2d2';
+    ctx.beginPath();
+    ctx.ellipse(0, R * 0.3, R * 0.55, R * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 球叶（层叠）
+    var greens = ['#4e6a38', '#5d7c42', '#6f8f4e'];
+    for (var i = 0; i < 3; i++) {
+      ctx.fillStyle = greens[i];
+      ctx.beginPath();
+      ctx.ellipse((i - 1) * R * 0.16, -R * 0.18 + i * R * 0.1, R * (0.5 - i * 0.07), R * (0.62 - i * 0.1), (i - 1) * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 心叶
+    ctx.fillStyle = '#8aa85e';
+    ctx.beginPath();
+    ctx.ellipse(0, -R * 0.5, R * 0.16, R * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 根部泥痕
+    ctx.fillStyle = '#7a6248';
+    ctx.beginPath();
+    ctx.ellipse(0, R * 0.68, R * 0.18, R * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (glow) {
+      ctx.strokeStyle = 'rgba(200,138,106,' + (0.3 + 0.3 * glow) + ')';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 1.18, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function remaining() { return TOTAL - placed.length - (flying ? 1 : 0); }
+
+  canvas.addEventListener('pointerdown', function () {
+    if (resting) {
+      resting = false;
+      placed = [];
+      flying = null;
+      seed = (seed * 16807 + 7) % 2147483647;
+      rng = mulberry(seed);
+      saidStart = false;
+      return;
+    }
+    if (flying || resting) return;
+    if (placed.length + 1 > TOTAL) return;
+    var i = placed.length;
+    var to = slotXY(i);
+    var from = supplyXY(remaining() - 1 >= 0 ? Math.min(1, remaining() - 1) : 0);
+    flying = {
+      fx: from.x, fy: from.y, tx: to.x, ty: to.y,
+      t: 0, rot: rng() * 0.4 - 0.2, s: 0.92 + rng() * 0.16
+    };
+    if (!saidStart) { saidStart = true; say('根部朝里，斜的那面朝下——码得才稳。'); }
+  });
+
+  var last = Date.now();
+
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (flying) {
+      flying.t += dt * 1.6;
+      if (flying.t >= 1) {
+        placed.push({ x: flying.tx, y: flying.ty, rot: flying.rot, s: flying.s, t: 0.001 });
+        flying = null;
+        if (placed.length >= TOTAL) {
+          resting = true;
+          say('垛好了。压块油毡纸，能吃到开春。', true);
+        } else if (placed.length === TOTAL - 1) {
+          say('最后一颗——放顶上，心朝上。');
+        } else if (placed.length === 4) {
+          say('第二层收着点，往里错半颗。');
+        }
+      }
+    }
+    for (var i = 0; i < placed.length; i++) {
+      if (placed[i].t < 1) placed[i].t = Math.min(1, placed[i].t + dt * 4);
+    }
+
+    // ── 背景：夜里墙根 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c1016');
+    bg.addColorStop(1, '#12141a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙根（垛后一道暗墙裙）
+    ctx.fillStyle = '#171310';
+    ctx.fillRect(0, L.floorY - L.h * 0.16, w, L.h * 0.16);
+    ctx.fillStyle = 'rgba(122,96,62,0.18)';
+    ctx.fillRect(0, L.floorY - L.h * 0.16, w, 2);
+    // 地面
+    ctx.fillStyle = '#191410';
+    ctx.fillRect(0, L.floorY, w, h - L.floorY);
+    ctx.fillStyle = 'rgba(122,96,62,0.35)';
+    ctx.fillRect(0, L.floorY, w, 2);
+    // 一点凉月光
+    var mg = ctx.createRadialGradient(w * 0.78, h * 0.2, 0, w * 0.78, h * 0.2, Math.min(w, h) * 0.4);
+    mg.addColorStop(0, 'rgba(220,218,190,0.07)');
+    mg.addColorStop(1, 'rgba(220,218,190,0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 垛影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(L.px, L.py + L.R * 0.16, L.R * 3.1, L.R * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 待码的白菜
+    var rem = remaining();
+    for (var s2 = 0; s2 < Math.min(2, rem); s2++) {
+      var sp = supplyXY(s2);
+      var puls = 0.5 + 0.5 * Math.sin(now / 500);
+      drawCabbage(sp.x, sp.y, (s2 - 0.5) * 0.2, 0.95, s2 === 0 && !flying ? puls : 0);
+    }
+
+    // 已码好的
+    for (var i2 = 0; i2 < placed.length; i2++) {
+      var p2 = placed[i2];
+      var pop = 1 + Math.sin(Math.min(1, p2.t) * Math.PI) * 0.1 * (1 - p2.t);
+      drawCabbage(p2.x, p2.y, p2.rot, p2.s * pop, 0);
+    }
+    // 飞入中
+    if (flying) {
+      var t = flying.t;
+      var ex = flying.fx + (flying.tx - flying.fx) * t;
+      var ey = flying.fy + (flying.ty - flying.fy) * t - Math.sin(t * Math.PI) * L.R * 1.6;
+      drawCabbage(ex, ey, flying.rot + Math.sin(t * Math.PI) * 0.3, flying.s, 0);
+    }
+
+    // 引导
+    if (!saidStart && placed.length === 0 && !flying) {
+      ctx.fillStyle = 'rgba(200,138,106,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      var sp0 = supplyXY(0);
+      ctx.fillText('点一颗，码上垛', sp0.x - L.R * 1.6, sp0.y - L.R * 1.6);
+      ctx.textAlign = 'left';
+    }
+    if (resting) {
+      ctx.fillStyle = 'rgba(230,210,170,' + (0.34 + 0.16 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('再码一垛', L.px, L.floorY + 34);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实点击共用落位逻辑）
+  window.__stack = {
+    placed: function () { return placed.length; },
+    flying: function () { return flying ? 1 : 0; },
+    done: function () { return resting; },
+    tap: function () {
+      if (resting || flying) return;
+      if (placed.length >= TOTAL) return;
+      var i = placed.length;
+      var to = slotXY(i);
+      var from = supplyXY(Math.min(1, Math.max(0, remaining() - 1)));
+      flying = { fx: from.x, fy: from.y, tx: to.x, ty: to.y, t: 0, rot: rng() * 0.4 - 0.2, s: 0.92 + rng() * 0.16 };
+    }
+  };
+})();
+</script>
+</body>
+</html>
