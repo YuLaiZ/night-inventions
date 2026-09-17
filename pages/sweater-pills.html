@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>毛衣起球</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #14110e;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d8c6a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d8c6a8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d8c6a8; border-color: #d8c6a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>毛衣起球</h1>
+  <p>穿了一季的毛衣，袖口和腰边起了球。<br>一颗颗摘掉——明天还能体面地出门。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    var s = Math.min(L.w / 560, L.h / 800);
+    L.s = Math.max(0.55, Math.min(0.92, s));
+    L.cx = L.w / 2;
+    L.cy = L.h * 0.58;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // 毛衣几何（相对坐标，1 单位 = L.s * 100px ÷ 100）
+  function sweaterGeom() {
+    var u = L.s * 100;
+    return {
+      u: u,
+      bodyW: 3.4 * u, bodyH: 3.95 * u,         // 衣身（下摆罗纹作为底边）
+      shoulderY: -2.1 * u,
+      hemY: 2.1 * u,
+      sleeveW: 1.15 * u, sleeveLen: 2.6 * u,
+      cuffH: 0.5 * u,
+      neckW: 1.5 * u, neckH: 0.34 * u
+    };
+  }
+
+  // ── 毛球：坐标一律用「相对单位」（× g.u/100 = 像素偏移）──
+  var pills = [];
+  var picked = 0;
+  var total = 0;
+  var saidFirst = false;
+  var done = false;
+  var doneFired = false;
+  var pops = [];   // 摘掉的爆点动画
+
+  function spawnPills() {
+    pills = [];
+    picked = 0;
+    total = 0;
+    var zones = pillZones();
+    for (var z = 0; z < zones.length; z++) {
+      var zone = zones[z];
+      for (var i = 0; i < zone.n; i++) {
+        pills.push({
+          x: zone.x + (rng() - 0.5) * zone.w,
+          y: zone.y + (rng() - 0.5) * zone.h,
+          r: 1.6 + rng() * 2.2,
+          gone: false
+        });
+        total++;
+      }
+    }
+  }
+
+  function pillZones() {
+    // 摩擦区：左右袖口（跟随袖子旋转后的落点）、两侧腰、下摆；前胸随机散一片
+    return [
+      { x: -203, y: -6, w: 120, h: 90, n: 4 },    // 左袖口
+      { x: 203, y: -6, w: 120, h: 90, n: 4 },     // 右袖口
+      { x: -164, y: 0, w: 50, h: 210, n: 5 },     // 左腰
+      { x: 164, y: 0, w: 50, h: 210, n: 5 },      // 右腰
+      { x: 0, y: 182, w: 238, h: 40, n: 3 },      // 下摆
+      { x: (rng() - 0.5) * 170, y: (rng() - 0.5) * 210, w: 102, h: 105, n: 3 }  // 随机一片
+    ];
+  }
+
+  function pickAt(sx, sy) {
+    var g = sweaterGeom();
+    var px = sx - L.cx, py = sy - L.cy;
+    for (var i = 0; i < pills.length; i++) {
+      var p = pills[i];
+      if (p.gone) continue;
+      var dx = px - p.x * g.u / 100, dy = py - p.y * g.u / 100;
+      var rr = p.r * g.u / 100 + 14;
+      if (dx * dx + dy * dy < rr * rr) {
+        p.gone = true;
+        picked++;
+        pops.push({ x: sx, y: sy, born: Date.now() });
+        pillSound();
+        if (!saidFirst) { saidFirst = true; say('捏住，轻轻一揪——球就下来了。'); }
+        if (picked >= total && !doneFired) {
+          doneFired = true;
+          done = true;
+          setTimeout(function () {
+            say('摘完了。明天穿它出门——今晚你给它理了个发。', true);
+          }, 350);
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function pillSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 900 + rng() * 700;
+    g.gain.setValueAtTime(0.03, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.08);
+  }
+
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (done) return;
+    var hit = pickAt(ev.clientX, ev.clientY);
+    if (!hit && !saidFirst) say('找那些小绒球——袖口和腰边最多。');
+  });
+
+  // ── 绘制 ──
+  function ribbed(x, y, w, h, vertical) {
+    ctx.fillStyle = '#2a2620';
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 4);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(160,140,110,0.22)';
+    ctx.lineWidth = 1;
+    var step = 5;
+    if (vertical) {
+      for (var ix = x + 3; ix < x + w - 2; ix += step) {
+        ctx.beginPath(); ctx.moveTo(ix, y + 1); ctx.lineTo(ix, y + h - 1); ctx.stroke();
+      }
+    } else {
+      for (var iy = y + 3; iy < y + h - 2; iy += step) {
+        ctx.beginPath(); ctx.moveTo(x + 1, iy); ctx.lineTo(x + w - 1, iy); ctx.stroke();
+      }
+    }
+  }
+
+  function drawSweater(g, now) {
+    ctx.save();
+    ctx.translate(L.cx, L.cy);
+    var u = g.u;
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, g.hemY + 0.4 * u, g.bodyW * 0.5, 0.28 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 两袖（斜向下外的圆角长条）
+    var sleeveG = ctx.createLinearGradient(-g.bodyW / 2, 0, -g.bodyW / 2 - g.sleeveLen, 0);
+    sleeveG.addColorStop(0, '#4a4238');
+    sleeveG.addColorStop(1, '#37312a');
+    ctx.fillStyle = sleeveG;
+    ctx.save();
+    ctx.translate(-(g.bodyW / 2) + g.sleeveW * 0.15, g.shoulderY + 0.2 * u);
+    ctx.rotate(0.42);
+    ctx.beginPath();
+    ctx.roundRect(-g.sleeveW * 0.55, -0.15 * u, g.sleeveW, g.sleeveLen, g.sleeveW * 0.45);
+    ctx.fill();
+    // 左袖口罗纹
+    ribbed(-g.sleeveW * 0.5, g.sleeveLen - g.cuffH - 0.15 * u, g.sleeveW * 0.9, g.cuffH, true);
+    ctx.restore();
+    ctx.save();
+    ctx.translate((g.bodyW / 2) - g.sleeveW * 0.15, g.shoulderY + 0.2 * u);
+    ctx.rotate(-0.42);
+    var sleeveG2 = ctx.createLinearGradient(g.bodyW / 2, 0, g.bodyW / 2 + g.sleeveLen, 0);
+    sleeveG2.addColorStop(0, '#4a4238');
+    sleeveG2.addColorStop(1, '#37312a');
+    ctx.fillStyle = sleeveG2;
+    ctx.beginPath();
+    ctx.roundRect(-g.sleeveW * 0.45, -0.15 * u, g.sleeveW, g.sleeveLen, g.sleeveW * 0.45);
+    ctx.fill();
+    ribbed(-g.sleeveW * 0.4, g.sleeveLen - g.cuffH - 0.15 * u, g.sleeveW * 0.9, g.cuffH, true);
+    ctx.restore();
+
+    // 衣身
+    var bodyG = ctx.createLinearGradient(-g.bodyW / 2, 0, g.bodyW / 2, 0);
+    bodyG.addColorStop(0, '#403a31');
+    bodyG.addColorStop(0.5, '#4c443a');
+    bodyG.addColorStop(1, '#3a342c');
+    ctx.fillStyle = bodyG;
+    ctx.beginPath();
+    ctx.roundRect(-g.bodyW / 2, g.shoulderY, g.bodyW, g.bodyH, 0.4 * u);
+    ctx.fill();
+    // 针织纹理（细 V 纹，若隐若现）
+    ctx.strokeStyle = 'rgba(180,160,125,0.06)';
+    ctx.lineWidth = 1;
+    for (var row = g.shoulderY + 10; row < g.hemY - 6; row += 7) {
+      for (var col = -g.bodyW / 2 + 6; col < g.bodyW / 2 - 6; col += 6) {
+        ctx.beginPath();
+        ctx.moveTo(col, row + 5);
+        ctx.lineTo(col + 3, row);
+        ctx.lineTo(col + 6, row + 5);
+        ctx.stroke();
+      }
+    }
+    // 领口罗纹（贴着肩线）
+    ribbed(-g.neckW / 2, g.shoulderY + 2, g.neckW, g.neckH + 6, false);
+    ctx.fillStyle = '#191612';
+    ctx.beginPath();
+    ctx.ellipse(0, g.shoulderY + g.neckH / 2 + 5, g.neckW / 2 - 4, g.neckH / 2.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 下摆罗纹
+    ribbed(-g.bodyW / 2 + 4, g.hemY - g.cuffH, g.bodyW - 8, g.cuffH, false);
+
+    // 毛球（未摘的）
+    for (var i = 0; i < pills.length; i++) {
+      var p = pills[i];
+      if (p.gone) continue;
+      var px = p.x * u / 100, py = p.y * u / 100;
+      var pr = p.r * u / 100;
+      // 绒球本体：两三簇小圆
+      ctx.fillStyle = 'rgba(200,182,150,0.85)';
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(226,210,180,0.9)';
+      ctx.beginPath();
+      ctx.arc(px + pr * 0.35, py - pr * 0.3, pr * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var g = sweaterGeom();
+    var bg = ctx.createLinearGradient(0, 0, 0, L.h);
+    bg.addColorStop(0, '#151210');
+    bg.addColorStop(1, '#0e0c0a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, L.w, L.h);
+    drawSweater(g, now);
+
+    // 摘掉爆点
+    for (var i = pops.length - 1; i >= 0; i--) {
+      var pp = pops[i];
+      var age = (now - pp.born) / 1000;
+      if (age > 0.5) { pops.splice(i, 1); continue; }
+      var n = 4;
+      for (var k = 0; k < n; k++) {
+        var ang = k / n * Math.PI * 2 + pp.born;
+        var dist = age * 46;
+        ctx.fillStyle = 'rgba(210,192,158,' + (0.7 * (1 - age / 0.5)).toFixed(2) + ')';
+        ctx.beginPath();
+        ctx.arc(pp.x + Math.cos(ang) * dist, pp.y + Math.sin(ang) * dist, 2 * (1 - age), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 引导与进度
+    if (!saidFirst && !done) {
+      ctx.fillStyle = 'rgba(216,198,168,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点那些小绒球', L.w / 2, L.h - 86);
+      ctx.textAlign = 'left';
+    }
+    // 进度（纯数字等宽）
+    ctx.fillStyle = 'rgba(135,120,96,0.8)';
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText((total - picked) + ' / ' + total, L.w - 20, L.h - 44);
+    ctx.textAlign = 'left';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  spawnPills();
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__pill = {
+    left: function () { return total - picked; },
+    done: function () { return doneFired; },
+    pick: function () {
+      // 摘掉第一颗未摘的毛球（走真实路径）
+      for (var i = 0; i < pills.length; i++) {
+        if (!pills[i].gone) {
+          var g = sweaterGeom();
+          pickAt(L.cx + pills[i].x * g.u / 100, L.cy + pills[i].y * g.u / 100);
+          return true;
+        }
+      }
+      return false;
+    }
+  };
+})();
+</script>
+</body>
+</html>

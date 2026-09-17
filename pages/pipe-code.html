@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暖气管敲暗号</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #100e0c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d8c6a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d8c6a8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d8c6a8; border-color: #d8c6a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>暖气管敲暗号</h1>
+  <p>后半夜的暖气管，整栋楼连成一根。<br>敲两下试试——楼上没准也醒着。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    // 两根竖管（窄屏靠边，让开文案）
+    L.pipeL = L.w * (L.w < 640 ? 0.18 : 0.30);
+    L.pipeR = L.w * (L.w < 640 ? 0.82 : 0.70);
+    L.pipeW = Math.max(24, Math.min(46, L.w * 0.024));
+    L.topY = L.h * 0.21;           // 顶部横管
+    L.radiatorTop = L.h * 0.64;    // 散热器顶
+    L.radiatorH = L.h * 0.22;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态机：idle → tapping → waiting → replying ──
+  var phase = 'idle';
+  var myTaps = [];          // 我敲的 {at}
+  var replyTaps = [];       // 邻居回应 {at, x, tone}
+  var lastTapAt = 0;
+  var replyTimer = null;
+  var roundCount = 0;       // 收到回应的轮数
+  var learnedCode = false;  // 学会了晚安暗号
+  var saidFirst = false, saidReply = false, saidCode = false, saidJazz = false;
+  var ripples = [];         // 敲击波纹 {x, y, born, mine}
+
+  // roundRect 兼容（老内核退化）
+  if (!ctx.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+      r = Math.min(r, w / 2, h / 2);
+      this.moveTo(x + r, y);
+      this.arcTo(x + w, y, x + w, y + h, r);
+      this.arcTo(x + w, y + h, x, y + h, r);
+      this.arcTo(x, y + h, x, y, r);
+      this.arcTo(x, y, x + w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // 识别玩家敲的「两长一短」晚安：4 击、间隔 [长,长,短]（与邻居回应同款）
+  function isGoodnightPattern(taps) {
+    if (taps.length !== 4) return false;
+    var d = [];
+    for (var i = 1; i < taps.length; i++) d.push(taps[i] - taps[i - 1]);
+    return d[0] >= 450 && d[0] <= 1150 &&
+      d[1] >= 450 && d[1] <= 1150 &&
+      d[2] > 60 && d[2] < 430;
+  }
+
+  function inPipe(x, y) {
+    var halfW = L.pipeW * 1.6;
+    var nearL = Math.abs(x - L.pipeL) < halfW;
+    var nearR = Math.abs(x - L.pipeR) < halfW;
+    return (nearL || nearR) && y > L.topY;
+  }
+
+  function knockSound(muffled) {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    // 金属管敲击：高频正弦快衰减 + 噪声瞬态
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = muffled ? 620 + rng() * 160 : 1650 + rng() * 500;
+    g.gain.setValueAtTime(muffled ? 0.05 : 0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (muffled ? 0.14 : 0.09));
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.16);
+    var buf = AC.createBufferSource();
+    var nb = AC.createBuffer(1, AC.sampleRate * 0.03, AC.sampleRate);
+    var d = nb.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    buf.buffer = nb;
+    var ng = AC.createGain();
+    ng.gain.setValueAtTime(muffled ? 0.012 : 0.022, t);
+    var lp = AC.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = muffled ? 700 : 2600;
+    buf.connect(lp); lp.connect(ng); ng.connect(AC.destination);
+    buf.start(t);
+  }
+
+  function doKnock(x, y, mine) {
+    ripples.push({ x: x, y: y, born: Date.now(), mine: mine });
+    knockSound(!mine);
+  }
+
+  // ── 邻居的回应 ──
+  function scheduleReply() {
+    phase = 'waiting';
+    var mode;
+    if (isGoodnightPattern(myTaps)) {
+      mode = 'goodnight';          // 玩家敲对了暗号
+    } else {
+      var roll = rng();
+      mode = roll < 0.42 ? 'echo' : (roll < 0.75 ? 'code' : 'jazz');
+    }
+    var delay = 900 + rng() * 1600;
+    replyTimer = setTimeout(function () { reply(mode); }, delay);
+  }
+
+  function reply(mode) {
+    phase = 'replying';
+    roundCount++;
+    var now = Date.now();
+    var side = rng() < 0.5 ? L.pipeL : L.pipeR;
+    if (mode === 'echo' && myTaps.length > 0) {
+      for (var i = 0; i < myTaps.length; i++) {
+        (function (k, dt) {
+          setTimeout(function () {
+            doKnock(side, L.h * (0.3 + rng() * 0.18), false);
+          }, dt);
+        })(i, myTaps[i] - myTaps[0]);
+      }
+      say('回了！楼上那位，学你呢。');
+    } else if (mode === 'code' || mode === 'goodnight') {
+      // 两长一短：这栋楼的老暗号
+      var sideX = rng() < 0.5 ? L.pipeL : L.pipeR;
+      [0, 700, 1450, 1800].forEach(function (dt) {
+        setTimeout(function () {
+          doKnock(sideX, L.h * (0.28 + rng() * 0.2), false);
+        }, dt);
+      });
+      if (mode === 'goodnight') {
+        learnedCode = true;
+        say('收到。楼上回了同样的两长一短——晚安，替你带到了。', true);
+      } else if (!learnedCode) {
+        learnedCode = true;
+        say('两长一短——是这栋楼的老暗号，晚安的意思。', true);
+      } else {
+        say('楼上回了个晚安。');
+      }
+    } else {
+      // 即兴：完全不搭的一段
+      var n = 2 + (rng() * 4 | 0);
+      var gap = 160 + rng() * 200;
+      for (var j = 0; j < n; j++) {
+        setTimeout(function () {
+          doKnock(side, L.h * (0.25 + rng() * 0.25), false);
+        }, j * gap);
+      }
+      say('今晚的回应有点即兴——楼上大概换了个睡不着的人。');
+    }
+    // 回应结束后回到 idle
+    setTimeout(function () {
+      phase = 'idle';
+      myTaps = [];
+    }, 2600);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (phase === 'replying' || phase === 'waiting') {
+      // 回应期间也允许插话，但不记录
+      if (inPipe(ev.clientX, ev.clientY)) doKnock(ev.clientX, ev.clientY, true);
+      return;
+    }
+    if (!inPipe(ev.clientX, ev.clientY)) {
+      if (!saidFirst) say('找那两根铁管子——竖着的，烫手的那根。');
+      return;
+    }
+    var now = Date.now();
+    if (phase === 'waiting') {
+      // 重新开聊：取消上一段还没到的回应
+      if (replyTimer) { clearTimeout(replyTimer); replyTimer = null; }
+      myTaps = [];
+      phase = 'tapping';
+    }
+    if (now - lastTapAt > 1600 && myTaps.length > 0) {
+      myTaps = [];   // 上一段已超时
+    }
+    lastTapAt = now;
+    myTaps.push(now);
+    doKnock(ev.clientX, ev.clientY, true);
+    if (myTaps.length === 1 && !saidFirst) {
+      saidFirst = true;
+      say('敲了。竖管传声最远——楼上楼下，全在这根铁里。');
+    }
+    if (phase !== 'tapping') phase = 'tapping';
+    if (replyTimer) clearTimeout(replyTimer);
+    // 停顿 1.6 秒视为一段敲完
+    replyTimer = setTimeout(function () {
+      if (myTaps.length >= 1) scheduleReply();
+    }, 1650);
+  });
+
+  // ── 声音底座 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) { AC = null; }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#12100d');
+    bg.addColorStop(1, '#0b0a08');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙面细颗粒
+    ctx.fillStyle = 'rgba(200,180,140,0.02)';
+    for (var gi = 0; gi < 40; gi++) {
+      var gx = (gi * 197 + (seed % 97)) % w, gy = (gi * 131 + 53) % h;
+      ctx.fillRect(gx, gy, 2, 2);
+    }
+
+    function drawPipe(x) {
+      // 管影
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(x - L.pipeW / 2 + 5, L.topY - 90, L.pipeW, h);
+      // 管身（暖色微温感）：向上穿出楼板，通到楼上
+      var pg = ctx.createLinearGradient(x - L.pipeW / 2, 0, x + L.pipeW / 2, 0);
+      pg.addColorStop(0, '#4a3c2e');
+      pg.addColorStop(0.35, '#7a6650');
+      pg.addColorStop(0.6, '#8d7860');
+      pg.addColorStop(1, '#3e332a');
+      ctx.fillStyle = pg;
+      ctx.fillRect(x - L.pipeW / 2, L.topY - 90, L.pipeW, h);
+      // 高光
+      ctx.fillStyle = 'rgba(240,220,180,0.14)';
+      ctx.fillRect(x - L.pipeW / 2 + L.pipeW * 0.18, L.topY - 90, L.pipeW * 0.14, h);
+      // 管箍
+      ctx.fillStyle = '#5c4c3a';
+      ctx.fillRect(x - L.pipeW / 2 - 3, h * 0.42, L.pipeW + 6, 10);
+      ctx.fillRect(x - L.pipeW / 2 - 3, h * 0.56, L.pipeW + 6, 10);
+    }
+    drawPipe(L.pipeL);
+    drawPipe(L.pipeR);
+
+    // 顶部横管（连通两根竖管，向上即通到楼上）
+    var hg = ctx.createLinearGradient(0, L.topY, 0, L.topY + L.pipeW);
+    hg.addColorStop(0, '#6b5945');
+    hg.addColorStop(1, '#463a2d');
+    ctx.fillStyle = hg;
+    ctx.fillRect(L.pipeL - L.pipeW / 2, L.topY, L.pipeR - L.pipeL + L.pipeW, L.pipeW);
+    ctx.fillStyle = 'rgba(240,220,180,0.1)';
+    ctx.fillRect(L.pipeL - L.pipeW / 2, L.topY + L.pipeW * 0.18, L.pipeR - L.pipeL + L.pipeW, L.pipeW * 0.14);
+    // 楼板线（横管之上：声音就是穿过去找楼上人的）
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, L.topY - 14, w, 4);
+
+    // 阀门手轮（横管中央）
+    var vx = (L.pipeL + L.pipeR) / 2, vy = L.topY + L.pipeW / 2;
+    ctx.strokeStyle = '#8a4030';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(vx, vy + 34, 22, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#6e3527';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(vx, vy);
+    ctx.lineTo(vx, vy + 14);
+    ctx.stroke();
+
+    // 柱式散热器（下方，两管之间）：一排竖圆柱，柱身带凹槽，上下横箱压住
+    var radX = L.pipeL + L.pipeW, radW = L.pipeR - L.pipeL - L.pipeW;
+    var colW = Math.max(34, Math.min(60, radW / Math.max(4, Math.round(radW / 46))));
+    var cols = Math.floor(radW / colW);
+    var radW2 = cols * colW;
+    var radX2 = (L.pipeL + L.pipeR - radW2) / 2;
+    for (var ci = 0; ci < cols; ci++) {
+      var cx = radX2 + ci * colW;
+      var cg = ctx.createLinearGradient(cx, 0, cx + colW, 0);
+      cg.addColorStop(0, '#443726');
+      cg.addColorStop(0.32, '#7d6950');
+      cg.addColorStop(0.55, '#8d7860');
+      cg.addColorStop(1, '#3a3026');
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.roundRect(cx + 2, L.radiatorTop, colW - 4, L.radiatorH, colW * 0.28);
+      ctx.fill();
+      // 柱身竖凹槽（两道暗线，铸铁柱式散热器的样子）
+      ctx.strokeStyle = 'rgba(20,14,8,0.4)';
+      ctx.lineWidth = 2;
+      for (var fl = 1; fl <= 2; fl++) {
+        ctx.beginPath();
+        ctx.moveTo(cx + colW * (0.3 + fl * 0.18), L.radiatorTop + 8);
+        ctx.lineTo(cx + colW * (0.3 + fl * 0.18), L.radiatorTop + L.radiatorH - 8);
+        ctx.stroke();
+      }
+    }
+    // 散热器上下横箱（盖住柱端）
+    var boxG = ctx.createLinearGradient(0, L.radiatorTop - 12, 0, L.radiatorTop + 12);
+    boxG.addColorStop(0, '#7d6950');
+    boxG.addColorStop(1, '#4a3c2e');
+    ctx.fillStyle = boxG;
+    ctx.fillRect(radX2 - 8, L.radiatorTop - 10, radW2 + 16, 18);
+    ctx.fillRect(radX2 - 8, L.radiatorTop + L.radiatorH - 8, radW2 + 16, 18);
+    ctx.fillStyle = 'rgba(240,220,180,0.1)';
+    ctx.fillRect(radX2 - 8, L.radiatorTop - 8, radW2 + 16, 3);
+    ctx.fillRect(radX2 - 8, L.radiatorTop + L.radiatorH - 6, radW2 + 16, 3);
+
+    // 敲击波纹
+    for (var ri = ripples.length - 1; ri >= 0; ri--) {
+      var rp = ripples[ri];
+      var age = (now - rp.born) / 1000;
+      if (age > 0.9) { ripples.splice(ri, 1); continue; }
+      var rr2 = 8 + age * 46;
+      var aa = (1 - age / 0.9) * (rp.mine ? 0.5 : 0.42);
+      ctx.strokeStyle = rp.mine ? 'rgba(240,214,160,' + aa.toFixed(3) + ')' : 'rgba(190,210,235,' + aa.toFixed(3) + ')';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(rp.x, rp.y, rr2, 0, Math.PI * 2);
+      ctx.stroke();
+      // 管身亮一下
+      if (age < 0.25) {
+        ctx.fillStyle = (rp.mine ? 'rgba(240,214,160,' : 'rgba(190,210,235,') + (0.18 * (1 - age / 0.25)).toFixed(3) + ')';
+        var px = rp.x - L.pipeW;
+        ctx.fillRect(px, rp.y - 30, L.pipeW * 2, 60);
+      }
+    }
+
+    // 引导（放中部空区，避开底部 caption）
+    if (!saidFirst) {
+      ctx.fillStyle = 'rgba(216,198,168,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('敲敲那两根竖管', w / 2, h * 0.36);
+      ctx.textAlign = 'left';
+    }
+    if (learnedCode && phase === 'idle') {
+      ctx.fillStyle = 'rgba(190,210,235,' + (0.2 + 0.1 * Math.sin(now / 640)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('两长一短，回个晚安', w / 2, h * 0.36 + 24);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__knock = {
+    taps: function () { return myTaps.length; },
+    rounds: function () { return roundCount; },
+    phase: function () { return phase; },
+    learned: function () { return learnedCode; },
+    tap: function () {
+      var now = Date.now();
+      myTaps.push(now);
+      lastTapAt = now;
+      doKnock(L.pipeL, L.h * 0.4, true);
+    },
+    forceReply: function (mode) {
+      if (replyTimer) clearTimeout(replyTimer);
+      reply(mode || (rng() < 0.5 ? 'code' : 'echo'));
+    },
+    lastPattern: function () {
+      var d = [];
+      for (var i = 1; i < myTaps.length; i++) d.push(myTaps[i] - myTaps[i - 1]);
+      return { n: myTaps.length, d: d, phase: phase };
+    }
+  };
+})();
+</script>
+</body>
+</html>

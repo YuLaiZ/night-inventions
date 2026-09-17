@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>掀笼布</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #10131a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #94a3b0;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #ccd8e2; margin-bottom: 12px; padding-left: 0.28em;
+    text-shadow: 0 1px 10px rgba(10,14,20,0.55);
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #76838e; letter-spacing: 0.08em; text-shadow: 0 1px 8px rgba(10,14,20,0.5); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #ccd8e2;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+    text-shadow: 0 1px 8px rgba(10,14,20,0.5);
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #48525c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #76838e;
+    text-decoration: none;
+    border-bottom: 1px dotted #76838e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #ccd8e2; border-color: #ccd8e2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>掀笼布</h1>
+  <p>天蒙蒙亮，头一件事：给鸟掀笼布。<br>按住布，往上掀——它醒了，这一天就算开了头。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 640, L.h / 720)));
+    L.cx = L.w / 2;
+    L.cy = L.h * 0.52;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var lift = 0;             // 0 罩着 → 1 全掀
+  var dragging = false;
+  var dragY0 = 0, lift0 = 0;
+  var revealed = false;     // 掀过半（鸟露面）
+  var sang = false;         // 开口叫过
+  var hops = 0;             // 抖毛次数
+  var hopT = 0;             // 抖毛动画计时
+  var notes = [];           // 鸣叫音符涟漪 {x, y, born, freq}
+  var skyBright = 0;        // 天光亮度加成 0..1
+  var saidLift = false, saidReveal = false;
+  var doneFired = false;
+  var R = 0;
+
+  function calcR() { R = 150 * L.s; }
+  calcR();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired && lift >= 1) return;
+    dragging = true;
+    dragY0 = ev.clientY;
+    lift0 = lift;
+    if (!saidLift) { saidLift = true; say('攥住布角，往上掀——轻点，它胆小。'); }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+    var dy = dragY0 - ev.clientY;
+    lift = Math.max(0, Math.min(1, lift0 + dy / (R * 0.9)));
+    if (!revealed && lift > 0.55) {
+      revealed = true;
+      hops = 2;
+      hopT = 0.001;
+      skyBright = 0.6;
+      if (!saidReveal) { saidReveal = true; say('露面了。抖抖毛——缓一缓，就开口。'); }
+    }
+    if (revealed && lift >= 0.95 && !sang) {
+      sang = true;
+      startSinging();
+    }
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+  window.addEventListener('pointercancel', function () { dragging = false; });
+
+  function startSinging() {
+    doneFired = true;
+    skyBright = 1;
+    var n = 0;
+    function next() {
+      if (n >= 4) return;
+      n++;
+      notes.push({ x: L.cx + (rng() - 0.5) * R * 0.7, y: L.cy - 60 * L.s - rng() * 40, born: Date.now(), freq: 0 });
+      birdsong();
+      setTimeout(next, 420 + rng() * 480);
+    }
+    setTimeout(function () {
+      say('叫了。这一天，是它叫开的。', true);
+      next();
+    }, 500);
+  }
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function birdsong() {
+    if (!AC || AC.state !== 'running') return;
+    var t0 = AC.currentTime;
+    var chirps = 2 + (rng() * 2 | 0);
+    for (var c = 0; c < chirps; c++) {
+      var t = t0 + c * 0.09;
+      var o = AC.createOscillator();
+      var g = AC.createGain();
+      o.type = 'sine';
+      var f = 2700 + rng() * 1500;
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * (1.25 + rng() * 0.2), t + 0.05);
+      g.gain.setValueAtTime(0.028, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+      o.connect(g); g.connect(AC.destination);
+      o.start(t); o.stop(t + 0.08);
+    }
+  }
+  function clothSwish() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.2;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.2);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var bp = AC.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = 0.8;
+    var g = AC.createGain();
+    g.gain.value = 0.03;
+    src.connect(bp); bp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  var lastSwishAt = 0;
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcR();
+
+    if (dragging && lift < 1) {
+      if (now - lastSwishAt > 220) { lastSwishAt = now; clothSwish(); }
+    }
+    if (hopT > 0 && hopT < 1) hopT += dt / 0.5;
+
+    // ── 绘制 ──
+    // 天光（掀开越多越亮）
+    var dawn = 0.25 + lift * 0.35 + skyBright * 0.4;
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mixRGB([16, 20, 28], [92, 118, 150], dawn));
+    bg.addColorStop(0.7, mixRGB([13, 15, 20], [140, 142, 140], dawn * 0.9));
+    bg.addColorStop(1, mixRGB([10, 11, 14], [110, 104, 92], dawn * 0.8));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 窗外微光斑（掀开后天光）
+    if (lift > 0.3) {
+      var gl = ctx.createRadialGradient(w * 0.78, h * 0.24, 0, w * 0.78, h * 0.24, w * 0.4);
+      gl.addColorStop(0, 'rgba(220,215,190,' + (0.1 * lift + 0.06 * skyBright).toFixed(2) + ')');
+      gl.addColorStop(1, 'rgba(220,215,190,0)');
+      ctx.fillStyle = gl;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 五斗柜（笼子座）
+    var cabTop = L.cy + R * 0.72;
+    ctx.fillStyle = mixRGB([36, 28, 20], [86, 66, 46], dawn * 0.7);
+    ctx.fillRect(L.cx - R * 1.35, cabTop, R * 2.7, h - cabTop);
+    ctx.fillStyle = 'rgba(220,200,160,0.1)';
+    ctx.fillRect(L.cx - R * 1.35, cabTop, R * 2.7, 4);
+    // 柜面两条屉缝
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(L.cx - R * 1.1, cabTop + 34 * L.s);
+    ctx.lineTo(L.cx + R * 1.1, cabTop + 34 * L.s);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(L.cx - R * 1.1, cabTop + 78 * L.s);
+    ctx.lineTo(L.cx + R * 1.1, cabTop + 78 * L.s);
+    ctx.stroke();
+
+    // 笼子（圆笼：笼身竖丝+顶钩）
+    var cageTop = L.cy - R * 0.78;
+    var cageBot = cabTop + 2;
+    // 笼内（掀开越彻底，天光透进越多）
+    var innerDark = 0.82 - lift * 0.55;
+    ctx.fillStyle = 'rgba(22,18,13,' + innerDark.toFixed(2) + ')';
+    ctx.beginPath();
+    ctx.ellipse(L.cx, L.cy, R * 0.94, R * 0.86, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (lift > 0.2) {
+      var innerG = ctx.createRadialGradient(L.cx + R * 0.3, L.cy - R * 0.4, R * 0.05, L.cx, L.cy, R);
+      innerG.addColorStop(0, 'rgba(200,205,190,' + (0.16 * lift).toFixed(2) + ')');
+      innerG.addColorStop(1, 'rgba(200,205,190,0)');
+      ctx.fillStyle = innerG;
+      ctx.beginPath();
+      ctx.ellipse(L.cx, L.cy, R * 0.94, R * 0.86, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 栖杆
+    ctx.strokeStyle = '#6a5232';
+    ctx.lineWidth = 5 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(L.cx - R * 0.6, L.cy + R * 0.22);
+    ctx.lineTo(L.cx + R * 0.6, L.cy + R * 0.22);
+    ctx.stroke();
+
+    // 鸟（掀开过半才画）
+    if (revealed) {
+      var hopY = hopT > 0 && hopT < 1 ? -Math.sin(hopT * Math.PI) * 14 * L.s : 0;
+      var bob = sang ? Math.sin(now / 240) * 2.4 * L.s : Math.sin(now / 600) * 1.2 * L.s;
+      var bx = L.cx + Math.sin(now / 900) * 5 * L.s;
+      var by = L.cy + R * 0.22 - 13 * L.s + bob + hopY;
+      // 身体（绣眼：橄榄绿背、黄白腹、白眼圈）
+      ctx.fillStyle = '#7a8f4a';
+      ctx.beginPath();
+      ctx.ellipse(bx, by, 15 * L.s, 12 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 头
+      ctx.fillStyle = '#85984e';
+      ctx.beginPath();
+      ctx.arc(bx + 11 * L.s, by - 8 * L.s, 8 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+      // 腹部
+      ctx.fillStyle = '#e8dfae';
+      ctx.beginPath();
+      ctx.ellipse(bx + 2 * L.s, by + 4 * L.s, 10 * L.s, 7 * L.s, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      // 眼圈（绣眼标志）
+      ctx.fillStyle = '#f2f0e4';
+      ctx.beginPath();
+      ctx.arc(bx + 14 * L.s, by - 9 * L.s, 4.2 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1a1a14';
+      ctx.beginPath();
+      ctx.arc(bx + 14.5 * L.s, by - 9 * L.s, 1.9 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+      // 喙
+      ctx.strokeStyle = '#3c3428';
+      ctx.lineWidth = 2 * L.s;
+      ctx.beginPath();
+      ctx.moveTo(bx + 18 * L.s, by - 9 * L.s);
+      ctx.lineTo(bx + 25 * L.s, by - 7.4 * L.s);
+      ctx.stroke();
+      // 尾羽
+      ctx.strokeStyle = '#5c6c3a';
+      ctx.lineWidth = 3.4 * L.s;
+      ctx.beginPath();
+      ctx.moveTo(bx - 13 * L.s, by - 2 * L.s);
+      ctx.lineTo(bx - 24 * L.s, by - 8 * L.s);
+      ctx.stroke();
+      // 爪
+      ctx.strokeStyle = '#4a4038';
+      ctx.lineWidth = 1.8 * L.s;
+      ctx.beginPath();
+      ctx.moveTo(bx - 2 * L.s, by + 11 * L.s);
+      ctx.lineTo(bx - 2 * L.s, by + R * 0.22 - 13 * L.s + 2);
+      ctx.moveTo(bx + 5 * L.s, by + 11 * L.s);
+      ctx.lineTo(bx + 5 * L.s, by + R * 0.22 - 13 * L.s + 2);
+      ctx.stroke();
+      // 抖毛羽毛屑
+      if (hopT > 0.2 && hopT < 0.8) {
+        ctx.fillStyle = 'rgba(200,205,160,0.5)';
+        for (var fi = 0; fi < 5; fi++) {
+          var fa = fi * 1.3 + hopT * 6;
+          ctx.beginPath();
+          ctx.arc(bx + Math.cos(fa) * 26 * L.s, by + Math.sin(fa) * 18 * L.s - hopT * 30, 1.4 * L.s, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // 笼丝（竖弧线，罩在内容之上，布掀开后可见）
+    var wireA = 0.25 + lift * 0.65;
+    ctx.strokeStyle = 'rgba(58,48,36,' + wireA.toFixed(2) + ')';
+    ctx.lineWidth = 2.2 * L.s;
+    for (var wi = -5; wi <= 5; wi++) {
+      var wx2 = L.cx + wi / 5 * R * 0.88;
+      var bulge = Math.sqrt(Math.max(0, 1 - Math.pow(wi / 5, 2))) * R * 0.1;
+      ctx.beginPath();
+      ctx.ellipse(wx2, (cageTop + cageBot) / 2 - bulge, R * 0.06, (cageBot - cageTop) / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 顶与底圈
+    ctx.strokeStyle = 'rgba(76,62,44,' + wireA.toFixed(2) + ')';
+    ctx.lineWidth = 4 * L.s;
+    ctx.beginPath();
+    ctx.ellipse(L.cx, cageTop + 6, R * 0.9, R * 0.13, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(L.cx, cageBot - 4, R * 0.98, R * 0.14, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 顶钩
+    ctx.strokeStyle = 'rgba(76,62,44,' + wireA.toFixed(2) + ')';
+    ctx.lineWidth = 3.4 * L.s;
+    ctx.beginPath();
+    ctx.arc(L.cx, cageTop - 22 * L.s, 12 * L.s, Math.PI * 0.8, Math.PI * 2.1);
+    ctx.stroke();
+
+    // 笼布（lift 0=全罩 1=全掀：布顶边随 lift 上收）
+    var clothH = (cageBot - cageTop + 30 * L.s) * (1 - lift);
+    if (clothH > 4) {
+      var clothTop = cageBot + 14 * L.s - clothH;
+      var clothG = ctx.createLinearGradient(L.cx - R, 0, L.cx + R, 0);
+      clothG.addColorStop(0, mixRGB([30, 38, 52], [58, 70, 92], dawn));
+      clothG.addColorStop(0.5, mixRGB([38, 48, 64], [74, 88, 110], dawn));
+      clothG.addColorStop(1, mixRGB([26, 32, 44], [52, 62, 82], dawn));
+      ctx.fillStyle = clothG;
+      ctx.beginPath();
+      ctx.moveTo(L.cx - R * 1.02, clothTop);
+      ctx.lineTo(L.cx + R * 1.02, clothTop);
+      ctx.quadraticCurveTo(L.cx + R * 1.12, clothTop + clothH * 0.5, L.cx + R * 1.0, cageBot + 14 * L.s);
+      ctx.lineTo(L.cx - R * 1.0, cageBot + 14 * L.s);
+      ctx.quadraticCurveTo(L.cx - R * 1.12, clothTop + clothH * 0.5, L.cx - R * 1.02, clothTop);
+      ctx.closePath();
+      ctx.fill();
+      // 布褶（竖向条）
+      ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+      ctx.lineWidth = 2;
+      for (var fi = -3; fi <= 3; fi++) {
+        ctx.beginPath();
+        ctx.moveTo(L.cx + fi * R * 0.26, clothTop + 4);
+        ctx.quadraticCurveTo(L.cx + fi * R * 0.3, clothTop + clothH * 0.55, L.cx + fi * R * 0.24, cageBot + 12 * L.s);
+        ctx.stroke();
+      }
+      // 布顶边
+      ctx.strokeStyle = 'rgba(180,195,215,0.2)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(L.cx - R * 1.02, clothTop);
+      ctx.lineTo(L.cx + R * 1.02, clothTop);
+      ctx.stroke();
+    }
+
+    // 音符涟漪
+    for (var ni = notes.length - 1; ni >= 0; ni--) {
+      var no = notes[ni];
+      var nAge = (now - no.born) / 1400;
+      if (nAge > 1) { notes.splice(ni, 1); continue; }
+      ctx.strokeStyle = 'rgba(225,232,205,' + (0.7 * (1 - nAge)).toFixed(2) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(no.x, no.y - nAge * 46, 6 + nAge * 22, 0, Math.PI * 2);
+      ctx.stroke();
+      // 小音符点
+      ctx.fillStyle = 'rgba(225,232,205,' + (0.85 * (1 - nAge)).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.ellipse(no.x + 10 + nAge * 12, no.y - nAge * 46 - 4, 3, 2.2, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (!saidLift) {
+      ctx.fillStyle = 'rgba(204,216,226,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住笼布，往上掀', L.cx, L.cy + R + 70 * L.s);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function mixRGB(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__bird = {
+    lift: function () { return +lift.toFixed(2); },
+    revealed: function () { return revealed; },
+    sang: function () { return sang; },
+    done: function () { return doneFired; },
+    drag: function (toLift) {
+      // 直接把布掀到指定程度（走同一条状态推进）
+      var t0 = lift;
+      lift = Math.max(0, Math.min(1, toLift));
+      if (!revealed && lift > 0.55) {
+        revealed = true;
+        hops = 2;
+        hopT = 0.001;
+        skyBright = 0.6;
+        if (!saidReveal) { saidReveal = true; say('露面了。抖抖毛——缓一缓，就开口。'); }
+      }
+      if (revealed && lift >= 0.95 && !sang) {
+        sang = true;
+        startSinging();
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

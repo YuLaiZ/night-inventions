@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拍西瓜</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #101210;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #9aa392;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #cfd8c2; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a846e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #cfd8c2;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4c5346;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a846e;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a846e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #cfd8c2; border-color: #cfd8c2; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>拍西瓜</h1>
+  <p>熟不熟，拍拍才知道。<br>拍三下听听声——敢拍板，就切。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1, Math.min(L.w / 640, L.h / 720)));
+    L.cx = L.w * 0.42;
+    L.cy = L.h * 0.58;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var ripeness = 0.3 + rng() * 0.65;   // 熟度（每局随机）
+  var taps = 0;
+  var cut = false;
+  var cutT = 0;                         // 切开动画 0..1
+  var shock = 0;                        // 拍击震颤
+  var saidFirst = false;
+  var doneFired = false;
+  var flash = 0;
+  var knifeSwing = 0;
+  var juiceSeeds = [];                  // 切开时迸的瓜汁点
+
+  var MELON_R = 0;
+  function calcR() { MELON_R = 120 * L.s; }
+  calcR();
+
+  function melonHit(px, py) {
+    var dx = px - L.cx, dy = py - L.cy;
+    return dx * dx + dy * dy < (MELON_R * 1.15) * (MELON_R * 1.15);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired && cutT >= 1) {
+      // 重开一局
+      ripeness = 0.3 + rng() * 0.65;
+      taps = 0;
+      cut = false;
+      cutT = 0;
+      doneFired = false;
+      juiceSeeds = [];
+      say('新瓜到位。这次……听仔细点。');
+      return;
+    }
+    if (cut) return;
+    if (melonHit(ev.clientX, ev.clientY)) {
+      taps++;
+      shock = 1;
+      flash = 1;
+      tapSound(ripeness);
+      if (taps === 1) {
+        saidFirst = true;
+        say(ripeness > 0.6 ? '嘭嘭的——声音闷，有戏。' : '梆梆的——脆了点。再拍拍。');
+      } else if (taps === 2) {
+        say(ripeness > 0.6 ? '还是闷的。稳了。' : '还是脆。心里有点没底了。');
+      } else if (taps === 3) {
+        say('三下拍了。敢拍板，就切——点刀。');
+      } else {
+        say(ripeness > 0.6 ? '闷响，拍的次数不嫌多。' : '越拍越心虚。要不要赌一把？');
+      }
+    } else if (ev.clientX > L.cx + MELON_R && ev.clientY < L.cy + 40 * L.s && taps >= 3) {
+      cutMelon();
+    }
+  });
+
+  function cutMelon() {
+    cut = true;
+    cutT = 0.001;
+    knifeSwing = 1;
+    // 瓜汁迸点
+    for (var i = 0; i < 22; i++) {
+      var a = -Math.PI / 2 + (rng() - 0.5) * 2.4;
+      var v = 60 + rng() * 140;
+      juiceSeeds.push({ x: L.cx, y: L.cy - 10, vx: Math.cos(a) * v * (rng() < 0.5 ? -1 : 1) * 0.6, vy: Math.sin(a) * v, born: Date.now() + i * 30 });
+    }
+    cutSound(ripeness);
+  }
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function tapSound(ripe) {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    // 低频闷响（熟）与高频清响（生）按熟度混合
+    var o1 = AC.createOscillator();
+    var g1 = AC.createGain();
+    o1.frequency.value = 160 + ripe * 60;
+    g1.gain.setValueAtTime(0.06 + ripe * 0.05, t);
+    g1.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o1.connect(g1); g1.connect(AC.destination);
+    o1.start(t); o1.stop(t + 0.17);
+    var o2 = AC.createOscillator();
+    var g2 = AC.createGain();
+    o2.frequency.value = 620 + (1 - ripe) * 500;
+    g2.gain.setValueAtTime(0.05 * (1 - ripe) + 0.012, t);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    o2.connect(g2); g2.connect(AC.destination);
+    o2.start(t); o2.stop(t + 0.07);
+  }
+  function cutSound(ripe) {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.setValueAtTime(200, t);
+    o.frequency.exponentialRampToValueAtTime(60, t + 0.2);
+    g.gain.setValueAtTime(0.09, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.23);
+    if (ripe > 0.6) {
+      var o2 = AC.createOscillator();
+      var g2 = AC.createGain();
+      o2.frequency.value = 900 + rng() * 300;
+      g2.gain.setValueAtTime(0.02, t + 0.05);
+      g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      o2.connect(g2); g2.connect(AC.destination);
+      o2.start(t + 0.05); o2.stop(t + 0.16);
+    }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcR();
+    shock = Math.max(0, shock - dt * 3.5);
+    flash = Math.max(0, flash - dt * 3);
+    knifeSwing = Math.max(0, knifeSwing - dt * 2.2);
+    if (cut && cutT < 1) cutT = Math.min(1, cutT + dt * 1.4);
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#111411');
+    bg.addColorStop(1, '#0a0d0a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 案板
+    var boardG = ctx.createLinearGradient(0, L.cy + MELON_R * 0.6, 0, h);
+    boardG.addColorStop(0, 'rgba(40,34,22,0)');
+    boardG.addColorStop(0.4, '#282216');
+    boardG.addColorStop(1, '#1a1509');
+    ctx.fillStyle = boardG;
+    ctx.fillRect(0, L.cy + MELON_R * 0.6, w, h);
+
+    var shakeX = Math.sin(now / 28) * shock * 5;
+
+    if (!cut) {
+      // 整瓜
+      ctx.save();
+      ctx.translate(L.cx + shakeX, L.cy);
+      var squash = 1 - shock * 0.06;
+      ctx.scale(1 / squash, squash);
+      // 影
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath();
+      ctx.ellipse(0, MELON_R * 0.92, MELON_R * 0.95, MELON_R * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 瓜身
+      var mg = ctx.createRadialGradient(-MELON_R * 0.35, -MELON_R * 0.4, MELON_R * 0.15, 0, 0, MELON_R);
+      mg.addColorStop(0, '#3f6e35');
+      mg.addColorStop(0.6, '#2e5428');
+      mg.addColorStop(1, '#1d3a1c');
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.arc(0, 0, MELON_R, 0, Math.PI * 2);
+      ctx.fill();
+      // 墨绿条纹（弧形带）
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, MELON_R, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(16,36,18,0.75)';
+      ctx.lineWidth = 14 * L.s;
+      for (var st = -2; st <= 2; st++) {
+        ctx.beginPath();
+        var sx = st * MELON_R * 0.42;
+        ctx.moveTo(sx * 0.75, -MELON_R);
+        ctx.quadraticCurveTo(sx * 1.35, 0, sx * 0.75, MELON_R);
+        ctx.stroke();
+      }
+      ctx.restore();
+      // 高光
+      ctx.fillStyle = 'rgba(220,240,210,0.14)';
+      ctx.beginPath();
+      ctx.ellipse(-MELON_R * 0.38, -MELON_R * 0.42, MELON_R * 0.26, MELON_R * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+      // 瓜藤
+      ctx.strokeStyle = '#4a5c2e';
+      ctx.lineWidth = 5 * L.s;
+      ctx.beginPath();
+      ctx.moveTo(0, -MELON_R + 2);
+      ctx.quadraticCurveTo(12 * L.s, -MELON_R - 14 * L.s, 26 * L.s, -MELON_R - 8 * L.s);
+      ctx.stroke();
+      ctx.restore();
+      // 拍击光圈
+      if (flash > 0) {
+        ctx.strokeStyle = 'rgba(220,235,200,' + (0.5 * flash).toFixed(2) + ')';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(L.cx, L.cy, MELON_R * (1 + (1 - flash) * 0.3), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      // 切开：两半分开
+      var sep = cutT * MELON_R * 0.55;
+      var tilt = cutT * 0.12;
+      // 左半（朝里倒）
+      ctx.save();
+      ctx.translate(L.cx - shakeX - sep, L.cy + 6);
+      ctx.rotate(-tilt);
+      drawHalf(-1, now);
+      ctx.restore();
+      // 右半
+      ctx.save();
+      ctx.translate(L.cx - shakeX + sep, L.cy + 6);
+      ctx.rotate(tilt * 0.6);
+      drawHalf(1, now);
+      ctx.restore();
+      // 瓜汁
+      for (var ji = juiceSeeds.length - 1; ji >= 0; ji--) {
+        var js = juiceSeeds[ji];
+        var age = (now - js.born) / 1000;
+        if (age < 0) continue;
+        if (age > 1.1) { juiceSeeds.splice(ji, 1); continue; }
+        var jx = js.x + js.vx * age;
+        var jy = js.y + js.vy * age + 220 * age * age;
+        var rj = (1 - age / 1.1) * 3.4;
+        if (rj > 0) {
+          ctx.fillStyle = 'rgba(226,80,70,' + (0.8 * (1 - age / 1.1)).toFixed(2) + ')';
+          ctx.beginPath();
+          ctx.arc(jx, jy, rj, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // 刀（右侧，切开时挥下）
+    var knifeX = L.cx + MELON_R * 1.7;
+    var knifeY = L.cy - 40 * L.s;
+    ctx.save();
+    ctx.translate(knifeX, knifeY);
+    ctx.rotate(-0.5 + knifeSwing * 1.1);
+    // 刀柄
+    ctx.fillStyle = '#4a3826';
+    ctx.beginPath();
+    ctx.roundRect(-10 * L.s, 0, 20 * L.s, 54 * L.s, 6 * L.s);
+    ctx.fill();
+    // 刀身
+    ctx.fillStyle = '#9aa6ae';
+    ctx.beginPath();
+    ctx.moveTo(-9 * L.s, 0);
+    ctx.lineTo(-9 * L.s, -108 * L.s);
+    ctx.quadraticCurveTo(4 * L.s, -122 * L.s, 26 * L.s, -104 * L.s);
+    ctx.lineTo(9 * L.s, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fillRect(-4 * L.s, -100 * L.s, 3, 92 * L.s);
+    ctx.restore();
+
+    // 提示
+    if (!doneFired) {
+      var hint = cut ? '' : (taps >= 3 ? '点刀，切' : '拍拍瓜身');
+      if (hint) {
+        ctx.fillStyle = 'rgba(207,216,194,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+      // 拍击计数（等宽）
+      ctx.fillStyle = 'rgba(122,132,110,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('拍了 ' + taps + ' 下', w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function drawHalf(side, now) {
+    // 半圆剖面：外壳+瓤+籽
+    var R = MELON_R;
+    ctx.save();
+    ctx.scale(side, 1);
+    // 瓜皮底
+    ctx.fillStyle = '#2e5428';
+    ctx.beginPath();
+    ctx.arc(0, 0, R, -Math.PI / 2, Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+    // 白皮层
+    ctx.fillStyle = '#dfe8cc';
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.92, -Math.PI / 2, Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+    // 瓤（按熟度）
+    var r2 = Math.max(0.15, ripeness);
+    var flesh = r2 > 0.6 ? '#d8483e' : (r2 > 0.45 ? '#e08a76' : '#f0e3d0');
+    ctx.fillStyle = flesh;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.84, -Math.PI / 2, Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+    if (r2 > 0.6) {
+      // 红瓤的沙瓤纹理
+      ctx.fillStyle = 'rgba(180,40,36,0.35)';
+      for (var i = 0; i < 8; i++) {
+        var a = -1.3 + i * 0.35;
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * R * (0.3 + i % 3 * 0.16), Math.sin(a) * R * (0.3 + i % 2 * 0.2), R * 0.07, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 籽
+    if (r2 > 0.45) {
+      ctx.fillStyle = r2 > 0.6 ? '#241a12' : '#8a7a5e';
+      for (var sd = 0; sd < 7; sd++) {
+        var sa = -1.25 + sd * 0.42;
+        var srr = R * (0.42 + (sd % 3) * 0.13);
+        ctx.save();
+        ctx.translate(Math.cos(sa) * srr, Math.sin(sa) * srr);
+        ctx.rotate(sa + Math.PI / 2);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 2.6 * L.s, 4.4 * L.s, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+    // 剖面高光
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.7, -Math.PI / 2, Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // 成就判定（切开即结算一次）
+    if (!doneFired && cutT > 0.5) {
+      doneFired = true;
+      if (ripeness > 0.6) {
+        say('熟了。红瓤沙籽——今晚的甜是拍出来的。', true);
+      } else if (ripeness > 0.45) {
+        say('半生不熟。凑合吃，别浪费。点瓜再开一个。', true);
+      } else {
+        say('生的。怪不得那么脆。点瓜，再赌一个。', true);
+      }
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__melon = {
+    taps: function () { return taps; },
+    ripeness: function () { return +ripeness.toFixed(2); },
+    cut: function () { return cut; },
+    done: function () { return doneFired; },
+    tap: function () {
+      taps++;
+      shock = 1; flash = 1;
+      tapSound(ripeness);
+      recountNotNeeded();
+    },
+    forceCut: function () { if (!cut) cutMelon(); }
+  };
+  function recountNotNeeded() { /* 拍击无结算，占位保持钩子形状 */ }
+})();
+</script>
+</body>
+</html>

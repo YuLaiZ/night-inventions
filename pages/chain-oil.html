@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给自行车链条上油</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0f1012;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #97a0a8;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #ccd4da; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #6f7880; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #ccd4da;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454b52;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #6f7880;
+    text-decoration: none;
+    border-bottom: 1px dotted #6f7880;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #ccd4da; border-color: #ccd4da; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给自行车链条上油</h1>
+  <p>链条干涩了一路，回家的最后一件事——给它喂口油。<br>点链条滴油，按住转踏板，让每一节都吃到。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    var s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 620, L.h / 620)));
+    L.s = s;
+    // 后轮（飞轮）与 前齿盘
+    L.wheelR = 150 * s;
+    L.wx = L.w * 0.32;
+    L.wy = L.h * 0.55;
+    L.cogR = 34 * s;                 // 飞轮
+    L.cx2 = L.w * 0.62;
+    L.cy2 = L.h * 0.55;
+    L.chainR = 62 * s;               // 前齿盘
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+    buildPath();
+  });
+
+  // ── 链条路径：跑道形（上斜线 → 齿盘右半圆 → 下斜线 → 飞轮左半圆）──
+  var path = [];      // 采样点 {x, y, ang}
+  var STEP = 7;       // 链节长（px）
+
+  function buildPath() {
+    path = [];
+    // 飞轮顶切点 → 齿盘顶切点 → 齿盘右半圆 → 齿盘底切点 → 飞轮底切点 → 飞轮左半圆 → 闭合
+    var t1x = L.wx, t1y = L.wy - L.cogR;              // 飞轮顶
+    var t2x = L.cx2, t2y = L.cy2 - L.chainR;          // 齿盘顶
+    var b1x = L.wx, b1y = L.wy + L.cogR;              // 飞轮底
+    var b2x = L.cx2, b2y = L.cy2 + L.chainR;          // 齿盘底
+
+    function seg(x1, y1, x2, y2) {
+      var d = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+      var n = Math.max(2, Math.round(d / STEP));
+      var ang = Math.atan2(y2 - y1, x2 - x1);
+      for (var i = 0; i < n; i++) {
+        var t = i / n;
+        path.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t, ang: ang });
+      }
+    }
+    function arcRight(cx3, cy3, r) {
+      // 右半圆：从顶(−π/2) 经 0 到底(π/2)
+      var steps = Math.max(6, Math.round(Math.PI * r / STEP));
+      for (var i = 0; i < steps; i++) {
+        var a = -Math.PI / 2 + Math.PI * i / steps;
+        path.push({ x: cx3 + Math.cos(a) * r, y: cy3 + Math.sin(a) * r, ang: a + Math.PI / 2 });
+      }
+    }
+    function arcLeft(cx3, cy3, r) {
+      // 左半圆：从底(π/2) 经 π 到顶(3π/2 即 −π/2)
+      var steps = Math.max(6, Math.round(Math.PI * r / STEP));
+      for (var i = 0; i < steps; i++) {
+        var a = Math.PI / 2 + Math.PI * i / steps;
+        path.push({ x: cx3 + Math.cos(a) * r, y: cy3 + Math.sin(a) * r, ang: a + Math.PI / 2 });
+      }
+    }
+    seg(t1x, t1y, t2x, t2y);        // 上边（向右）
+    arcRight(L.cx2, L.cy2, L.chainR);
+    seg(b2x, b2y, b1x, b1y);        // 下边（向左）
+    arcLeft(L.wx, L.wy, L.cogR);
+    buildClosed();
+  }
+
+  function buildClosed() {
+    // 沿整条闭合折线按 STEP 匀速重采样（消除段间破口）
+    var pts = path.slice();
+    pts.push({ x: pts[0].x, y: pts[0].y, ang: pts[0].ang });
+    var res = [];
+    var acc = 0;
+    var need = STEP;
+    var prev = pts[0];
+    for (var i = 1; i < pts.length; i++) {
+      var cur = pts[i];
+      var dx = cur.x - prev.x, dy = cur.y - prev.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d === 0) continue;
+      while (acc + d >= need) {
+        var t = (need - acc) / d;
+        res.push({
+          x: prev.x + dx * t,
+          y: prev.y + dy * t,
+          ang: Math.atan2(dy, dx)
+        });
+        need += STEP;
+      }
+      acc += d;
+      prev = cur;
+    }
+    if (res.length > 10) path = res;
+  }
+
+  buildPath();
+
+  // 链节状态
+  var links = path.map(function () { return 0; });   // oil 0..1
+  var N = links.length;
+
+  // ── 状态 ──
+  var phase = 0;          // 踏板角
+  var spinning = false;
+  var omega = 0;          // rad/s
+  var progress = 0;       // 0..1 油亮比例
+  var doneFired = false;
+  var saidFirst = false;
+  var saidSpin = false;
+  var oilDrops = [];      // 油滴动画 {x, y, ty, born}
+  var dripFx = [];        // 滴油闪光 {idx, born}
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    var px = ev.clientX, py = ev.clientY;
+    // 找最近链节
+    var best = -1, bd = 40 * L.s;
+    for (var i = 0; i < path.length; i++) {
+      var dx = path[i].x - px, dy = path[i].y - py;
+      var d2 = dx * dx + dy * dy;
+      if (d2 < bd * bd) { bd = d2; best = i; }
+    }
+    if (best >= 0) {
+      drip(best, px, py);
+    } else {
+      // 按住空白处 = 转踏板
+      spinning = true;
+    }
+  });
+  window.addEventListener('pointerup', function () { spinning = false; });
+  window.addEventListener('pointercancel', function () { spinning = false; });
+
+  function drip(idx, px, py) {
+    links[idx] = 1;
+    if (links[(idx + 1) % N] < 0.7) links[(idx + 1) % N] = 0.7;
+    if (links[(idx - 1 + N) % N] < 0.7) links[(idx - 1 + N) % N] = 0.7;
+    if (links[(idx + 2) % N] < 0.4) links[(idx + 2) % N] = 0.4;
+    if (links[(idx - 2 + N) % N] < 0.4) links[(idx - 2 + N) % N] = 0.4;
+    oilDrops.push({ x: px, y: py - 120 * L.s, ty: py, born: Date.now(), idx: idx });
+    dripFx.push({ idx: idx, born: Date.now() });
+    dripSound();
+    if (!saidFirst) { saidFirst = true; say('嗒。链条的第一口油。'); }
+    recount();
+  }
+
+  function recount() {
+    var oiled = 0;
+    for (var i = 0; i < N; i++) if (links[i] > 0.5) oiled++;
+    progress = oiled / N;
+    if (progress >= 0.6 && !doneFired) {
+      doneFired = true;
+      setTimeout(function () {
+        say('喝饱了。明天一蹬，它比谁都轻快。', true);
+      }, 300);
+    }
+  }
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  var lastTickAt = 0;
+  function chainTick() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    if (t - lastTickAt < 0.03) return;
+    lastTickAt = t;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 2400 + rng() * 600;
+    g.gain.setValueAtTime(links[Math.floor(rng() * N)] > 0.5 ? 0.012 : 0.02, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.04);
+  }
+  function dripSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.setValueAtTime(900, t);
+    o.frequency.exponentialRampToValueAtTime(300, t + 0.09);
+    g.gain.setValueAtTime(0.04, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.11);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 转速
+    var targetW = spinning ? 3.4 : 0;
+    omega += (targetW - omega) * Math.min(1, dt * 2.5);
+    phase += omega * dt;
+    // 链条随踏板走：相位（按前齿盘线速度）
+    chainPhase += omega * L.chainR * dt / STEP;
+
+    // 链节节拍声（转起来才有）
+    if (omega > 0.5) {
+      tickAcc += omega * dt;
+      if (tickAcc > 0.55) { tickAcc = 0; chainTick(); }
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#101114');
+    bg.addColorStop(1, '#0a0b0d');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 地面
+    ctx.fillStyle = '#16171a';
+    ctx.fillRect(0, L.wy + L.wheelR * 0.86, w, h);
+    ctx.fillStyle = 'rgba(160,175,190,0.06)';
+    ctx.fillRect(0, L.wy + L.wheelR * 0.86, w, 2);
+
+    // 后轮
+    ctx.strokeStyle = '#3f454c';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(L.wx, L.wy, L.wheelR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#2b3036';
+    ctx.lineWidth = 1.4;
+    var spokeBase = phase * L.chainR / L.cogR;
+    for (var sp = 0; sp < 12; sp++) {
+      var sa = spokeBase + sp / 12 * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(L.wx, L.wy);
+      ctx.lineTo(L.wx + Math.cos(sa) * L.wheelR * 0.94, L.wy + Math.sin(sa) * L.wheelR * 0.94);
+      ctx.stroke();
+    }
+    // 轮毂
+    ctx.fillStyle = '#4a5158';
+    ctx.beginPath();
+    ctx.arc(L.wx, L.wy, 9 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 挡泥板弧（示意车架）
+    ctx.strokeStyle = '#3a4046';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(L.wx, L.wy, L.wheelR + 8, -Math.PI * 0.85, -Math.PI * 0.25);
+    ctx.stroke();
+    // 车架斜梁（示意）
+    ctx.strokeStyle = '#444b52';
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(L.cx2 - 26 * L.s, L.cy2 - 10 * L.s);
+    ctx.lineTo(L.wx + L.wheelR * 0.72, L.wy - L.wheelR * 0.62);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(L.cx2 - 20 * L.s, L.cy2 + 18 * L.s);
+    ctx.lineTo(L.wx + 8, L.wy + 4);
+    ctx.stroke();
+
+    // 飞轮
+    ctx.fillStyle = '#565e66';
+    ctx.beginPath();
+    ctx.arc(L.wx, L.wy, L.cogR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#2c3136';
+    ctx.lineWidth = 2;
+    for (var ti = 0; ti < 12; ti++) {
+      var ta = -phase * L.chainR / L.cogR + ti / 12 * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(L.wx + Math.cos(ta) * L.cogR * 0.75, L.wy + Math.sin(ta) * L.cogR * 0.75);
+      ctx.lineTo(L.wx + Math.cos(ta) * L.cogR, L.wy + Math.sin(ta) * L.cogR);
+      ctx.stroke();
+    }
+
+    // 前齿盘 + 曲柄踏板
+    ctx.fillStyle = '#5b636b';
+    ctx.beginPath();
+    ctx.arc(L.cx2, L.cy2, L.chainR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2c3136';
+    ctx.beginPath();
+    ctx.arc(L.cx2, L.cy2, L.chainR * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+    for (var tt2 = 0; tt2 < 16; tt2++) {
+      var ta2 = -phase + tt2 / 16 * Math.PI * 2;
+      ctx.fillStyle = '#485057';
+      ctx.beginPath();
+      ctx.arc(L.cx2 + Math.cos(ta2) * (L.chainR - 3), L.cy2 + Math.sin(ta2) * (L.chainR - 3), 3.4 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 曲柄（双臂）+ 踏板
+    ctx.save();
+    ctx.translate(L.cx2, L.cy2);
+    ctx.rotate(phase);
+    ctx.strokeStyle = '#5f6870';
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, L.chainR * 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -L.chainR * 0.9); ctx.stroke();
+    ctx.fillStyle = '#23282d';
+    ctx.fillRect(-16 * L.s, L.chainR * 0.9 - 5, 32 * L.s, 10);
+    ctx.fillRect(-16 * L.s, -L.chainR * 0.9 - 5, 32 * L.s, 10);
+    ctx.restore();
+
+    // 链条（沿 path 循环滚动）
+    var off = Math.floor(chainPhase) % N;
+    for (var li = 0; li < N; li++) {
+      var idx = ((li + off) % N + N) % N;
+      var p0 = path[li];
+      var p1 = path[(li + 1) % N];
+      var oil = links[li];
+      // 链板
+      ctx.strokeStyle = lerpC([118, 100, 82], [36, 36, 34], oil);
+      ctx.lineWidth = 4.6;
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.stroke();
+      // 油亮高光
+      if (oil > 0.3) {
+        ctx.strokeStyle = 'rgba(150,185,150,' + (0.4 * oil).toFixed(2) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.stroke();
+      }
+      // 滚子
+      ctx.fillStyle = oil > 0.5 ? lerpC([118, 100, 82], [52, 54, 50], oil) : '#8a7c68';
+      ctx.beginPath();
+      ctx.arc(p0.x, p0.y, 2.6 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 油滴动画
+    for (var oi = oilDrops.length - 1; oi >= 0; oi--) {
+      var od = oilDrops[oi];
+      var age = (now - od.born) / 1000;
+      var fy = od.y + (od.ty - od.y) * Math.min(1, age / 0.3);
+      if (age > 0.3) { oilDrops.splice(oi, 1); continue; }
+      ctx.fillStyle = 'rgba(150,170,130,0.9)';
+      ctx.beginPath();
+      ctx.ellipse(od.x, fy, 2.4 * L.s, 4.5 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 滴油闪光
+    for (var fi = dripFx.length - 1; fi >= 0; fi--) {
+      var fx = dripFx[fi];
+      var fage = (now - fx.born) / 1000;
+      if (fage > 0.6) { dripFx.splice(fi, 1); continue; }
+      var fp = path[fx.idx];
+      ctx.strokeStyle = 'rgba(160,190,150,' + (0.5 * (1 - fage / 0.6)).toFixed(2) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(fp.x, fp.y, 6 + fage * 26, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 油壶（挂墙上，右上）
+    var oX = w * 0.84, oY = h * 0.24;
+    ctx.fillStyle = '#4c5844';
+    ctx.beginPath();
+    ctx.roundRect(oX - 20 * L.s, oY - 26 * L.s, 40 * L.s, 52 * L.s, 6 * L.s);
+    ctx.fill();
+    ctx.fillStyle = '#3c4636';
+    ctx.beginPath();
+    ctx.roundRect(oX + 8 * L.s, oY - 34 * L.s, 16 * L.s, 12 * L.s, 3 * L.s);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(220,235,200,0.25)';
+    ctx.fillRect(oX - 14 * L.s, oY - 20 * L.s, 8 * L.s, 36 * L.s);
+    ctx.fillStyle = '#6f7880';
+    ctx.font = Math.round(11 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('链条油', oX, oY + 48 * L.s);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidFirst) {
+      ctx.fillStyle = 'rgba(204,212,218,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点链条，滴油', (L.wx + L.cx2) / 2, (L.wy + L.cy2) / 2 + 120 * L.s);
+      ctx.textAlign = 'left';
+    } else if (!doneFired && progress > 0.15 && omega < 0.2) {
+      ctx.fillStyle = 'rgba(204,212,218,' + (0.26 + 0.14 * Math.sin(now / 560)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住空白处转踏板——让油走到每一节', w / 2, L.wy + L.wheelR + 46);
+      ctx.textAlign = 'left';
+    }
+
+    // 进度（纯数字等宽）
+    ctx.fillStyle = 'rgba(111,120,128,0.85)';
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('油亮 ' + Math.round(progress * 100) + '%', w - 20, h - 44);
+    ctx.textAlign = 'left';
+  }
+
+  var chainPhase = 0;
+  var tickAcc = 0;
+
+  function lerpC(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__chain = {
+    progress: function () { return progress; },
+    done: function () { return doneFired; },
+    links: function () { return N; },
+    drip: function (i) { drip(((i % N) + N) % N, path[((i % N) + N) % N].x, path[((i % N) + N) % N].y); },
+    spin: function (ms) {
+      spinning = true;
+      setTimeout(function () { spinning = false; }, ms || 600);
+    }
+  };
+})();
+</script>
+</body>
+</html>

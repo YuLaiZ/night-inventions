@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>摇元宵</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #131009;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #e0cda8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #e0cda8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #e0cda8; border-color: #e0cda8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>摇元宵</h1>
+  <p>北方的元宵是滚出来的，不是包出来的。<br>按住竹筛摇——馅芯滚三轮、蘸两次水，滚成一颗白胖。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1, Math.min(L.w / 620, L.h / 760)));
+    L.cx = L.w / 2;
+    L.cy = L.h * 0.57;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var size = 0.06;          // 元宵 0..1
+  var stage = 0;            // 0 第一轮 / 1 蘸水1 / 2 第二轮 / 3 蘸水2 / 4 第三轮(完成)
+  var doneFired = false;
+  var pressing = false;
+  var shakeAmp = 0;         // 0..1
+  var ball = { x: 0, y: -40, vx: 0, vy: 0 };   // 相对筛心（px）
+  var dist = 0;             // 累计滚动距离（驱动长大）
+  var saidStart = false;
+  var saidWet = false;
+  var wetFlash = 0;         // 蘸水湿光 0..1 衰减
+  var bumps = 0;            // 碰壁次数（驱动嗒声）
+
+  var R_SIEVE;              // 筛内半径（layout 时算）
+
+  function calcR() {
+    R_SIEVE = L.s * 150;
+  }
+  calcR();
+
+  function ballR() { return (14 + size * 46) * L.s; }   // 馅芯→白胖
+
+  canvas.addEventListener('pointerdown', function () {
+    ensureAudio();
+    pressing = true;
+    if (!saidStart) { saidStart = true; say('摇起来——馅芯滚过粉，就厚一层。'); }
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  // ── 声音 ──
+  var AC = null, sandGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var hp = AC.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 3200;
+      sandGain = AC.createGain();
+      sandGain.gain.value = 0;
+      src.connect(hp); hp.connect(sandGain); sandGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+  function knockTick() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 1400 + rng() * 500;
+    g.gain.setValueAtTime(0.02, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.06);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcR();
+
+    // 摇动幅度
+    var target = pressing && !doneFired ? 1 : 0;
+    shakeAmp += (target - shakeAmp) * Math.min(1, dt * 4);
+
+    // 元宵物理：摇动加速度 + 惯性 + 筛壁反弹
+    var ax = Math.sin(now / 130) * shakeAmp * 900;
+    var ay = Math.cos(now / 95) * shakeAmp * 420;
+    ball.vx += ax * dt;
+    ball.vy += ay * dt;
+    ball.vx *= Math.pow(0.4, dt);
+    ball.vy *= Math.pow(0.4, dt);
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    var maxR = R_SIEVE - ballR() - 6 * L.s;
+    var dd = Math.sqrt(ball.x * ball.x + ball.y * ball.y);
+    if (dd > maxR) {
+      var nx = ball.x / dd, ny = ball.y / dd;
+      ball.x = nx * maxR; ball.y = ny * maxR;
+      var vn = ball.vx * nx + ball.vy * ny;
+      if (vn > 0) {
+        ball.vx -= vn * nx * 1.7;
+        ball.vy -= vn * ny * 1.7;
+        if (vn > 60) {
+          bumps++;
+          if (bumps % 2 === 0) knockTick();
+        }
+      }
+    }
+    // 滚动累计 → 长大（size 单调，蘸水只闪湿光不回退）
+    var spd = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    if (!doneFired) dist += spd * dt * (0.4 + shakeAmp * 0.6);
+    var prevSize = size;
+    if (!doneFired) size = Math.min(1, dist / 5200);
+    stage = size >= 1 ? 4 : size >= 0.68 ? 3 : size >= 0.34 ? 2 : 1;
+    if (!doneFired) {
+      if (prevSize < 0.34 && size >= 0.34) {
+        wetFlash = 1;
+        if (!saidWet) { saidWet = true; say('滚出一层了。蘸水——粉才挂得住。'); }
+        else say('第一层好了，蘸水。');
+      } else if (prevSize < 0.68 && size >= 0.68) {
+        wetFlash = 1;
+        say('再蘸一次水。最后一轮，滚圆它。');
+      }
+      if (size >= 1) {
+        doneFired = true;
+        stage = 4;
+        say('滚好了。白白胖胖，下锅见——今晚它是北方户口。', true);
+      }
+    }
+
+    // 声音：摇动的沙沙
+    if (sandGain) sandGain.gain.value = shakeAmp * 0.028 * (0.5 + 0.5 * Math.sin(now / 90));
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#17130c');
+    bg.addColorStop(1, '#0d0a06');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 案板面（渐变融入，不做生硬椭圆弧）
+    var boardG = ctx.createLinearGradient(0, h * 0.72, 0, h);
+    boardG.addColorStop(0, 'rgba(36,28,17,0)');
+    boardG.addColorStop(0.35, '#241c11');
+    boardG.addColorStop(1, '#1a1409');
+    ctx.fillStyle = boardG;
+    ctx.fillRect(0, h * 0.72, w, h * 0.28);
+
+    // 摇动偏移
+    var ox = Math.sin(now / 130) * shakeAmp * 9 * L.s;
+    var oy = Math.cos(now / 95) * shakeAmp * 4 * L.s;
+
+    // 粉碗（左，落在案板上）
+    var bwx = L.cx - R_SIEVE * 1.5, bwy = L.cy - R_SIEVE * 0.52;
+    ctx.fillStyle = '#3c3226';
+    ctx.beginPath();
+    ctx.ellipse(bwx, bwy, 52 * L.s, 20 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e8e0d0';
+    ctx.beginPath();
+    ctx.ellipse(bwx, bwy - 4 * L.s, 44 * L.s, 15 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,250,238,0.75)';
+    ctx.beginPath();
+    ctx.ellipse(bwx - 10 * L.s, bwy - 7 * L.s, 18 * L.s, 5 * L.s, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 水碗（右，落在案板上）
+    var wwxx = L.cx + R_SIEVE * 1.5;
+    ctx.fillStyle = '#3c3226';
+    ctx.beginPath();
+    ctx.ellipse(wwxx, bwy, 48 * L.s, 19 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var wg = ctx.createLinearGradient(0, bwy - 8, 0, bwy + 4);
+    wg.addColorStop(0, '#5a7086');
+    wg.addColorStop(1, '#31404e');
+    ctx.fillStyle = wg;
+    ctx.beginPath();
+    ctx.ellipse(wwxx, bwy - 4 * L.s, 40 * L.s, 13 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 水面微光
+    ctx.fillStyle = 'rgba(200,225,240,' + (0.25 + 0.12 * Math.sin(now / 700)).toFixed(2) + ')';
+    ctx.beginPath();
+    ctx.ellipse(wwxx - 8 * L.s, bwy - 6 * L.s, 12 * L.s, 3 * L.s, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 竹筛（浅盘，壁厚内凹）
+    ctx.save();
+    ctx.translate(L.cx + ox, L.cy + oy);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(6 * L.s, 16 * L.s, R_SIEVE + 18 * L.s, (R_SIEVE + 18 * L.s) * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 筛壁（侧）
+    ctx.fillStyle = '#6e5630';
+    ctx.beginPath();
+    ctx.ellipse(0, 12 * L.s, R_SIEVE + 16 * L.s, (R_SIEVE + 16 * L.s) * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8a6c3e';
+    ctx.beginPath();
+    ctx.ellipse(0, 8 * L.s, R_SIEVE + 14 * L.s, (R_SIEVE + 14 * L.s) * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 筛内（凹陷）
+    var sg = ctx.createRadialGradient(0, -8 * L.s, R_SIEVE * 0.2, 0, 0, R_SIEVE);
+    sg.addColorStop(0, '#d4b478');
+    sg.addColorStop(1, '#8a6c3e');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, R_SIEVE, R_SIEVE * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 编织纹（同心弧为主，放射线只到 3/4，中心留空）
+    ctx.strokeStyle = 'rgba(70,50,26,0.22)';
+    ctx.lineWidth = 1;
+    for (var ri = 1; ri <= 5; ri++) {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, R_SIEVE * ri / 6, R_SIEVE * ri / 6 * 0.42, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    for (var ai = 0; ai < 20; ai++) {
+      var aa = ai / 20 * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(aa) * R_SIEVE * 0.28, Math.sin(aa) * R_SIEVE * 0.28 * 0.42);
+      ctx.lineTo(Math.cos(aa) * R_SIEVE * 0.96, Math.sin(aa) * R_SIEVE * 0.96 * 0.42);
+      ctx.stroke();
+    }
+    // 筛里的浮粉
+    ctx.fillStyle = 'rgba(240,232,214,0.28)';
+    for (var fi = 0; fi < 12; fi++) {
+      var fa = fi * 2.4 + 0.7;
+      var fr = R_SIEVE * (0.3 + (fi % 4) * 0.17);
+      ctx.beginPath();
+      ctx.arc(Math.cos(fa) * fr, Math.sin(fa) * fr * 0.42, (2 + fi % 3) * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 元宵（在筛里，受筛椭圆压扁约束）
+    var bx = ball.x, by = ball.y * 0.42;
+    var br = ballR();
+    var core = { r: 13 * L.s, c: '#3a2317' };
+    var rr = Math.max(br, core.r);
+    // 底影
+    ctx.fillStyle = 'rgba(60,40,20,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(bx, by + br * 0.55, br * 0.95, br * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 球体：馅芯色 → 裹粉白
+    var mixT = Math.min(1, size * 1.15);
+    function lerpC(a, b, t) {
+      return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+    }
+    var ballGrad = ctx.createRadialGradient(bx - br * 0.3, by - br * 0.4, br * 0.15, bx, by, br);
+    ballGrad.addColorStop(0, lerpC([66, 42, 26], [252, 248, 236], mixT));
+    ballGrad.addColorStop(0.7, lerpC([42, 25, 14], [236, 228, 210], mixT));
+    ballGrad.addColorStop(1, lerpC([24, 14, 8], [206, 196, 176], mixT));
+    ctx.fillStyle = ballGrad;
+    ctx.beginPath();
+    ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.fill();
+    // 干粉颗粒（size 愈大愈多）
+    if (mixT > 0.25) {
+      ctx.fillStyle = 'rgba(255,252,244,' + (0.5 * mixT).toFixed(2) + ')';
+      for (var pi = 0; pi < 14; pi++) {
+        var pa = pi * 2.399 + seed;
+        var pd = Math.sqrt((pi + 1) / 14) * br * 0.82;
+        ctx.beginPath();
+        ctx.arc(bx + Math.cos(pa) * pd, by + Math.sin(pa) * pd * 0.9, (0.8 + pi % 3 * 0.5) * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 湿光（蘸水闪）
+    if (wetFlash > 0) {
+      ctx.fillStyle = 'rgba(190,215,235,' + (0.3 * wetFlash).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.ellipse(bx, by, br * 0.95, br * 0.75, 0, 0, Math.PI * 2);
+      ctx.fill();
+      wetFlash -= dt * 1.6;
+    }
+    // 完成后的微弹
+    if (doneFired) {
+      var wob = Math.sin(now / 320) * br * 0.03;
+      ctx.fillStyle = 'rgba(255,252,244,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(bx - br * 0.3, by - br * 0.45 + wob, br * 0.28, br * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 引导
+    if (!saidStart) {
+      ctx.fillStyle = 'rgba(224,205,168,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住竹筛，摇', L.cx, L.cy + R_SIEVE + 60 * L.s);
+      ctx.textAlign = 'left';
+    }
+    // 阶段进度（纯数字等宽：第几轮）
+    ctx.fillStyle = 'rgba(135,120,96,0.85)';
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'right';
+    var roundNo = doneFired ? 3 : Math.min(3, stage);
+    ctx.fillText('第 ' + roundNo + ' / 3 轮', L.w - 20, L.h - 44);
+    ctx.textAlign = 'left';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__yuanxiao = {
+    size: function () { return size; },
+    stage: function () { return stage; },
+    done: function () { return doneFired; },
+    shake: function (ms) {
+      // 模拟按住摇 ms 毫秒（直接灌滚动量，走同一条 size 单调路径）
+      pressing = true;
+      dist += (ms || 500) * 1.1;
+      setTimeout(function () { pressing = false; }, ms || 500);
+    }
+  };
+})();
+</script>
+</body>
+</html>

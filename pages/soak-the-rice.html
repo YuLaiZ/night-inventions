@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给明早的粥泡米</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #121009;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d8c6a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d8c6a8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d8c6a8; border-color: #d8c6a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给明早的粥泡米</h1>
+  <p>睡前抓一把米，淘两遍、添上水。<br>泡一夜，明早的粥自己会开花。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1, Math.min(L.w / 640, L.h / 720)));
+    L.cx = L.w / 2;
+    L.bowlY = L.h * 0.60;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态机：0 倒米 → 1 淘洗 → 2 倒浑水 → 3 添清水 → 完成 ──
+  var step = 0;
+  var pressing = false;
+  var rinseT = 0;         // 淘洗按住时长
+  var RINSE_NEED = 4;     // 秒
+  var pouring = 0;        // 倒米/倒水动画 0..1
+  var pourKind = '';
+  var grains = [];        // 米粒 {a(角), r(半径), rot, settled}
+  var saidPour = false, saidRinse = false, saidWater = false;
+  var doneFired = false;
+  var GRAIN_N = 42;
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired || pouring > 0) return;
+    if (step === 0) {
+      // 点米缸：倒米
+      pourKind = 'rice';
+      pouring = 0.001;
+    } else if (step === 2) {
+      // 点碗沿：倒掉浑水
+      pourKind = 'dirty';
+      pouring = 0.001;
+    } else if (step === 3) {
+      // 点水瓢：添清水
+      pourKind = 'water';
+      pouring = 0.001;
+    }
+    // step===1：按住碗淘洗（pressing）
+    pressing = step === 1;
+    if (pressing && !saidRinse) { saidRinse = true; say('按住碗，转着圈淘——水浑了就换。'); }
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function patter() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.25;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.5);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var hp = AC.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2600;
+    var g = AC.createGain();
+    g.gain.value = 0.05;
+    src.connect(hp); hp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+  function swish() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.5;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var lp = AC.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 900;
+    var g = AC.createGain();
+    g.gain.value = 0.04;
+    src.connect(lp); lp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    var bowlR = 130 * L.s;
+
+    // 倒入动画
+    if (pouring > 0) {
+      pouring += dt / 1.4;
+      if (pourKind === 'rice' && grains.length < GRAIN_N && rng() < 0.5) {
+        grains.push({
+          a: rng() * Math.PI * 2,
+          r: rng() * bowlR * 0.62,
+          rot: rng() * Math.PI,
+          settled: false
+        });
+        if (rng() < 0.3) patter();
+      }
+      if (pouring >= 1) {
+        pouring = 0;
+        if (pourKind === 'rice') {
+          step = 1;
+          if (!saidPour) { saidPour = true; say('米到位了。下一件事：给它洗个澡。'); }
+        } else if (pourKind === 'dirty') {
+          step = 3;
+          swish();
+        } else if (pourKind === 'water') {
+          doneFired = true;
+          say('水添好了，米睡了。明早的粥，自己会开花。', true);
+        }
+      }
+    }
+
+    // 淘洗
+    if (pressing && step === 1) {
+      rinseT += dt;
+      if (rng() < dt * 3) swish();
+      for (var gi = 0; gi < grains.length; gi++) {
+        grains[gi].a += dt * (2.2 - grains[gi].r / bowlR * 1.4);
+      }
+      if (rinseT >= RINSE_NEED) {
+        pressing = false;
+        step = 2;
+        say('水浑了——米浆别扔它也是好东西，倒掉就行。');
+      }
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#161309');
+    bg.addColorStop(1, '#0d0b06');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 案板
+    var boardG = ctx.createLinearGradient(0, h * 0.66, 0, h);
+    boardG.addColorStop(0, 'rgba(38,30,18,0)');
+    boardG.addColorStop(0.4, '#261e12');
+    boardG.addColorStop(1, '#191207');
+    ctx.fillStyle = boardG;
+    ctx.fillRect(0, h * 0.66, w, h * 0.34);
+
+    var bowlX = L.cx;
+    var by = L.bowlY;
+
+    // 米缸（左）
+    var jx = L.cx - 190 * L.s, jy = L.h * 0.42;
+    ctx.fillStyle = '#3a322a';
+    ctx.beginPath();
+    ctx.ellipse(jx, jy, 56 * L.s, 70 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#4a4036';
+    ctx.beginPath();
+    ctx.ellipse(jx, jy - 52 * L.s, 40 * L.s, 14 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ddd2ba';
+    ctx.beginPath();
+    ctx.ellipse(jx, jy - 52 * L.s, 30 * L.s, 9 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#6f7880';
+    ctx.font = Math.round(11 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('米缸', jx, jy + 96 * L.s);
+
+    // 水瓢（右）
+    var lx = L.cx + 190 * L.s, ly = L.h * 0.42;
+    ctx.fillStyle = '#544a3a';
+    ctx.beginPath();
+    ctx.ellipse(lx, ly, 44 * L.s, 56 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6a5c46';
+    ctx.lineWidth = 5 * L.s;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 46 * L.s, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+    ctx.fillStyle = '#3c4a56';
+    ctx.beginPath();
+    ctx.ellipse(lx, ly - 6 * L.s, 30 * L.s, 18 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#6f7880';
+    ctx.fillText('清水', lx, ly + 82 * L.s);
+    ctx.textAlign = 'left';
+
+    // 碗（中）
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.ellipse(bowlX + 8, by + 66 * L.s, bowlR * 1.05, bowlR * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 碗外壁
+    ctx.beginPath();
+    ctx.moveTo(bowlX - bowlR, by - 10);
+    ctx.quadraticCurveTo(bowlX - bowlR * 0.92, by + 60 * L.s, bowlX - bowlR * 0.55, by + 66 * L.s);
+    ctx.lineTo(bowlX + bowlR * 0.55, by + 66 * L.s);
+    ctx.quadraticCurveTo(bowlX + bowlR * 0.92, by + 60 * L.s, bowlX + bowlR, by - 10);
+    ctx.closePath();
+    ctx.fillStyle = '#cfc4ae';
+    ctx.fill();
+    // 碗内
+    var innerG = ctx.createRadialGradient(bowlX, by - 6, bowlR * 0.2, bowlX, by, bowlR);
+    innerG.addColorStop(0, '#b8ad96');
+    innerG.addColorStop(1, '#948a74');
+    ctx.fillStyle = innerG;
+    ctx.beginPath();
+    ctx.ellipse(bowlX, by - 4, bowlR * 0.94, bowlR * 0.36, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 水面/浑水/清水（步骤相关）
+    var waterAlpha = step >= 1 ? (step === 2 ? 0.35 : step >= 3 ? 0.3 : 0.18) : 0;
+    var waterC = step === 2 ? '188,178,148' : (step >= 3 ? '168,196,216' : '200,200,190');
+    if (waterAlpha > 0) {
+      ctx.fillStyle = 'rgba(' + waterC + ',' + waterAlpha.toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.ellipse(bowlX, by - 4, bowlR * 0.86, bowlR * 0.32, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 水面高光
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.beginPath();
+      ctx.ellipse(bowlX - bowlR * 0.3, by - 12, bowlR * 0.3, bowlR * 0.08, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 米粒
+    for (var i = 0; i < grains.length; i++) {
+      var gr = grains[i];
+      var gx = bowlX + Math.cos(gr.a) * gr.r;
+      var gy = by - 4 + Math.sin(gr.a) * gr.r * 0.36;
+      ctx.save();
+      ctx.translate(gx, gy);
+      ctx.rotate(gr.rot + gr.a);
+      ctx.fillStyle = '#f2ead6';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4.2 * L.s, 2.6 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 倒入中的米流/水流
+    if (pouring > 0) {
+      if (pourKind === 'rice') {
+        ctx.strokeStyle = 'rgba(242,234,214,0.8)';
+        ctx.lineWidth = 3 * L.s;
+        ctx.beginPath();
+        ctx.moveTo(jx + 30 * L.s, jy - 20 * L.s);
+        ctx.quadraticCurveTo(jx + 90 * L.s, by - 60 * L.s, bowlX - bowlR * 0.4, by - 8);
+        ctx.stroke();
+      } else if (pourKind === 'dirty') {
+        ctx.strokeStyle = 'rgba(188,178,148,0.7)';
+        ctx.lineWidth = 8 * L.s;
+        ctx.beginPath();
+        ctx.moveTo(bowlX + bowlR * 0.8, by);
+        ctx.quadraticCurveTo(bowlX + bowlR * 1.3, by + 40 * L.s, bowlX + bowlR * 1.5, by + 90 * L.s);
+        ctx.stroke();
+      } else if (pourKind === 'water') {
+        ctx.strokeStyle = 'rgba(168,196,216,0.75)';
+        ctx.lineWidth = 6 * L.s;
+        ctx.beginPath();
+        ctx.moveTo(lx - 20 * L.s, ly + 10 * L.s);
+        ctx.quadraticCurveTo(lx - 100 * L.s, by - 50 * L.s, bowlX + bowlR * 0.35, by - 6);
+        ctx.stroke();
+      }
+    }
+
+    // 引导与步骤点
+    var hint = ['', '', '', ''];
+    if (step === 0) hint[0] = '点米缸，倒米';
+    else if (step === 1) hint[0] = '按住碗，转着圈淘';
+    else if (step === 2) hint[0] = '点碗沿，倒掉浑水';
+    else if (step === 3) hint[0] = '点水瓢，添清水';
+    if (!doneFired) {
+      ctx.fillStyle = 'rgba(216,198,168,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint[0], w / 2, h - 96);
+      ctx.textAlign = 'left';
+      // 三步进度点
+      for (var pi = 0; pi < 3; pi++) {
+        ctx.fillStyle = pi < step ? 'rgba(216,198,168,0.85)' : 'rgba(216,198,168,0.25)';
+        ctx.beginPath();
+        ctx.arc(w / 2 - 18 + pi * 18, h - 66, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__rice = {
+    step: function () { return step; },
+    done: function () { return doneFired; },
+    grains: function () { return grains.length; },
+    act: function () {
+      // 依次驱动：倒米 →（按住模拟淘洗）→ 倒浑水 → 添清水
+      if (step === 0 || step === 2 || step === 3) {
+        var kinds = ['rice', '', 'dirty', 'water'];
+        pourKind = kinds[step];
+        pouring = 0.001;
+      } else if (step === 1) {
+        pressing = true;
+        rinseT = RINSE_NEED;   // 直接记满淘洗时长
+      }
+    },
+    forceRinse: function () { rinseT = RINSE_NEED; pressing = true; }
+  };
+})();
+</script>
+</body>
+</html>

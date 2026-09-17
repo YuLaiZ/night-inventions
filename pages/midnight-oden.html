@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜关东煮</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #100d0a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #dcc9a4; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #dcc9a4;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #dcc9a4; border-color: #dcc9a4; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜关东煮</h1>
+  <p>汤底咕嘟着，串等在架上。<br>点一串下锅——煮到它自己浮起来，再捞。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1, Math.min(L.w / 640, L.h / 720)));
+    L.cx = L.w / 2;
+    L.potY = L.h * 0.56;          // 锅口
+    L.potR = Math.min(190 * L.s, L.w * 0.4);
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 串 ──
+  // kind: 0 萝卜 / 1 贡丸 / 2 卤蛋 / 3 豆腐 / 4 昆布结
+  var kinds = [
+    { name: '萝卜', raw: '#e8ddc2', cooked: '#c8a86a', size: 1.0 },
+    { name: '贡丸', raw: '#d8c8b4', cooked: '#b08d64', size: 0.72 },
+    { name: '卤蛋', raw: '#eee2cc', cooked: '#c89a58', size: 0.66 },
+    { name: '豆腐', raw: '#f0e8d6', cooked: '#c0a072', size: 0.86 },
+    { name: '昆布', raw: '#5a6e52', cooked: '#3e5238', size: 0.8 }
+  ];
+  var skewers = [];
+  for (var i = 0; i < 5; i++) {
+    skewers.push({
+      kind: i,
+      state: 'rack',          // rack 架上 / pot 锅里 / done 捞起
+      cook: 0,                // 0..1
+      px: 0, py: 0,           // 当前位置（动画用）
+      tx: 0, ty: 0,           // 目标位置
+      sway: rng() * Math.PI * 2,
+      dropT: 0                // 下锅/捞起动画计时
+    });
+  }
+  var saidFirst = false, saidFloat = false;
+  var doneFired = false;
+
+  function rackPos(i) {
+    return { x: L.w * (0.16 + i * 0.17), y: L.h * 0.36 };
+  }
+  function potPos(i) {
+    var n = skewers.filter(function (s) { return s.state === 'pot' || s.state === 'done'; }).length;
+    return { x: L.cx + (i - 2) * L.potR * 0.3, y: L.potY + L.potR * 0.1 };
+  }
+
+  skewers.forEach(function (s, i) {
+    var p = rackPos(i);
+    s.px = p.x; s.py = p.y;
+  });
+
+  function skewerHit(px, py) {
+    for (var i = 0; i < skewers.length; i++) {
+      var s = skewers[i];
+      if (s.state === 'done') continue;
+      if (Math.abs(px - s.px) < 34 * L.s && Math.abs(py - s.py) < 90 * L.s) return s;
+    }
+    return null;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    var s = skewerHit(ev.clientX, ev.clientY);
+    if (!s) return;
+    if (s.state === 'rack') {
+      s.state = 'pot';
+      s.dropT = 0.001;
+      if (!saidFirst) { saidFirst = true; say('下锅了。汤是老汤，串是新客。'); }
+      bub(s.px, s.py);
+    } else if (s.state === 'pot' && s.cook >= 1) {
+      s.state = 'done';
+      s.dropT = 0.001;
+      afterPick();
+    } else if (s.state === 'pot') {
+      say('还没浮起来呢——浮起来才算数。');
+    }
+  });
+
+  function afterPick() {
+    var doneN = skewers.filter(function (k) { return k.state === 'done'; }).length;
+    if (doneN === 1) say('第一串出锅。烫——但值得等。');
+    else if (doneN === skewers.length && !doneFired) {
+      doneFired = true;
+      setTimeout(function () {
+        say('汤底越熬越厚。深夜的锅，专治空着的胃和醒着的头。', true);
+      }, 300);
+    } else {
+      say('又捞起一串。锅里的兄弟们，别急。');
+    }
+  }
+
+  // ── 汤面泡泡 ──
+  var bubbles = [];
+  function bub(x, y) {
+    bubbles.push({ x: x, y: y, born: Date.now(), r: 3 + rng() * 5 });
+  }
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function blip() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 320 + rng() * 240;
+    g.gain.setValueAtTime(0.02, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.13);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 煮制推进
+    var potCount = 0;
+    skewers.forEach(function (s, i) {
+      if (s.state === 'pot') {
+        potCount++;
+        if (s.cook < 1) {
+          s.cook = Math.min(1, s.cook + dt / 14);
+          if (s.cook >= 1 && !saidFloat) { saidFloat = true; say('浮起来了——熟没熟，汤最清楚。'); }
+          if (rng() < dt * 2) bub(s.px + (rng() - 0.5) * 20, L.potY - 4);
+        }
+      }
+      // 位置动画
+      if (s.dropT > 0 && s.dropT < 1) {
+        s.dropT += dt / 0.7;
+        var tx = s.state === 'pot' ? potPos(i).x : rackPos(i).x;
+        var ty = s.state === 'pot' ? L.potY + L.potR * 0.08 : rackPos(i).y;
+        var t = Math.min(1, s.dropT);
+        var ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        s.px = s.px + (tx - s.px) * Math.min(1, dt * 6);
+        s.py = s.py + (ty - s.py) * ease * Math.min(1, dt * 5);
+        if (s.dropT >= 1) { s.px = tx; s.py = ty; }
+      } else if (s.state === 'pot') {
+        var pp = potPos(i);
+        s.px += (pp.x - s.px) * Math.min(1, dt * 3);
+        s.py = L.potY + L.potR * 0.08 + Math.sin(now / 700 + s.sway) * 3;
+      }
+    });
+
+    // 汤面泡泡（锅里一直咕嘟）
+    if (rng() < dt * 6) {
+      bubbles.push({
+        x: L.cx + (rng() - 0.5) * L.potR * 1.5,
+        y: L.potY + L.potR * 0.08 + (rng() - 0.5) * 10,
+        born: now, r: 2.5 + rng() * 5
+      });
+      if (rng() < 0.3) blip();
+    }
+    for (var bi = bubbles.length - 1; bi >= 0; bi--) {
+      if (now - bubbles[bi].born > 900) bubbles.splice(bi, 1);
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#15100b');
+    bg.addColorStop(1, '#0b0806');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 锅后蒸汽
+    for (var si = 0; si < 4; si++) {
+      var stX = L.cx + (si - 1.5) * L.potR * 0.5;
+      var stY = L.potY - L.potR * 0.5 - ((now / 45 + si * 70) % 110);
+      var stA = 0.11 * (1 - ((now / 45 + si * 70) % 110) / 110);
+      ctx.fillStyle = 'rgba(230,215,185,' + stA.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(stX, stY, 16 * L.s * (1 + si % 2 * 0.4), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 锅身
+    var potTop = L.potY - 10 * L.s;
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(L.cx + 10, L.potY + L.potR * 0.62, L.potR * 1.04, L.potR * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var potG = ctx.createLinearGradient(L.cx - L.potR, 0, L.cx + L.potR, 0);
+    potG.addColorStop(0, '#2e2620');
+    potG.addColorStop(0.5, '#4a3d30');
+    potG.addColorStop(1, '#241d17');
+    ctx.fillStyle = potG;
+    ctx.beginPath();
+    ctx.moveTo(L.cx - L.potR, potTop);
+    ctx.quadraticCurveTo(L.cx - L.potR * 0.95, L.potY + L.potR * 0.58, L.cx - L.potR * 0.7, L.potY + L.potR * 0.6);
+    ctx.lineTo(L.cx + L.potR * 0.7, L.potY + L.potR * 0.6);
+    ctx.quadraticCurveTo(L.cx + L.potR * 0.95, L.potY + L.potR * 0.58, L.cx + L.potR, potTop);
+    ctx.closePath();
+    ctx.fill();
+    // 锅沿
+    ctx.fillStyle = '#5c4a38';
+    ctx.beginPath();
+    ctx.ellipse(L.cx, potTop, L.potR, L.potR * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 汤面
+    var brothG = ctx.createRadialGradient(L.cx, potTop, L.potR * 0.1, L.cx, potTop, L.potR);
+    brothG.addColorStop(0, '#a87848');
+    brothG.addColorStop(1, '#6e4a28');
+    ctx.fillStyle = brothG;
+    ctx.beginPath();
+    ctx.ellipse(L.cx, potTop, L.potR * 0.9, L.potR * 0.17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 汤面浮油光
+    ctx.fillStyle = 'rgba(240,200,130,0.16)';
+    for (var oi = 0; oi < 5; oi++) {
+      var ox2 = L.cx + Math.sin(oi * 2.1 + 1) * L.potR * 0.55;
+      var oy2 = potTop + Math.cos(oi * 1.7) * L.potR * 0.08;
+      ctx.beginPath();
+      ctx.ellipse(ox2, oy2, 12 * L.s, 3 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 泡泡
+    for (var bi = 0; bi < bubbles.length; bi++) {
+      var bp = bubbles[bi];
+      var bAge = (now - bp.born) / 900;
+      var bA = 0.55 * (1 - bAge);
+      ctx.strokeStyle = 'rgba(235,215,175,' + bA.toFixed(2) + ')';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(bp.x, bp.y - bAge * 4, bp.r * (0.6 + bAge * 0.6), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 锅下炉火（微光，一直有）
+    var fireG = ctx.createRadialGradient(L.cx, L.potY + L.potR * 0.72, 4, L.cx, L.potY + L.potR * 0.72, L.potR * 0.7);
+    fireG.addColorStop(0, 'rgba(230,124,58,' + (0.3 + 0.08 * Math.sin(now / 300)).toFixed(2) + ')');
+    fireG.addColorStop(1, 'rgba(224,120,60,0)');
+    ctx.fillStyle = fireG;
+    ctx.beginPath();
+    ctx.arc(L.cx, L.potY + L.potR * 0.72, L.potR * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 串架（顶部横杆）
+    ctx.strokeStyle = '#4e4234';
+    ctx.lineWidth = 6 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(L.w * 0.1, L.h * 0.30 - 54 * L.s);
+    ctx.lineTo(L.w * 0.9, L.h * 0.30 - 54 * L.s);
+    ctx.stroke();
+
+    // 串
+    skewers.forEach(function (s, i) {
+      var k = kinds[s.kind];
+      var cCol = s.state === 'rack' ? k.raw : lerpHex(k.raw, k.cooked, s.cook);
+      drawSkewer(s, cCol, k, now, i);
+    });
+
+    // 引导
+    var rackLeft = skewers.filter(function (s) { return s.state === 'rack'; }).length;
+    var potCooking = skewers.filter(function (s) { return s.state === 'pot'; }).length;
+    if (!doneFired) {
+      var hint = rackLeft > 0 ? '点一串，下锅' : (potCooking > 0 ? '点浮起来的串，捞' : '');
+      if (hint) {
+        ctx.fillStyle = 'rgba(220,201,164,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, L.cx, L.h - 96);
+        ctx.textAlign = 'left';
+      }
+    }
+    // 进度
+    var doneN2 = skewers.filter(function (s) { return s.state === 'done'; }).length;
+    ctx.fillStyle = 'rgba(135,120,96,0.85)';
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('出锅 ' + doneN2 + ' / 5 串', w - 20, h - 44);
+    ctx.textAlign = 'left';
+  }
+
+  function drawSkewer(s, cCol, k, now, i) {
+    var x = s.px;
+    var y = s.py;
+    var sz = k.size * L.s;
+    // 竹签
+    ctx.strokeStyle = '#c8b088';
+    ctx.lineWidth = 2.4;
+    var topY, botY;
+    if (s.state === 'pot' || s.state === 'done') {
+      topY = y - 96 * sz; botY = y + 34 * sz;
+    } else {
+      topY = y - 56 * sz; botY = y + 40 * sz;
+    }
+    ctx.beginPath();
+    ctx.moveTo(x, topY);
+    ctx.lineTo(x, botY);
+    ctx.stroke();
+    // 食材
+    ctx.fillStyle = cCol;
+    if (s.kind === 0) {
+      // 萝卜：两厚片
+      ctx.beginPath();
+      ctx.roundRect(x - 20 * sz, y - 30 * sz, 40 * sz, 26 * sz, 6 * sz);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.roundRect(x - 20 * sz, y + 2 * sz, 40 * sz, 26 * sz, 6 * sz);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(90,60,30,0.25)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 14 * sz, y - 24 * sz, 28 * sz, 3);
+      ctx.strokeRect(x - 14 * sz, y + 8 * sz, 28 * sz, 3);
+    } else if (s.kind === 1) {
+      // 贡丸：两丸
+      for (var m = -1; m <= 1; m += 2) {
+        ctx.beginPath();
+        ctx.arc(x, y + m * 16 * sz, 15 * sz, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(255,245,230,0.25)';
+      ctx.beginPath();
+      ctx.arc(x - 4 * sz, y - 20 * sz, 4 * sz, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (s.kind === 2) {
+      // 卤蛋：一枚
+      ctx.beginPath();
+      ctx.ellipse(x, y, 19 * sz, 22 * sz, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,245,225,0.3)';
+      ctx.beginPath();
+      ctx.arc(x - 6 * sz, y - 7 * sz, 5 * sz, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (s.kind === 3) {
+      // 豆腐：方块
+      ctx.beginPath();
+      ctx.roundRect(x - 22 * sz, y - 24 * sz, 44 * sz, 44 * sz, 4 * sz);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(90,60,30,0.2)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 14 * sz, y - 16 * sz, 28 * sz, 28 * sz);
+    } else {
+      // 昆布结：螺旋结
+      ctx.strokeStyle = cCol;
+      ctx.lineWidth = 9 * sz;
+      ctx.beginPath();
+      ctx.arc(x, y - 12 * sz, 14 * sz, 0, Math.PI * 1.4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y + 10 * sz, 13 * sz, Math.PI * 0.9, Math.PI * 2.2);
+      ctx.stroke();
+    }
+    // 熟透的油光
+    if (s.cook >= 1 && (s.state === 'pot' || s.state === 'done')) {
+      ctx.fillStyle = 'rgba(240,200,120,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(x, y - 6 * sz, 24 * sz, 18 * sz, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 捞起挂锅沿的滴汤
+    if (s.state === 'done') {
+      ctx.fillStyle = 'rgba(200,160,100,0.6)';
+      if (rng() < 0.06) {
+        ctx.beginPath();
+        ctx.ellipse(x + 6 * sz, botY + 8, 2, 3.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function lerpHex(c1, c2, t) {
+    function px(c) { return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]; }
+    t = Math.max(0, Math.min(1, t));
+    var a = px(c1), b = px(c2);
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__oden = {
+    cooked: function () { return skewers.filter(function (s) { return s.cook >= 1; }).length; },
+    picked: function () { return skewers.filter(function (s) { return s.state === 'done'; }).length; },
+    done: function () { return doneFired; },
+    cookOne: function (i) {
+      var s = skewers[(i == null ? 0 : i) % skewers.length];
+      if (s.state === 'rack') { s.state = 'pot'; s.dropT = 0.001; }
+      s.cook = 1;
+    },
+    pick: function (i) {
+      var s = skewers[(i == null ? 0 : i) % skewers.length];
+      if (s.state === 'pot') { s.state = 'done'; s.dropT = 0.001; afterPick(); }
+    }
+  };
+})();
+</script>
+</body>
+</html>

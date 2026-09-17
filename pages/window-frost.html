@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>冰窗花</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0e14;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #9db4c4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #cfe2ee; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7e95a6; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #cfe2ee;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #4e5c66;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7e95a6;
+    text-decoration: none;
+    border-bottom: 1px dotted #7e95a6;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #cfe2ee; border-color: #cfe2ee; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>冰窗花</h1>
+  <p>后半夜，屋里那点热气碰上冷玻璃，就成了霜。<br>按住哪儿哈口气——冰花就从哪儿开。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  // ── 离屏层：mist 哈气雾 / frost 冰花 / wet 水痕 ──
+  var mist = document.createElement('canvas');
+  var frost = document.createElement('canvas');
+  var wet = document.createElement('canvas');
+  var mctx = mist.getContext('2d');
+  var fctx = frost.getContext('2d');
+  var wctx = wet.getContext('2d');
+
+  var L = {};
+  var cols = 24, rows = 16;
+  var covered = {};           // 覆盖网格（冰花落过的格子）
+  var gridN = 0;
+
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    for (var i = 0; i < 3; i++) {
+      [mist, frost, wet][i].width = L.w * DPR;
+      [mist, frost, wet][i].height = L.h * DPR;
+    }
+    mctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    fctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    wctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    rows = Math.max(12, Math.round(cols * L.h / L.w));
+    gridN = cols * rows;
+    // 夜街光斑位置（玻璃后面）
+    L.glows = [
+      { x: L.w * 0.22, y: L.h * 0.62, r: Math.min(L.w, L.h) * 0.16, c: '216,169,92', a: 0.16 },
+      { x: L.w * 0.78, y: L.h * 0.4, r: Math.min(L.w, L.h) * 0.11, c: '216,169,92', a: 0.12 },
+      { x: L.w * 0.55, y: L.h * 0.78, r: Math.min(L.w, L.h) * 0.09, c: '184,204,216', a: 0.1 }
+    ];
+  }
+
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+
+  window.addEventListener('resize', function () {
+    // 旧冰花按比例缩放保留，雾与水痕散去
+    var oldF = document.createElement('canvas');
+    oldF.width = frost.width; oldF.height = frost.height;
+    oldF.getContext('2d').drawImage(frost, 0, 0);
+    var oldW = L.w, oldH = L.h;
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+    fctx.setTransform(1, 0, 0, 1, 0, 0);
+    fctx.drawImage(oldF, 0, 0, oldF.width, oldF.height, 0, 0, frost.width, frost.height);
+    fctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  });
+
+  // ── 冰晶生长引擎 ──
+  var tips = [];              // 生长前沿
+  var TIP_MAX = 420;
+  var breaths = [];           // 哈气团 {x,y,r,pow,born}
+
+  function mistAt(x, y, now) {
+    var m = 0;
+    for (var i = 0; i < breaths.length; i++) {
+      var b = breaths[i];
+      var age = (now - b.born) / 1000;
+      var decay = age < 6 ? 1 : Math.exp(-(age - 6) / 16);
+      if (decay < 0.02) continue;
+      var dx = x - b.x, dy = y - b.y;
+      m += b.pow * decay * Math.exp(-(dx * dx + dy * dy) / (b.r * b.r));
+    }
+    return Math.min(1, m);
+  }
+
+  function addTip(x, y, ang, depth, speedScale, lifeScale, edgeFlag) {
+    if (tips.length >= TIP_MAX) return;
+    tips.push({
+      x: x, y: y, px: x, py: y,
+      ang: ang,
+      depth: depth,
+      edge: !!edgeFlag,
+      speed: (2.6 - depth * 0.7) * (18 + rng() * 10) * speedScale,   // px/s
+      w: [2.6, 1.6, 0.9][depth] * (0.8 + rng() * 0.4) * (edgeFlag ? 0.7 : 1),
+      life: 0,
+      lifeMax: (edgeFlag ? 13 + rng() * 6 : [6 + rng() * 3, 3 + rng() * 2, 1.6 + rng() * 1.4][depth]) * lifeScale,
+      curve: (rng() - 0.5) * 0.85
+    });
+  }
+
+  function cluster(x, y, base) {
+    // 枝端晶簇：几根放射细刺
+    fctx.strokeStyle = 'rgba(222,240,248,0.5)';
+    fctx.lineWidth = 0.7;
+    var n = 4 + (rng() * 4 | 0);
+    for (var i = 0; i < n; i++) {
+      var a = base + (rng() - 0.5) * 2.2;
+      var len = 3 + rng() * 5;
+      fctx.beginPath();
+      fctx.moveTo(x, y);
+      fctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+      fctx.stroke();
+    }
+    fctx.fillStyle = 'rgba(228,244,250,0.65)';
+    fctx.beginPath();
+    fctx.arc(x, y, 1.1, 0, Math.PI * 2);
+    fctx.fill();
+  }
+
+  function markGrid(x, y) {
+    var gx = (x / L.w * cols) | 0, gy = (y / L.h * rows) | 0;
+    if (gx < 0 || gy < 0 || gx >= cols || gy >= rows) return;
+    covered[gx + ',' + gy] = 1;
+  }
+
+  function growTips(dt, now) {
+    var alive = [];
+    for (var i = 0; i < tips.length; i++) {
+      var t = tips[i];
+      t.life += dt;
+      var m = mistAt(t.x, t.y, now);
+      if (!t.edge && t.life > 4 && m < 0.06) { cluster(t.x, t.y, t.ang); continue; }
+      if (t.life > t.lifeMax) { cluster(t.x, t.y, t.ang); continue; }
+      var v = t.speed * dt * (t.edge ? 0.12 : (0.28 + 0.72 * m));
+      t.px = t.x; t.py = t.y;
+      t.ang += t.curve * dt;
+      t.x += Math.cos(t.ang) * v;
+      t.y += Math.sin(t.ang) * v;
+      if (t.x < -30 || t.x > L.w + 30 || t.y < -30 || t.y > L.h + 30) continue;
+      // 画这一小段（两层：冰的厚感 + 亮芯）
+      var alpha = t.edge ? 0.2 + rng() * 0.1 : 0.42 + m * 0.25;
+      fctx.strokeStyle = 'rgba(190,219,236,' + alpha.toFixed(2) + ')';
+      fctx.lineWidth = t.w;
+      fctx.lineCap = 'round';
+      fctx.beginPath(); fctx.moveTo(t.px, t.py); fctx.lineTo(t.x, t.y); fctx.stroke();
+      fctx.strokeStyle = 'rgba(236,248,252,' + (alpha * 0.55).toFixed(2) + ')';
+      fctx.lineWidth = t.w * 0.4;
+      fctx.beginPath(); fctx.moveTo(t.px, t.py); fctx.lineTo(t.x, t.y); fctx.stroke();
+      markGrid(t.x, t.y);
+      // 分叉
+      if (t.depth < 2 && rng() < dt * 1.35 * (t.edge ? 0.7 : (0.35 + m))) {
+        var side = rng() < 0.5 ? 1 : -1;
+        addTip(t.x, t.y, t.ang + side * (0.38 + rng() * 0.42), t.depth + 1, t.edge ? 0.5 : 1, 1);
+      }
+      // 主干/侧枝上的反向小刺（冰窗花的羽状锯齿）
+      if (t.depth <= 1 && rng() < dt * (t.depth === 0 ? 0.9 : 0.55)) {
+        var s2 = rng() < 0.5 ? 1 : -1;
+        var spikeLen = t.depth === 0 ? 8 + rng() * 4 : 4 + rng() * 3;
+        fctx.strokeStyle = 'rgba(212,234,244,0.5)';
+        fctx.lineWidth = 0.8;
+        var na = t.ang + s2 * (1.05 + rng() * 0.1);
+        fctx.beginPath();
+        fctx.moveTo(t.x, t.y);
+        fctx.lineTo(t.x + Math.cos(na) * spikeLen, t.y + Math.sin(na) * spikeLen);
+        fctx.stroke();
+      }
+      alive.push(t);
+    }
+    tips = alive;
+  }
+
+  function seedEdge() {
+    // 四边各撒几簇旧冰花，朝屏内慢慢长
+    var spots = [];
+    var n = 6;
+    for (var i = 0; i < n; i++) {
+      spots.push({ x: L.w * (i + 0.5) / n + (rng() - 0.5) * 30, y: rng() * 8, a: Math.PI / 2 + (rng() - 0.5) * 1.1 });
+      spots.push({ x: L.w * (i + 0.5) / n + (rng() - 0.5) * 30, y: L.h - rng() * 8, a: -Math.PI / 2 + (rng() - 0.5) * 1.1 });
+    }
+    for (var j = 0; j < 4; j++) {
+      spots.push({ x: rng() * 8, y: L.h * (j + 0.5) / 4 + (rng() - 0.5) * 40, a: (rng() - 0.5) * 1.1 });
+      spots.push({ x: L.w - rng() * 8, y: L.h * (j + 0.5) / 4 + (rng() - 0.5) * 40, a: Math.PI + (rng() - 0.5) * 1.1 });
+    }
+    for (var k = 0; k < spots.length; k++) {
+      var s = spots[k];
+      var cnt = 1 + (rng() * 2 | 0);
+      for (var c = 0; c < cnt; c++) addTip(s.x, s.y, s.a + (rng() - 0.5) * 0.8, 0, 0.5 + rng() * 0.4, 1, true);
+    }
+  }
+  seedEdge();
+
+  // ── 哈气 / 擦 ──
+  var pressing = false;
+  var wiping = false;
+  var pressX = 0, pressY = 0, lastWX = 0, lastWY = 0;
+  var saidBreath = false, saidGrow = false, saidWipe = false, achieved = false;
+  var drops = [];               // 水珠
+  var wipeDist = 0;
+
+  var lastBreathAt = 0;
+
+  function paintBreath(x, y, dt, now) {
+    // 哈气团限速入队：雾团只画一次（随 mist 全局消散），叠多了会糊成实心球
+    if (now - lastBreathAt > 340) {
+      lastBreathAt = now;
+      breaths.push({ x: x, y: y, r: 70 + rng() * 30, pow: 0.85, born: now });
+      if (breaths.length > 26) breaths.shift();
+      var jx = x + (rng() - 0.5) * 24, jy = y + (rng() - 0.5) * 24;
+      var g = mctx.createRadialGradient(jx, jy, 0, jx, jy, 110);
+      g.addColorStop(0, 'rgba(205,228,242,0.10)');
+      g.addColorStop(0.7, 'rgba(205,228,242,0.045)');
+      g.addColorStop(1, 'rgba(205,228,242,0)');
+      mctx.fillStyle = g;
+      mctx.beginPath();
+      mctx.arc(jx, jy, 110, 0, Math.PI * 2);
+      mctx.fill();
+    }
+    // 雾浓处冒出新芽（中心密外缘疏，丛簇轮廓更有机）
+    if (tips.length < TIP_MAX && rng() < dt * 6) {
+      var a = rng() * Math.PI * 2;
+      var rr = rng() * rng() * 70;
+      addTip(x + Math.cos(a) * rr, y + Math.sin(a) * rr, a + (rng() - 0.5) * 1.2, 0, 0.9 + rng() * 0.5, 1);
+      if (!saidGrow && tips.length > 6) { saidGrow = true; say('开了。从你哈气的地方，往四面八方开。'); }
+    }
+  }
+
+  function wipe(x, y) {
+    var r = 27;
+    mctx.globalCompositeOperation = 'destination-out';
+    mctx.beginPath(); mctx.arc(x, y, r, 0, Math.PI * 2); mctx.fill();
+    fctx.globalCompositeOperation = 'destination-out';
+    fctx.beginPath(); fctx.arc(x, y, r, 0, Math.PI * 2); fctx.fill();
+    mctx.globalCompositeOperation = 'source-over';
+    fctx.globalCompositeOperation = 'source-over';
+    // 湿痕（淡、宽窄随机，反复擦才攒出可见水光）
+    wctx.fillStyle = 'rgba(150,185,210,0.03)';
+    wctx.beginPath(); wctx.arc(x, y, r * (0.35 + rng() * 0.45), 0, Math.PI * 2); wctx.fill();
+    if (!saidWipe) { saidWipe = true; say('袖子一抹，化成水了。玻璃记性好，等下还开。'); }
+  }
+
+  function spawnDrops(x, y) {
+    if (drops.length >= 14) return;
+    var n = 1 + (rng() * 2 | 0);
+    for (var i = 0; i < n; i++) {
+      drops.push({
+        x: x + (rng() - 0.5) * 18,
+        y: y + (rng() - 0.5) * 10,
+        vy: 8 + rng() * 10,
+        r: 3.8 + rng() * 2.6,
+        wob: rng() * Math.PI * 2
+      });
+    }
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    pressing = true;
+    wiping = false;
+    wipeDist = 0;
+    pressX = lastWX = ev.clientX;
+    pressY = lastWY = ev.clientY;
+    if (!saidBreath) { saidBreath = true; say('哈出的气全糊在玻璃上了——等它冷透。'); }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!pressing) return;
+    var dx = ev.clientX - pressX, dy = ev.clientY - pressY;
+    if (!wiping && dx * dx + dy * dy > 18 * 18) wiping = true;
+    if (wiping) {
+      var ddx = ev.clientX - lastWX, ddy = ev.clientY - lastWY;
+      var step = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (step > 3) {
+        var steps = Math.min(8, Math.ceil(step / 9));
+        for (var i = 1; i <= steps; i++) {
+          var ix = lastWX + ddx * i / steps, iy = lastWY + ddy * i / steps;
+          wipe(ix, iy);
+        }
+        lastWX = ev.clientX; lastWY = ev.clientY;
+        wipeDist += step;
+        if (wipeDist > 46 && rng() < 0.7) { spawnDrops(ev.clientX, ev.clientY); wipeDist = 0; }
+      }
+    }
+  });
+  window.addEventListener('pointerup', function () { pressing = false; wiping = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; wiping = false; });
+
+  // ── 声音（极轻）：呼吸白噪 + 结晶细响 ──
+  var AC = null, breathGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate * 1.2;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var lp = AC.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 850;
+      breathGain = AC.createGain();
+      breathGain.gain.value = 0;
+      src.connect(lp); lp.connect(breathGain); breathGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+  function chime() {
+    if (!AC || AC.state !== 'running') return;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 2300 + rng() * 2100;
+    g.gain.setValueAtTime(0.011, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + 0.09);
+    o.connect(g); g.connect(AC.destination);
+    o.start(); o.stop(AC.currentTime + 0.1);
+  }
+
+  // ── 雪（玻璃外）──
+  var snow = [];
+  (function () {
+    for (var i = 0; i < 34; i++) {
+      snow.push({
+        x: rng(), y: rng(),
+        s: 0.6 + rng() * 1.8,
+        v: 8 + rng() * 16,
+        drift: (rng() - 0.5) * 6
+      });
+    }
+  })();
+
+  function coverage() {
+    var n = 0;
+    for (var k in covered) if (covered[k]) n++;
+    return n / gridN;
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 更新
+    if (pressing && !wiping) paintBreath(pressX, pressY, dt, now);
+    growTips(dt, now);
+    var grew = tips.length;
+
+    // 雾整体缓慢消散
+    mctx.globalCompositeOperation = 'destination-out';
+    mctx.fillStyle = 'rgba(0,0,0,' + (dt * 0.028).toFixed(4) + ')';
+    mctx.fillRect(0, 0, w, h);
+    mctx.globalCompositeOperation = 'source-over';
+    // 水痕慢慢干
+    wctx.globalCompositeOperation = 'destination-out';
+    wctx.fillStyle = 'rgba(0,0,0,' + (dt * 0.02).toFixed(4) + ')';
+    wctx.fillRect(0, 0, w, h);
+    wctx.globalCompositeOperation = 'source-over';
+
+    // 呼吸声淡入淡出
+    if (breathGain) {
+      var target = (pressing && !wiping) ? 0.045 : 0;
+      breathGain.gain.value += (target - breathGain.gain.value) * Math.min(1, dt * 5);
+    }
+    if (grew > 0 && rng() < dt * 1.6) chime();
+
+    // 成就
+    var cov = coverage();
+    if (!achieved && cov >= 0.42) {
+      achieved = true;
+      say('开满了。这一夜，玻璃替你开了一座花园。', true);
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0a0e15');
+    bg.addColorStop(0.6, '#0c1220');
+    bg.addColorStop(1, '#080c12');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // 街灯失焦光斑
+    for (var gi = 0; gi < L.glows.length; gi++) {
+      var gl = L.glows[gi];
+      var gr = ctx.createRadialGradient(gl.x, gl.y, 0, gl.x, gl.y, gl.r);
+      gr.addColorStop(0, 'rgba(' + gl.c + ',' + gl.a + ')');
+      gr.addColorStop(1, 'rgba(' + gl.c + ',0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.arc(gl.x, gl.y, gl.r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 雪
+    ctx.fillStyle = 'rgba(214,228,238,0.5)';
+    for (var si = 0; si < snow.length; si++) {
+      var sn = snow[si];
+      sn.y += sn.v * dt / h;
+      sn.x += sn.drift * dt / w;
+      if (sn.y > 1.02) { sn.y = -0.02; sn.x = rng(); }
+      ctx.globalAlpha = 0.25 + sn.s / 2.4 * 0.4;
+      ctx.beginPath();
+      ctx.arc(sn.x * w, sn.y * h, sn.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 雾 → 冰花 → 水痕
+    ctx.drawImage(mist, 0, 0, w, h);
+    ctx.drawImage(frost, 0, 0, w, h);
+    ctx.drawImage(wet, 0, 0, w, h);
+
+    // 水珠（最上，玻璃内侧）
+    for (var di = drops.length - 1; di >= 0; di--) {
+      var dp = drops[di];
+      dp.vy += 26 * dt;                    // 黏滞慢滑
+      dp.y += dp.vy * dt;
+      dp.wob += dt * 6;
+      dp.x += Math.sin(dp.wob) * 7 * dt;
+      ctx.fillStyle = 'rgba(205,228,244,0.95)';
+      ctx.beginPath();
+      ctx.ellipse(dp.x, dp.y, dp.r * 0.74, dp.r, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 珠心高光
+      ctx.fillStyle = 'rgba(240,250,255,0.75)';
+      ctx.beginPath();
+      ctx.arc(dp.x - dp.r * 0.22, dp.y - dp.r * 0.3, dp.r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      // 滑过的小拖尾
+      ctx.fillStyle = 'rgba(205,228,244,0.32)';
+      ctx.fillRect(dp.x - dp.r * 0.18, dp.y - dp.r * 3.6, dp.r * 0.36, dp.r * 2.8);
+      ctx.fillStyle = 'rgba(235,246,252,0.5)';
+      ctx.beginPath();
+      ctx.arc(dp.x - dp.r * 0.25, dp.y - dp.r * 0.3, dp.r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      if (dp.y > h + 10) drops.splice(di, 1);
+    }
+
+    // 玻璃斜高光
+    ctx.save();
+    ctx.globalAlpha = 0.05;
+    ctx.fillStyle = '#dceaf4';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.12, 0); ctx.lineTo(w * 0.3, 0); ctx.lineTo(w * 0.14, h); ctx.lineTo(0, h);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(w * 0.66, 0); ctx.lineTo(w * 0.72, 0); ctx.lineTo(w * 0.56, h); ctx.lineTo(w * 0.5, h);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // 引导与重开提示
+    if (!saidBreath) {
+      ctx.fillStyle = 'rgba(207,226,238,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住玻璃，哈口气', w / 2, h * 0.56);
+      ctx.textAlign = 'left';
+    }
+    if (achieved && !pressing) {
+      ctx.fillStyle = 'rgba(158,186,204,' + (0.26 + 0.12 * Math.sin(now / 600)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('袖子擦掉它，天亮前还能再开一轮', w / 2, h * 0.56 + 26);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实交互共用状态机）
+  window.__frost = {
+    coverage: function () { return coverage(); },
+    done: function () { return achieved; },
+    breath: function (x, y) {
+      // 模拟在 (x,y) 哈一口长气：注入雾团并从周边散点生芽
+      var t0 = Date.now();
+      breaths.push({ x: x, y: y, r: 90, pow: 1.4, born: t0 - 3000 });
+      for (var i = 0; i < 6; i++) {
+        var a = rng() * Math.PI * 2;
+        var rr = 6 + rng() * 36;
+        addTip(x + Math.cos(a) * rr, y + Math.sin(a) * rr, a + (rng() - 0.5) * 0.8, 0, 1.2, 1);
+      }
+    },
+    wipe: function (x, y) { wipe(x, y); spawnDrops(x, y); },
+    tips: function () { return tips.length; },
+    dropCount: function () { return drops.length; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调水温</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0f1216;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8fa0ad;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c9d6de; margin-bottom: 12px; padding-left: 0.28em;
+    text-shadow: 0 1px 8px rgba(8,12,16,0.5);
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #74828e; letter-spacing: 0.08em; text-shadow: 0 1px 6px rgba(8,12,16,0.45); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c9d6de;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+    text-shadow: 0 1px 8px rgba(8,12,16,0.5);
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #46525c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #74828e;
+    text-decoration: none;
+    border-bottom: 1px dotted #74828e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c9d6de; border-color: #c9d6de; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>调水温</h1>
+  <p>早上第一件事：拧开花洒，把水调到正好。<br>左凉右热——不烫嘴的那种暖，从头顶淋到心口。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 620, L.h / 720)));
+    L.cx = L.w / 2;
+    L.showerY = L.h * 0.24;
+    L.knobY = L.h * 0.72;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var angle = -60;          // -60 全冷 → +60 全热
+  var dragging = false;
+  var temp = 8;             // 当前出水温 °C（平滑跟随）
+  var flow = 0.65;          // 水流 0..1（一进门花洒已开着凉水）
+  var steam = [];
+  var drops = [];
+  var saidFirst = false;
+  var inZoneT = 0;
+  var doneFired = false;
+  var lastKnobAt = Date.now();
+
+  function knobPos() {
+    return { x: L.cx, y: L.knobY };
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    var kp = knobPos();
+    var dx = ev.clientX - kp.x, dy = ev.clientY - kp.y;
+    if (dx * dx + dy * dy < Math.pow(70 * L.s, 2)) {
+      dragging = true;
+      lastKnobAt = Date.now();
+    }
+    if (!saidFirst) { saidFirst = true; say('水先开起来。左凉右热，慢慢找。'); }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+    var kp = knobPos();
+    var ang = Math.atan2(ev.clientY - kp.y, ev.clientX - kp.x) * 180 / Math.PI;
+    // 把手朝上为 0：映射 [-60, 60]
+    var a = ang + 90;
+    if (a > 180) a -= 360;
+    angle = Math.max(-60, Math.min(60, a));
+    lastKnobAt = Date.now();
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+  window.addEventListener('pointercancel', function () { dragging = false; });
+
+  // ── 声音 ──
+  var AC = null, waterGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var hp = AC.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 1800;
+      waterGain = AC.createGain();
+      waterGain.gain.value = 0;
+      src.connect(hp); hp.connect(waterGain); waterGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 水流与水温
+    var flowOn = Date.now() - lastKnobAt < 4000 || dragging || flow > 0;
+    var targetFlow = flowOn ? 1 : 0;
+    flow += (targetFlow - flow) * Math.min(1, dt * 2);
+    var targetTemp = 8 + (angle + 60) / 120 * 38;
+    temp += (targetTemp - temp) * Math.min(1, dt * 1.6);
+    if (waterGain) waterGain.gain.value = flow * 0.022;
+
+    // 舒适区判定（38–42°）
+    if (!doneFired && temp >= 38 && temp <= 42 && flow > 0.6) {
+      inZoneT += dt;
+      if (inZoneT >= 1.6) {
+        doneFired = true;
+        say('正好。不烫嘴的那种暖，从头顶淋到心口。', true);
+      }
+    } else {
+      inZoneT = 0;
+    }
+
+    // 蒸汽（水温高才冒）
+    if (temp > 26 && rng() < dt * (temp - 26) * 0.5) {
+      steam.push({
+        x: L.cx + (rng() - 0.5) * 90 * L.s,
+        y: L.showerY + 30 * L.s,
+        vy: 24 + rng() * 26,
+        life: 0, max: 1.8 + rng() * 1.6,
+        r: 6 + rng() * 10,
+        drift: (rng() - 0.5) * 12
+      });
+    }
+    for (var si = steam.length - 1; si >= 0; si--) {
+      var st = steam[si];
+      st.life += dt;
+      st.y -= st.vy * dt;
+      st.x += st.drift * dt;
+      if (st.life > st.max) steam.splice(si, 1);
+    }
+    // 水滴溅落
+    if (flow > 0.3 && rng() < dt * 20 * flow) {
+      drops.push({
+        x: L.cx + (rng() - 0.5) * 120 * L.s,
+        y: L.showerY + 10,
+        vy: 60 + rng() * 80
+      });
+    }
+    for (var di = drops.length - 1; di >= 0; di--) {
+      drops[di].y += drops[di].vy * dt;
+      if (drops[di].y > L.knobY + 80 * L.s) drops.splice(di, 1);
+    }
+
+    // ── 绘制 ──
+    // 瓷砖墙（冷灰蓝，温度高时墙面泛暖）
+    var warmWall = Math.max(0, (temp - 20) / 25) * flow;
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mixRGB([17, 22, 28], [46, 36, 30], warmWall * 0.7));
+    bg.addColorStop(1, mixRGB([13, 17, 22], [38, 30, 25], warmWall * 0.7));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+    ctx.lineWidth = 1;
+    for (var ty = 0; ty < h; ty += 72 * L.s) {
+      ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke();
+    }
+    for (var tx = 0; tx < w; tx += 72 * L.s) {
+      ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h); ctx.stroke();
+    }
+    // 晨光侧照
+    var sun = ctx.createLinearGradient(w, 0, w * 0.4, h * 0.5);
+    sun.addColorStop(0, 'rgba(235,220,180,0.1)');
+    sun.addColorStop(1, 'rgba(235,220,180,0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, w, h);
+
+    // 花洒软管+顶喷
+    ctx.strokeStyle = '#58646e';
+    ctx.lineWidth = 5 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(w - 30, 0);
+    ctx.quadraticCurveTo(w - 90 * L.s, L.showerY * 0.4, L.cx + 34 * L.s, L.showerY - 6 * L.s);
+    ctx.stroke();
+    ctx.fillStyle = '#6a7680';
+    ctx.beginPath();
+    ctx.roundRect(L.cx - 60 * L.s, L.showerY - 14 * L.s, 120 * L.s, 18 * L.s, 8 * L.s);
+    ctx.fill();
+    ctx.fillStyle = '#39424a';
+    ctx.beginPath();
+    ctx.roundRect(L.cx - 56 * L.s, L.showerY + 2 * L.s, 112 * L.s, 8 * L.s, 4 * L.s);
+    ctx.fill();
+
+    // 水柱（flow>0）
+    if (flow > 0.05) {
+      var fa = 0.3 * flow;
+      var wCol = temp > 33 ? '168,205,228' : '150,190,222';
+      var wColW = temp > 33 ? '196,222,238' : '172,204,228';
+      // 水幕（梯形）
+      ctx.fillStyle = 'rgba(' + wCol + ',' + (fa * 0.5).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.moveTo(L.cx - 52 * L.s, L.showerY + 10 * L.s);
+      ctx.lineTo(L.cx + 52 * L.s, L.showerY + 10 * L.s);
+      ctx.lineTo(L.cx + 86 * L.s, L.showerY + 300 * L.s);
+      ctx.lineTo(L.cx - 86 * L.s, L.showerY + 300 * L.s);
+      ctx.closePath();
+      ctx.fill();
+      // 水线
+      ctx.strokeStyle = 'rgba(' + wColW + ',' + (fa * 0.6).toFixed(2) + ')';
+      ctx.lineWidth = 1.6;
+      for (var li = 0; li < 9; li++) {
+        var lx = L.cx - 48 * L.s + li * 12 * L.s;
+        var sw = Math.sin(now / 160 + li * 1.7) * 3;
+        ctx.beginPath();
+        ctx.moveTo(lx + sw, L.showerY + 10 * L.s);
+        ctx.lineTo(lx + sw * 1.6, L.showerY + 120 * L.s + (li % 3) * 40);
+        ctx.stroke();
+      }
+      // 落地水花
+      for (var dj = 0; dj < drops.length; dj++) {
+        ctx.fillStyle = 'rgba(' + wColW + ',' + (fa * 0.8).toFixed(2) + ')';
+        ctx.beginPath();
+        ctx.ellipse(drops[dj].x, drops[dj].y, 1.6, 3.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 蒸汽
+    for (var sj = 0; sj < steam.length; sj++) {
+      var st2 = steam[sj];
+      var sa = (1 - st2.life / st2.max) * 0.14;
+      ctx.fillStyle = 'rgba(238,242,244,' + sa.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(st2.x + Math.sin(st2.life * 2.4 + st2.r) * 7, st2.y, st2.r * (1 + st2.life * 0.55), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 水温把手（圆盘+指针柄）
+    var kp = knobPos();
+    var kr = 56 * L.s;
+    // 底盘色环（蓝→红渐变，舒适区绿弧）
+    ctx.lineWidth = 10 * L.s;
+    var ring = ctx.createLinearGradient(kp.x - kr, 0, kp.x + kr, 0);
+    ring.addColorStop(0, '#4a7fb8');
+    ring.addColorStop(1, '#c05a48');
+    ctx.strokeStyle = ring;
+    ctx.beginPath();
+    ctx.arc(kp.x, kp.y, kr + 10 * L.s, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3);
+    ctx.stroke();
+    // 舒适区绿弧（38-42° 对应角度区间）
+    var zA1 = (38 / 45) * 120 - 60;
+    var zA2 = (42 / 45) * 120 - 60;
+    ctx.strokeStyle = 'rgba(120,200,140,0.85)';
+    ctx.beginPath();
+    ctx.arc(kp.x, kp.y, kr + 10 * L.s, (-90 + zA1) * Math.PI / 180, (-90 + zA2) * Math.PI / 180);
+    ctx.stroke();
+    // 把手体
+    var knobG = ctx.createRadialGradient(kp.x - 18 * L.s, kp.y - 20 * L.s, 6, kp.x, kp.y, kr);
+    knobG.addColorStop(0, '#8b98a2');
+    knobG.addColorStop(1, '#4d5860');
+    ctx.fillStyle = knobG;
+    ctx.beginPath();
+    ctx.arc(kp.x, kp.y, kr, 0, Math.PI * 2);
+    ctx.fill();
+    // 指针柄
+    ctx.save();
+    ctx.translate(kp.x, kp.y);
+    ctx.rotate(angle * Math.PI / 180);
+    ctx.fillStyle = '#e8eef2';
+    ctx.beginPath();
+    ctx.roundRect(-7 * L.s, -kr - 4 * L.s, 14 * L.s, kr * 0.85, 6 * L.s);
+    ctx.fill();
+    ctx.restore();
+    // 冷热标
+    ctx.fillStyle = '#4a7fb8';
+    ctx.font = Math.round(13 * L.s) + 'px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('凉', kp.x - kr - 26 * L.s, kp.y + 5);
+    ctx.fillStyle = '#c05a48';
+    ctx.fillText('热', kp.x + kr + 26 * L.s, kp.y + 5);
+
+    // 水温数字（等宽）
+    ctx.fillStyle = doneFired ? 'rgba(150,220,160,0.95)' : 'rgba(180,196,206,0.9)';
+    ctx.font = '600 ' + Math.round(22 * L.s) + 'px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillText(Math.round(temp) + '°C', kp.x, kp.y + 8);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!saidFirst) {
+      ctx.fillStyle = 'rgba(201,214,222,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住把手，左右拖——找绿灯亮的那个位置', w / 2, L.knobY + kr + 52 * L.s);
+      ctx.textAlign = 'left';
+    } else if (!doneFired) {
+      ctx.fillStyle = 'rgba(201,214,222,' + (0.22 + 0.12 * Math.sin(now / 560)) + ')';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('绿弧就是正好——稳住它', w / 2, L.knobY + kr + 52 * L.s);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function mixRGB(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__temp = {
+    temp: function () { return +temp.toFixed(1); },
+    angle: function () { return angle; },
+    flow: function () { return +flow.toFixed(2); },
+    done: function () { return doneFired; },
+    set: function (a) {
+      angle = Math.max(-60, Math.min(60, a));
+      lastKnobAt = Date.now();
+    }
+  };
+})();
+</script>
+</body>
+</html>

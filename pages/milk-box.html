@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>奶箱里的牛奶</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12151a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #97a3ae;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d2dde6; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #7a8590; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d2dde6;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #49525a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #7a8590;
+    text-decoration: none;
+    border-bottom: 1px dotted #7a8590;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d2dde6; border-color: #d2dde6; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>奶箱里的牛奶</h1>
+  <p>天刚亮，楼下奶箱是满的。<br>开门、取瓶——玻璃瓶上还挂着夜里的凉。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.1, Math.min(L.w / 620, L.h / 720)));
+    L.cx = L.w / 2;
+    L.doorY = L.h * 0.34;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var step = 0;             // 0 关着 → 1 门开 → 2 取第一瓶 → 3 取第二瓶 → 完成
+  var doorT = 0;            // 门开合动画 0..1
+  var noteShown = false;    // 便条已展示
+  var saidDoor = false;
+  var doneFired = false;
+  var bottles = [{ taken: false, x: 0, y: 0 }, { taken: false, x: 0, y: 0 }];
+  var anims = [];           // 取瓶飞行动画 {x,y,tx,ty,t}
+  var clinks = 0;
+
+  var BW;   // 奶箱宽
+  var BH;
+  function calcBox() {
+    BW = 190 * L.s;
+    BH = 240 * L.s;
+  }
+  calcBox();
+
+  function boxX() { return L.cx; }
+  function boxY() { return L.doorY + BH / 2; }
+
+  function hitDoor(px, py) {
+    return Math.abs(px - boxX()) < BW / 2 && Math.abs(py - boxY()) < BH / 2;
+  }
+  function bottleAt(i) {
+    return { x: boxX() - BW * 0.2 + i * BW * 0.4, y: boxY() + BH * 0.08 };
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    var px = ev.clientX, py = ev.clientY;
+    if (step === 0 && hitDoor(px, py)) {
+      step = 1;
+      doorT = 0.001;
+      creak();
+      if (!saidDoor) { saidDoor = true; say('吱呀——送奶的来过了，比楼里谁都早。'); }
+      setTimeout(function () { noteShown = true; }, 900);
+      return;
+    }
+    if (step >= 1) {
+      // 点瓶取
+      for (var i = 0; i < 2; i++) {
+        if (bottles[i].taken) continue;
+        var bp = bottleAt(i);
+        var dx = px - bp.x, dy = py - bp.y;
+        if (doorT >= 1 && dx * dx + dy * dy < Math.pow(46 * L.s, 2)) {
+          bottles[i].taken = true;
+          var tx = L.cx + (i === 0 ? -120 : 120) * L.s;
+          var ty = L.h * 0.74;
+          anims.push({ x: bp.x, y: bp.y, tx: tx, ty: ty, t: 0 });
+          clink();
+          clinks++;
+          if (clinks === 1) say('冰的。玻璃瓶上全是夜里的水汽。');
+          if (clinks === 2 && !doneFired) {
+            doneFired = true;
+            setTimeout(function () {
+              say('两瓶都到手。哐当一声，天就全亮了。', true);
+            }, 350);
+          }
+        }
+      }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function creak() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(180, t);
+    o.frequency.linearRampToValueAtTime(240, t + 0.28);
+    g.gain.setValueAtTime(0.018, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    var lp = AC.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 900;
+    o.connect(lp); lp.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.31);
+  }
+  function clink() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 1750 + rng() * 350;
+    g.gain.setValueAtTime(0.035, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.1);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcBox();
+
+    if (doorT > 0 && doorT < 1) doorT = Math.min(1, doorT + dt * 1.3);
+    for (var ai = anims.length - 1; ai >= 0; ai--) {
+      var an = anims[ai];
+      an.t += dt / 0.55;
+      if (an.t >= 1) anims.splice(ai, 1);
+    }
+
+    // ── 绘制 ──
+    // 晨光墙面
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#2b3440');
+    bg.addColorStop(0.55, '#3e4650');
+    bg.addColorStop(1, '#2c333c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙面砖缝（两行错缝）
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 1;
+    var rowH = 64;
+    for (var row = 0; row * rowH < h; row++) {
+      var yy = 60 + row * rowH;
+      ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(w, yy); ctx.stroke();
+      var off = row % 2 === 0 ? 30 : 78;
+      for (var rx2 = off; rx2 < w; rx2 += 96) {
+        ctx.beginPath(); ctx.moveTo(rx2, yy); ctx.lineTo(rx2, yy + rowH); ctx.stroke();
+      }
+    }
+    // 晨光斜照
+    var sunG = ctx.createLinearGradient(w * 0.7, 0, w * 0.3, h);
+    sunG.addColorStop(0, 'rgba(235,215,170,0.14)');
+    sunG.addColorStop(1, 'rgba(235,215,170,0)');
+    ctx.fillStyle = sunG;
+    ctx.fillRect(0, 0, w, h);
+
+    // 奶箱（挂在墙上）
+    var bx = boxX(), by = boxY();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.roundRect(bx - BW / 2 + 8, by - BH / 2 + 10, BW, BH, 10);
+    ctx.fill();
+    // 箱体
+    var boxG = ctx.createLinearGradient(bx - BW / 2, 0, bx + BW / 2, 0);
+    boxG.addColorStop(0, '#5a6a58');
+    boxG.addColorStop(0.5, '#71836c');
+    boxG.addColorStop(1, '#4c5a4a');
+    ctx.fillStyle = boxG;
+    ctx.beginPath();
+    ctx.roundRect(bx - BW / 2, by - BH / 2, BW, BH, 10);
+    ctx.fill();
+    // 箱体磨损边
+    ctx.strokeStyle = 'rgba(30,38,28,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(bx - BW / 2, by - BH / 2, BW, BH, 10);
+    ctx.stroke();
+    // 「奶」字（箱面上）
+    ctx.fillStyle = 'rgba(235,240,230,0.5)';
+    ctx.font = '500 ' + Math.round(30 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('奶', bx, by - BH / 2 - 16 * L.s);
+    ctx.textAlign = 'left';
+
+    // 箱内（门开后可见：暗腔+两瓶奶）
+    if (doorT > 0.35) {
+      var inA = Math.min(1, (doorT - 0.35) / 0.5);
+      ctx.fillStyle = 'rgba(20,24,22,' + (0.85 * inA).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.roundRect(bx - BW / 2 + 12 * L.s, by - BH / 2 + 14 * L.s, BW - 24 * L.s, BH - 40 * L.s, 6);
+      ctx.fill();
+      // 两瓶奶（未取走的画在箱里）
+      for (var bi = 0; bi < 2; bi++) {
+        if (bottles[bi].taken) continue;
+        var bp = bottleAt(bi);
+        drawBottle(bp.x, bp.y, 1, inA);
+      }
+      // 便条（门开后飘出一句奶站留言）
+      if (noteShown) {
+        ctx.fillStyle = 'rgba(240,238,225,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(bx - 74 * L.s, by - BH / 2 - 74 * L.s, 148 * L.s, 52 * L.s, 3);
+        ctx.fill();
+        ctx.fillStyle = '#4a4638';
+        ctx.font = Math.round(12.5 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('明日起，换新奶站', bx, by - BH / 2 - 50 * L.s);
+        ctx.fillText('鲜奶照旧，六点前到', bx, by - BH / 2 - 32 * L.s);
+        ctx.textAlign = 'left';
+        // 图钉
+        ctx.fillStyle = '#b8543e';
+        ctx.beginPath();
+        ctx.arc(bx, by - BH / 2 - 70 * L.s, 3.4 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 箱门（绕左铰链旋转打开）
+    var openAng = doorT * 1.9;   // rad
+    ctx.save();
+    ctx.translate(bx - BW / 2, by - BH / 2);
+    ctx.transform(Math.cos(-openAng), Math.sin(-openAng) * 0.28, 0, 1, 0, 0);
+    var doorG = ctx.createLinearGradient(0, 0, BW, 0);
+    doorG.addColorStop(0, '#65776a');
+    doorG.addColorStop(0.6, '#7d9080');
+    doorG.addColorStop(1, '#5a6c5c');
+    ctx.fillStyle = doorG;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, BW, BH - 24 * L.s, 8);
+    ctx.fill();
+    // 门上锁孔与通风缝
+    ctx.fillStyle = 'rgba(25,32,26,0.8)';
+    for (var vi = 0; vi < 3; vi++) {
+      ctx.fillRect(BW * 0.32, BH * 0.3 + vi * 18 * L.s, BW * 0.36, 4 * L.s);
+    }
+    ctx.fillStyle = '#2c332c';
+    ctx.beginPath();
+    ctx.arc(BW - 16 * L.s, BH / 2 - 12 * L.s, 5 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // 门内缘亮边（开了才见）
+    if (doorT > 0.4) {
+      ctx.strokeStyle = 'rgba(235,240,225,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bx - BW / 2 + 12 * L.s, by - BH / 2 + 14 * L.s);
+      ctx.lineTo(bx - BW / 2 + 12 * L.s, by + BH / 2 - 26 * L.s);
+      ctx.stroke();
+    }
+
+    // 已取出的瓶（窗台/地上）
+    for (var ti = 0; ti < 2; ti++) {
+      if (!bottles[ti].taken) continue;
+      var an2 = null;
+      for (var aj = 0; aj < anims.length; aj++) {
+        // 找对应的动画（按顺序）
+      }
+      var tx2 = L.cx + (ti === 0 ? -120 : 120) * L.s;
+      var ty2 = L.h * 0.74;
+      // 若还在飞行中画中间位置
+      var flying = null;
+      for (var fk = 0; fk < anims.length; fk++) {
+        if (!anims[fk].used && anims[fk].tx === tx2 && anims[fk].ty === ty2) { flying = anims[fk]; flying.used = true; break; }
+      }
+      if (flying) {
+        var ft = flying.t;
+        var fx2 = flying.x + (flying.tx - flying.x) * ft;
+        var fy2 = flying.y + (flying.ty - flying.y) * ft - Math.sin(ft * Math.PI) * 60 * L.s;
+        drawBottle(fx2, fy2, ft, 1);
+      } else {
+        drawBottle(tx2, ty2, 1, 1);
+      }
+    }
+
+    // 窗台线（瓶子放的地方）
+    ctx.fillStyle = 'rgba(28,32,38,0.9)';
+    ctx.fillRect(0, L.h * 0.74 + 26 * L.s, w, h);
+    ctx.fillStyle = 'rgba(220,225,230,0.12)';
+    ctx.fillRect(0, L.h * 0.74 + 26 * L.s, w, 2);
+
+    // 引导
+    if (!doneFired) {
+      var hint = step === 0 ? '点奶箱，开门' : '点瓶子，取出来';
+      ctx.fillStyle = 'rgba(210,221,230,' + (0.32 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, w / 2, h - 96);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function drawBottle(x, y, scale, alpha) {
+    var s = L.s * (0.7 + scale * 0.3);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 瓶身（玻璃）
+    var bg2 = ctx.createLinearGradient(x - 15 * s, 0, x + 15 * s, 0);
+    bg2.addColorStop(0, 'rgba(196,214,222,0.55)');
+    bg2.addColorStop(0.4, 'rgba(232,242,246,0.75)');
+    bg2.addColorStop(1, 'rgba(176,196,206,0.6)');
+    ctx.fillStyle = bg2;
+    ctx.beginPath();
+    ctx.roundRect(x - 15 * s, y - 34 * s, 30 * s, 62 * s, 7 * s);
+    ctx.fill();
+    // 瓶颈
+    ctx.beginPath();
+    ctx.roundRect(x - 8 * s, y - 52 * s, 16 * s, 20 * s, 3 * s);
+    ctx.fill();
+    // 牛奶（瓶内奶位）
+    ctx.fillStyle = 'rgba(248,246,238,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(x - 13 * s, y - 8 * s, 26 * s, 34 * s, 5 * s);
+    ctx.fill();
+    // 铝箔盖
+    ctx.fillStyle = '#c8cdd4';
+    ctx.beginPath();
+    ctx.ellipse(x, y - 52 * s, 9 * s, 3.6 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 水汽（凉瓶凝露）
+    ctx.fillStyle = 'rgba(235,245,250,0.5)';
+    for (var i = 0; i < 5; i++) {
+      var dx = ((i * 37 + seed) % 20) - 10;
+      var dy = ((i * 53) % 40) - 20;
+      ctx.beginPath();
+      ctx.arc(x + dx * s, y + dy * s, 1.1 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(x - 9 * s, y - 30 * s, 3 * s, 50 * s);
+    ctx.restore();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__milk = {
+    step: function () { return step; },
+    taken: function () { return (bottles[0].taken ? 1 : 0) + (bottles[1].taken ? 1 : 0); },
+    done: function () { return doneFired; },
+    open: function () {
+      if (step === 0) {
+        step = 1;
+        doorT = 0.001;
+        setTimeout(function () { noteShown = true; }, 400);
+      }
+    },
+    take: function (i) {
+      if (doorT < 1 || bottles[i].taken) return;
+      bottles[i].taken = true;
+      clinks++;
+      if (clinks === 2 && !doneFired) {
+        doneFired = true;
+        say('两瓶都到手。哐当一声，天就全亮了。', true);
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

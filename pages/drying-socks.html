@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>暖气片上烘袜子</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12100d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d8c6a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d8c6a8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d8c6a8; border-color: #d8c6a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>暖气片上烘袜子</h1>
+  <p>洗好的袜子搭在暖气片上，早上穿的是暖的。<br>按住阀门拧开——热气慢慢来，别着急。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260917;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.radTop = L.h * 0.38;
+    L.radH = L.h * 0.26;
+    var rw = Math.min(L.w * 0.72, 640);
+    L.radX = (L.w - rw) / 2;
+    L.radW = rw;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var heat = 0;           // 阀门/加热 0..1（按住上升，松手缓降）
+  var pressing = false;
+  var dry = [0, 0];       // 两只袜子干燥度 0..1
+  var DRY_NEED = 6.5;     // 热量秒数（heat=1 时）
+  var doneFired = false;
+  var saidWarm = false;
+  var saidFirst = false;
+  var steam = [];         // 热气粒子 {x, y, vy, life, drift, r}
+  var drops = [];         // 湿袜滴水 {x, y, vy}
+
+  var SOCK_X = [0.32, 0.62];   // 挂点（相对 radW）
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    pressing = true;
+    if (!saidFirst) { saidFirst = true; say('阀门一开，管子里就有水声——热气在路上。'); }
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  // ── 声音：加热水声（低鸣+气泡感）──
+  var AC = null, humGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate * 1.5;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var lp = AC.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 260;
+      humGain = AC.createGain();
+      humGain.gain.value = 0;
+      src.connect(lp); lp.connect(humGain); humGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    heat += ((pressing && !doneFired ? 1 : 0) - heat) * Math.min(1, dt * (pressing ? 2.2 : 0.5));
+    if (humGain) humGain.gain.value = heat * 0.03;
+
+    // 烘干进度
+    if (heat > 0.25 && !doneFired) {
+      for (var i = 0; i < 2; i++) {
+        if (dry[i] < 1) {
+          dry[i] = Math.min(1, dry[i] + heat * dt / DRY_NEED);
+          if (dry[i] >= 1 && !saidWarm) {
+            saidWarm = true;
+            say('一只干透了。袜子这种东西，暖是从脚底开始的。');
+          }
+        }
+      }
+      if (dry[0] >= 1 && dry[1] >= 1 && !doneFired) {
+        doneFired = true;
+        setTimeout(function () {
+          say('都干了。明早踩进它们的时候，会替今晚谢你。', true);
+        }, 400);
+      }
+      // 热气粒子
+      if (rng() < dt * 22 * heat) {
+        var sx = L.radX + rng() * L.radW;
+        steam.push({
+          x: sx, y: L.radTop - 6,
+          vy: 22 + rng() * 26,
+          life: 0, max: 1.6 + rng() * 1.4,
+          drift: (rng() - 0.5) * 14,
+          r: 5 + rng() * 9
+        });
+      }
+      // 偶尔滴水（袜子还湿时）
+      if (rng() < dt * 1.4 * (1 - (dry[0] + dry[1]) / 2)) {
+        drops.push({
+          x: L.radX + L.radW * SOCK_X[rng() < 0.5 ? 0 : 1] + (rng() - 0.5) * 30,
+          y: L.radTop + 26,
+          vy: 30 + rng() * 30
+        });
+      }
+    }
+    for (var si = steam.length - 1; si >= 0; si--) {
+      var st = steam[si];
+      st.life += dt;
+      st.y -= st.vy * dt;
+      st.x += st.drift * dt;
+      if (st.life > st.max) steam.splice(si, 1);
+    }
+    for (var di = drops.length - 1; di >= 0; di--) {
+      var dp = drops[di];
+      dp.vy += 300 * dt;
+      dp.y += dp.vy * dt;
+      if (dp.y > h) drops.splice(di, 1);
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#14110d');
+    bg.addColorStop(1, '#0c0a07');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙面颗粒
+    ctx.fillStyle = 'rgba(200,180,140,0.02)';
+    for (var gi = 0; gi < 50; gi++) {
+      ctx.fillRect((gi * 167 + 31) % w, (gi * 233 + 57) % h, 2, 2);
+    }
+
+    // 暖光（heat 越大灯越暖）
+    if (heat > 0.02) {
+      var glowG = ctx.createRadialGradient(L.cx, L.radTop + L.radH * 0.5, 10, L.cx, L.radTop + L.radH * 0.5, Math.max(w, h) * 0.6);
+      glowG.addColorStop(0, 'rgba(224,150,80,' + (0.1 * heat).toFixed(3) + ')');
+      glowG.addColorStop(1, 'rgba(224,150,80,0)');
+      ctx.fillStyle = glowG;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 散热器：一排竖圆柱 + 上下横箱
+    var colW = 46;
+    var cols = Math.max(4, Math.round(L.radW / colW));
+    colW = L.radW / cols;
+    for (var ci = 0; ci < cols; ci++) {
+      var cx = L.radX + ci * colW;
+      var cg = ctx.createLinearGradient(cx, 0, cx + colW, 0);
+      var warm = heat;
+      cg.addColorStop(0, lerpC([56, 46, 36], [122, 78, 44], warm));
+      cg.addColorStop(0.35, lerpC([110, 92, 70], [196, 128, 72], warm));
+      cg.addColorStop(1, lerpC([46, 38, 30], [104, 66, 38], warm));
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.roundRect(cx + 2, L.radTop, colW - 4, L.radH, colW * 0.3);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(18,12,6,0.35)';
+      ctx.lineWidth = 2;
+      for (var fl = 1; fl <= 2; fl++) {
+        ctx.beginPath();
+        ctx.moveTo(cx + colW * (0.32 + fl * 0.17), L.radTop + 8);
+        ctx.lineTo(cx + colW * (0.32 + fl * 0.17), L.radTop + L.radH - 8);
+        ctx.stroke();
+      }
+    }
+    // 上下横箱
+    ctx.fillStyle = lerpC([92, 76, 58], [168, 110, 62], heat);
+    ctx.fillRect(L.radX - 10, L.radTop - 12, L.radW + 20, 18);
+    ctx.fillRect(L.radX - 10, L.radTop + L.radH - 6, L.radW + 20, 18);
+    ctx.fillStyle = 'rgba(240,220,180,0.12)';
+    ctx.fillRect(L.radX - 10, L.radTop - 10, L.radW + 20, 3);
+
+    // 阀门（左端横箱上）
+    var vx = L.radX - 22, vy = L.radTop - 20;
+    ctx.strokeStyle = lerpC([110, 53, 39], [210, 100, 60], heat);
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(vx, vy, 15, 0, Math.PI * 2);
+    ctx.stroke();
+    // 手轮辐条随 heat 旋转
+    ctx.save();
+    ctx.translate(vx, vy);
+    ctx.rotate(heat * Math.PI * 1.5);
+    ctx.strokeStyle = ctx.strokeStyle;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-15, 0); ctx.lineTo(15, 0);
+    ctx.moveTo(0, -15); ctx.lineTo(0, 15);
+    ctx.stroke();
+    ctx.restore();
+
+    // 两只袜子（搭在散热器上）
+    drawSock(0, now);
+    drawSock(1, now);
+
+    // 热气
+    for (var ti = 0; ti < steam.length; ti++) {
+      var st2 = steam[ti];
+      var a = (1 - st2.life / st2.max) * 0.16 * heat;
+      ctx.fillStyle = 'rgba(235,220,190,' + a.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(st2.x + Math.sin(st2.life * 3 + st2.r) * 6, st2.y, st2.r * (1 + st2.life * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 水滴
+    ctx.fillStyle = 'rgba(150,185,210,0.7)';
+    for (var dj = 0; dj < drops.length; dj++) {
+      ctx.beginPath();
+      ctx.ellipse(drops[dj].x, drops[dj].y, 1.6, 2.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导与进度
+    if (!saidFirst) {
+      ctx.fillStyle = 'rgba(216,198,168,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按住屏幕，拧开阀门', w / 2, L.radTop + L.radH + 56);
+      ctx.textAlign = 'left';
+    }
+    ctx.fillStyle = 'rgba(135,120,96,0.85)';
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.textAlign = 'right';
+    var dryN = (dry[0] >= 1 ? 1 : 0) + (dry[1] >= 1 ? 1 : 0);
+    ctx.fillText('干了 ' + dryN + ' / 2 只', w - 20, h - 44);
+    ctx.textAlign = 'left';
+  }
+
+  function drawSock(idx, now) {
+    var sx = L.radX + L.radW * SOCK_X[idx];
+    var sy = L.radTop - 4;
+    var d = dry[idx];
+    // 湿→干：颜色由深冷变暖亮
+    var body = lerpC([52, 62, 74], idx === 0 ? [168, 84, 70] : [122, 130, 148], d);
+    var stripe = lerpC([38, 46, 56], idx === 0 ? [226, 180, 120] : [200, 205, 216], d);
+    // 袜筒（搭在片上的环）
+    ctx.strokeStyle = body;
+    ctx.lineWidth = 13;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx - 22, sy);
+    ctx.quadraticCurveTo(sx, sy - 16, sx + 22, sy);
+    ctx.stroke();
+    // 条纹
+    ctx.strokeStyle = stripe;
+    ctx.lineWidth = 3;
+    for (var li = -1; li <= 1; li++) {
+      ctx.beginPath();
+      ctx.moveTo(sx - 22, sy + li * 4 - 2);
+      ctx.quadraticCurveTo(sx, sy - 16 + li * 4 - 2, sx + 22, sy + li * 4 - 2);
+      ctx.stroke();
+    }
+    // 垂下的一只（左袜垂右、右袜垂左，别碰着）
+    var side = idx === 0 ? 1 : -1;
+    var swing = Math.sin(now / 800 + idx * 2) * (1 - d) * 3 + Math.sin(now / 500 + idx) * heat * 2;
+    ctx.strokeStyle = body;
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.moveTo(sx + side * 20, sy + 4);
+    ctx.quadraticCurveTo(sx + side * 30, sy + 30 + swing, sx + side * 22, sy + 56 + swing);
+    ctx.stroke();
+    // 袜尖
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(sx + side * 22, sy + 60 + swing, 7, 0, Math.PI * 2);
+    ctx.fill();
+    // 干透的高光
+    if (d >= 1) {
+      ctx.fillStyle = 'rgba(255,240,210,0.25)';
+      ctx.beginPath();
+      ctx.arc(sx, sy - 8, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function lerpC(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__sock = {
+    heat: function () { return heat; },
+    dry: function () { return [dry[0], dry[1]]; },
+    done: function () { return doneFired; },
+    press: function (ms) {
+      pressing = true;
+      setTimeout(function () { pressing = false; }, ms || 500);
+    },
+    forceDry: function () {
+      dry[0] = 1; dry[1] = 1;
+      doneFired = true;
+    }
+  };
+})();
+</script>
+</body>
+</html>
