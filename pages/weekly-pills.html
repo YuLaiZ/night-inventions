@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一周药盒</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #100f13;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8e99a4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>一周药盒</h1>
+  <p>睡前把七天的药一格格分好。<br>按时吃药的人，也在认真过生活。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 680, L.h / 720)));
+    L.cx = L.w / 2;
+    L.boxY = L.h * 0.62;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var step = 'pour';        // pour 倒药 → place 分格 → done
+  var pillsOnTable = [];    // 桌上的药片 {x, y, rot}
+  var grid = [0, 0, 0, 0, 0, 0, 0];   // 七格各几粒
+  var NEED = 7;
+  var saidPour = false;
+  var doneFired = false;
+  var falling = [];         // 倒出的下落动画
+  var todayIdx = 3;         // 周四（示例）
+  var DAYS = ['一', '二', '三', '四', '五', '六', '日'];
+
+  function calcBox() {
+    var bw = Math.min(560 * L.s, L.w * 0.9);
+    return { w: bw, h: 108 * L.s, x: L.cx - bw / 2, y: L.boxY };
+  }
+
+  function cellRect(i, box) {
+    var cw = box.w / 7;
+    return { x: box.x + i * cw, y: box.y, w: cw, h: box.h };
+  }
+
+  function pillJar() {
+    return { x: L.cx - 200 * L.s, y: L.h * 0.34 };
+  }
+  function hitJar(px, py) {
+    var j = pillJar();
+    return Math.abs(px - j.x) < 60 * L.s && Math.abs(py - j.y) < 80 * L.s;
+  }
+  function hitCell(px, py) {
+    var box = calcBox();
+    for (var i = 0; i < 7; i++) {
+      var c = cellRect(i, box);
+      if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) return i;
+    }
+    return -1;
+  }
+  function hitLoosePill(px, py) {
+    for (var i = pillsOnTable.length - 1; i >= 0; i--) {
+      var p = pillsOnTable[i];
+      var dx = px - p.x, dy = py - p.y;
+      if (dx * dx + dy * dy < Math.pow(26 * L.s, 2)) return i;
+    }
+    return -1;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    var px = ev.clientX, py = ev.clientY;
+    if (step === 'pour' && hitJar(px, py)) {
+      // 倒一粒
+      var j = pillJar();
+      falling.push({ x: j.x + (rng() - 0.5) * 30 * L.s, y: j.y + 40 * L.s, vy: 40, tx: L.cx + (rng() - 0.5) * 220 * L.s, ty: L.boxY - 60 * L.s, t: 0, rot: rng() * Math.PI });
+      rattle();
+      return;
+    }
+    if (step === 'pour') {
+      // 桌上已有散粒？点击散粒直接归位到桌面待分
+      var li = hitLoosePill(px, py);
+      if (li >= 0) { tickSound(); }
+      return;
+    }
+    if (step === 'place') {
+      var pi = hitLoosePill(px, py);
+      if (pi >= 0) {
+        var cell = hitCell(px, py);
+        if (cell >= 0) {
+          // 放入该格
+          var p = pillsOnTable.splice(pi, 1)[0];
+          grid[cell]++;
+          plink();
+          var filled = grid.reduce(function (a, b) { return a + b; }, 0);
+          if (filled >= NEED && !doneFired) {
+            doneFired = true;
+            step = 'done';
+            setTimeout(function () {
+              say('七格都满了。按时吃药的人，也在认真过生活。', true);
+            }, 250);
+          } else if (cell === todayIdx) {
+            say('周四这格先满——今天的，明天别忘了吃。');
+          }
+        } else {
+          say('放进格子里——随便哪格，一周都会被排好。');
+        }
+      }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function rattle() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.18;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.4);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var hp = AC.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2400;
+    var g = AC.createGain();
+    g.gain.value = 0.045;
+    src.connect(hp); hp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+  function plink() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 1350 + rng() * 500;
+    g.gain.setValueAtTime(0.03, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.08);
+  }
+  function tickSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 700;
+    g.gain.setValueAtTime(0.02, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.05);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 下落动画落定
+    for (var fi = falling.length - 1; fi >= 0; fi--) {
+      var f = falling[fi];
+      f.t += dt / 0.55;
+      f.y += f.vy * dt;
+      f.vy += 260 * dt;
+      if (f.t >= 1 || f.y >= L.boxY - 16 * L.s) {
+        falling.splice(fi, 1);
+        pillsOnTable.push({ x: f.x, y: Math.min(f.y, L.boxY - 16 * L.s), rot: f.rot });
+        if (pillsOnTable.length >= 3 && step === 'pour') {
+          step = 'place';
+          say('倒够了。点一粒，放进格子里。');
+        }
+      }
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#131218');
+    bg.addColorStop(1, '#0a090c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 床头柜面
+    ctx.fillStyle = '#1e1a15';
+    ctx.fillRect(0, L.boxY + 130 * L.s, w, h);
+    ctx.fillStyle = 'rgba(220,210,180,0.06)';
+    ctx.fillRect(0, L.boxY + 130 * L.s, w, 2);
+
+    // 药瓶（左）
+    var j = pillJar();
+    var jarG = ctx.createLinearGradient(j.x - 50 * L.s, 0, j.x + 50 * L.s, 0);
+    jarG.addColorStop(0, '#3c3428');
+    jarG.addColorStop(0.5, '#574838');
+    jarG.addColorStop(1, '#332b22');
+    ctx.fillStyle = jarG;
+    ctx.beginPath();
+    ctx.roundRect(j.x - 44 * L.s, j.y - 60 * L.s, 88 * L.s, 130 * L.s, 10 * L.s);
+    ctx.fill();
+    // 瓶盖
+    ctx.fillStyle = '#e8e2d2';
+    ctx.beginPath();
+    ctx.roundRect(j.x - 46 * L.s, j.y - 78 * L.s, 92 * L.s, 24 * L.s, 5);
+    ctx.fill();
+    // 标签
+    ctx.fillStyle = 'rgba(238,232,218,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(j.x - 36 * L.s, j.y - 24 * L.s, 72 * L.s, 56 * L.s, 3);
+    ctx.fill();
+    ctx.fillStyle = '#5a5040';
+    ctx.font = Math.round(11 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('每晚一粒', j.x, j.y + 4 * L.s);
+    ctx.fillText('睡前服用', j.x, j.y + 22 * L.s);
+    ctx.textAlign = 'left';
+
+    // 药盒（七格）
+    var box = calcBox();
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.roundRect(box.x + 5, box.y + 8, box.w, box.h, 10);
+    ctx.fill();
+    // 盒体
+    var boxG = ctx.createLinearGradient(box.x, 0, box.x + box.w, 0);
+    boxG.addColorStop(0, '#4a5560');
+    boxG.addColorStop(0.5, '#5e6a76');
+    boxG.addColorStop(1, '#414c56');
+    ctx.fillStyle = boxG;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 10);
+    ctx.fill();
+    // 七格
+    var dayTone = [
+      'rgba(190,120,110,0.35)', 'rgba(190,150,100,0.32)', 'rgba(170,170,100,0.3)',
+      'rgba(110,160,110,0.32)', 'rgba(100,150,180,0.32)', 'rgba(130,120,180,0.3)',
+      'rgba(170,120,160,0.32)'
+    ];
+    for (var i = 0; i < 7; i++) {
+      var c = cellRect(i, box);
+      var pad = 6 * L.s;
+      // 格底色
+      ctx.fillStyle = dayTone[i];
+      ctx.beginPath();
+      ctx.roundRect(c.x + pad / 2, c.y + pad / 2 + 14 * L.s, c.w - pad, box.h - pad - 16 * L.s, 5);
+      ctx.fill();
+      // 格里的药
+      for (var gi = 0; gi < grid[i]; gi++) {
+        var px2 = c.x + c.w / 2 + (gi % 2 === 0 ? -7 : 7) * L.s;
+        var py2 = c.y + box.h - 22 * L.s - Math.floor(gi / 2) * 14 * L.s;
+        drawPill(px2, py2);
+      }
+      // 星期字
+      ctx.fillStyle = i === todayIdx ? 'rgba(235,225,200,0.95)' : 'rgba(210,215,225,0.55)';
+      ctx.font = Math.round(12 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(DAYS[i], c.x + c.w / 2, c.y + 14 * L.s);
+      if (i === todayIdx) {
+        ctx.fillStyle = 'rgba(235,200,120,0.9)';
+        ctx.beginPath();
+        ctx.arc(c.x + c.w / 2, c.y + 22 * L.s, 2.4 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.textAlign = 'left';
+
+    // 桌上散粒
+    for (var pi = 0; pi < pillsOnTable.length; pi++) {
+      drawPill(pillsOnTable[pi].x, pillsOnTable[pi].y);
+    }
+    // 下落中
+    for (var fj = 0; fj < falling.length; fj++) {
+      drawPill(falling[fj].x, falling[fj].y);
+    }
+
+    // 引导
+    if (!doneFired) {
+      var hint = step === 'pour' ? '点药瓶，倒一粒' : '点药片，放进格子里';
+      ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, w / 2, h - 96);
+      ctx.textAlign = 'left';
+      var total = grid.reduce(function (a, b) { return a + b; }, 0);
+      ctx.fillStyle = 'rgba(142,153,164,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(total + ' / ' + NEED, w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function drawPill(x, y) {
+    ctx.fillStyle = '#f0ece0';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 7.5 * L.s, 5 * L.s, 0.3 + rng() * 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(160,150,130,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x + 1.5 * L.s, y + 1 * L.s, 4.5 * L.s, 2.6 * L.s, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__pills = {
+    filled: function () { return grid.reduce(function (a, b) { return a + b; }, 0); },
+    loose: function () { return pillsOnTable.length; },
+    done: function () { return doneFired; },
+    pour: function () {
+      // 倒三粒到桌上（直接落定，走同一数组）
+      for (var i = 0; i < 3; i++) {
+        pillsOnTable.push({ x: L.cx + (rng() - 0.5) * 220 * L.s, y: L.boxY - 30 * L.s, rot: rng() * Math.PI });
+      }
+      if (step === 'pour') step = 'place';
+    },
+    fill: function (i) {
+      var cell = (i == null ? grid.findIndex(function (g) { return g === 0; }) : i);
+      if (cell >= 0 && cell < 7 && pillsOnTable.length > 0) {
+        pillsOnTable.pop();
+        grid[cell]++;
+        var filled = grid.reduce(function (a, b) { return a + b; }, 0);
+        if (filled >= NEED) { doneFired = true; step = 'done'; }
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

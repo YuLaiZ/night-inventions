@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>歪相框</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12131a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #94a0ad;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #ccd6de; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #76828e; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #ccd6de;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #48525c;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #76828e;
+    text-decoration: none;
+    border-bottom: 1px dotted #76828e;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #ccd6de; border-color: #ccd6de; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>歪相框</h1>
+  <p>墙上的相框歪了三天，路过八回，扶了零回。<br>今晚按住它，扶稳——歪着的东西，总有人记得扶。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 640, L.h / 720)));
+    L.cx = L.w / 2;
+    L.nailY = L.h * 0.3;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var angle = -16;          // 当前倾角（度），目标 0
+  var vel = 0;              // 角速度
+  var held = false;         // 扶稳中
+  var holdT = 0;            // 连续扶稳时长（angle 近 0 时累计）
+  var doneFired = false;
+  var saidFirst = false;
+  var bubble = -0.8;        // 水平仪气泡 -1..1
+  var knocks = 0;
+  var dust = [];
+
+  var FW, FH;               // 相框宽高
+  function calcF() {
+    FW = 170 * L.s;
+    FH = 210 * L.s;
+  }
+  calcF();
+
+  function frameTop() { return L.nailY + 16 * L.s; }
+  function hitFrame(px, py) {
+    // 粗判：相框包围盒（忽略角度细节）
+    var cy = frameTop() + FH / 2;
+    return Math.abs(px - L.cx) < FW * 0.75 && Math.abs(py - cy) < FH * 0.62;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired) return;
+    if (hitFrame(ev.clientX, ev.clientY)) {
+      held = true;
+      if (!saidFirst) { saidFirst = true; say('手扶住，别急着松——让它稳稳地正过来。'); }
+      else if (knocks >= 1) { say('扶着呢。稳住——气泡快到中间了。'); }
+    } else {
+      // 点墙=推一下（更歪/晃）
+      knocks++;
+      vel += (ev.clientX < L.cx ? -6 : 6);
+      say('哎——越推越歪了。扶住它，别推。');
+    }
+  });
+  window.addEventListener('pointerup', function () {
+    if (held && !doneFired && holdT < 1.2) say('松太快了——再扶一会儿。');
+    held = false;
+  });
+  window.addEventListener('pointercancel', function () { held = false; });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function knockSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 140 + rng() * 60;
+    g.gain.setValueAtTime(0.03, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.09);
+  }
+  function settleSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.02, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.31);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcF();
+
+    // 摆动物理
+    if (!held) {
+      // 单摆回复+阻尼
+      var accel = -angle * 2.2;
+      vel += accel * dt;
+      vel *= Math.pow(0.45, dt);
+      angle += vel * dt;
+    } else {
+      // 扶稳：角度快速归零、气泡滑向中央
+      angle += (0 - angle) * Math.min(1, dt * 6);
+      vel *= Math.pow(0.1, dt);
+      if (Math.abs(angle) < 1.2) {
+        holdT += dt;
+        if (!doneFired && holdT >= 1.5) {
+          doneFired = true;
+          settleSound();
+          say('正了。歪着的东西，总有人会记得扶。', true);
+        }
+      } else {
+        holdT = 0;
+      }
+    }
+    bubble += ((angle / -16) - bubble) * Math.min(1, dt * 5);
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#151820');
+    bg.addColorStop(1, '#0c0e13');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙面微光
+    var wallG = ctx.createRadialGradient(w * 0.5, L.nailY, 0, w * 0.5, L.nailY, w * 0.55);
+    wallG.addColorStop(0, 'rgba(190,200,220,0.07)');
+    wallG.addColorStop(1, 'rgba(190,200,220,0)');
+    ctx.fillStyle = wallG;
+    ctx.fillRect(0, 0, w, h);
+
+    // 钉子
+    ctx.fillStyle = '#6a727c';
+    ctx.beginPath();
+    ctx.arc(L.cx, L.nailY, 4 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(L.cx - 1.2, L.nailY - 1.2, 1.4 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 相框（绕钉子下方挂点摆动）
+    var pivotY = L.nailY + 10 * L.s;
+    ctx.save();
+    ctx.translate(L.cx, pivotY);
+    ctx.rotate(angle * Math.PI / 180);
+
+    // 挂绳（三角）
+    ctx.strokeStyle = '#7a6a4a';
+    ctx.lineWidth = 2 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-FW * 0.32, FH * 0.06);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(FW * 0.32, FH * 0.06);
+    ctx.stroke();
+
+    // 框体
+    var fx = -FW / 2, fy = FH * 0.06;
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.roundRect(fx + 5, fy + 7, FW, FH, 6);
+    ctx.fill();
+    var frameG = ctx.createLinearGradient(fx, 0, fx + FW, 0);
+    frameG.addColorStop(0, '#7a5c3c');
+    frameG.addColorStop(0.5, '#9a7850');
+    frameG.addColorStop(1, '#6a4e34');
+    ctx.fillStyle = frameG;
+    ctx.beginPath();
+    ctx.roundRect(fx, fy, FW, FH, 5);
+    ctx.fill();
+    // 画面（夜色小画：山与灯）
+    var pad = 12 * L.s;
+    var pw = FW - pad * 2, ph = FH - pad * 2;
+    var picG = ctx.createLinearGradient(fx + pad, fy + pad, fx + pad, fy + pad + ph);
+    picG.addColorStop(0, '#232c3e');
+    picG.addColorStop(1, '#12161f');
+    ctx.fillStyle = picG;
+    ctx.fillRect(fx + pad, fy + pad, pw, ph);
+    // 画：远山两层
+    ctx.fillStyle = '#2c3a52';
+    ctx.beginPath();
+    ctx.moveTo(fx + pad, fy + pad + ph * 0.72);
+    ctx.quadraticCurveTo(fx + pad + pw * 0.3, fy + pad + ph * 0.42, fx + pad + pw * 0.55, fy + pad + ph * 0.7);
+    ctx.quadraticCurveTo(fx + pad + pw * 0.75, fy + pad + ph * 0.88, fx + pad + pw, fy + pad + ph * 0.68);
+    ctx.lineTo(fx + pad + pw, fy + pad + ph);
+    ctx.lineTo(fx + pad, fy + pad + ph);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#1a2436';
+    ctx.beginPath();
+    ctx.moveTo(fx + pad, fy + pad + ph * 0.9);
+    ctx.quadraticCurveTo(fx + pad + pw * 0.4, fy + pad + ph * 0.66, fx + pad + pw, fy + pad + ph * 0.86);
+    ctx.lineTo(fx + pad + pw, fy + pad + ph);
+    ctx.lineTo(fx + pad, fy + pad + ph);
+    ctx.closePath();
+    ctx.fill();
+    // 画：一盏小灯
+    var lampX = fx + pad + pw * 0.68, lampY = fy + pad + ph * 0.6;
+    var lampG = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, 22 * L.s);
+    lampG.addColorStop(0, 'rgba(240,200,120,0.5)');
+    lampG.addColorStop(1, 'rgba(240,200,120,0)');
+    ctx.fillStyle = lampG;
+    ctx.beginPath();
+    ctx.arc(lampX, lampY, 22 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e8c882';
+    ctx.beginPath();
+    ctx.arc(lampX, lampY, 3.2 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 玻璃反光
+    ctx.strokeStyle = 'rgba(235,242,250,0.14)';
+    ctx.lineWidth = 8 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(fx + pad + 6, fy + pad + ph * 0.9);
+    ctx.lineTo(fx + pad + pw * 0.5, fy + pad + 8);
+    ctx.stroke();
+
+    // 顶部小水平仪（框上沿）
+    var lvW = 56 * L.s;
+    ctx.fillStyle = 'rgba(20,24,30,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(-lvW / 2, fy - 20 * L.s, lvW, 12 * L.s, 6);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, fy - 20 * L.s + 2);
+    ctx.lineTo(0, fy - 10 * L.s);
+    ctx.stroke();
+    // 气泡
+    var bX = bubble * (lvW / 2 - 7 * L.s);
+    ctx.fillStyle = doneFired ? 'rgba(140,220,150,0.95)' : 'rgba(230,220,140,0.9)';
+    ctx.beginPath();
+    ctx.arc(bX, fy - 14 * L.s, 4.4 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // 扶稳提示（手扶时的双环）
+    if (held) {
+      ctx.strokeStyle = 'rgba(200,215,230,' + (0.25 + 0.15 * Math.sin(now / 260)).toFixed(2) + ')';
+      ctx.lineWidth = 2;
+      var cy2 = frameTop() + FH / 2;
+      ctx.beginPath();
+      ctx.arc(L.cx, cy2, FW * 0.72, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 引导
+    if (!doneFired) {
+      var hint = !saidFirst ? '点相框，扶住它' : (held ? '稳住——等气泡回到中间' : '按住相框，扶稳');
+      ctx.fillStyle = 'rgba(204,214,222,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, w / 2, h - 96);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__frame = {
+    angle: function () { return +angle.toFixed(1); },
+    held: function () { return held; },
+    done: function () { return doneFired; },
+    hold: function (ms) {
+      held = true;
+      setTimeout(function () { held = false; }, ms || 500);
+    },
+    push: function (dir) { vel += (dir || 1) * 5; knocks++; }
+  };
+})();
+</script>
+</body>
+</html>

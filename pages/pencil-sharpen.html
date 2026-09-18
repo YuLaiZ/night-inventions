@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>削铅笔</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #131009;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a89880;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d8c6a8; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #877860; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d8c6a8;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #55493a;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #877860;
+    text-decoration: none;
+    border-bottom: 1px dotted #877860;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d8c6a8; border-color: #d8c6a8; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>削铅笔</h1>
+  <p>笔钝了不要紧，卷笔刀还认得它。<br>插进去，摇六圈——明天写什么，都尖着写。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.15, Math.min(L.w / 560, L.h / 640)));
+    L.cx = L.w / 2 - 40 * L.s;
+    L.cy = L.h * 0.54;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态机：insert 插笔 → grind 摇 → done ──
+  var stage = 'insert';     // insert / grinding / done
+  var inserted = false;
+  var turns = 0;            // 已摇圈数
+  var NEED = 6;
+  var crankAng = 0;         // 摇柄角
+  var pressing = false;
+  var shavings = 0;         // 木屑卷长度 0..1
+  var saidInsert = false, saidHalf = false;
+  var doneFired = false;
+  var creakAt = 0;
+
+  var sharpX = 0, sharpY = 0;
+  function calcSharp() {
+    sharpX = L.cx + 120 * L.s;
+    sharpY = L.cy + 10 * L.s;
+  }
+  calcSharp();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (stage === 'insert') {
+      // 点铅笔或卷笔刀都算插
+      inserted = true;
+      stage = 'grinding';
+      click();
+      if (!saidInsert) { saidInsert = true; say('咔。插到底——摇的时候别晃。'); }
+      return;
+    }
+    if (stage === 'grinding') {
+      pressing = true;
+    }
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function creak() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.type = 'sawtooth';
+    o.frequency.value = 90 + rng() * 40;
+    g.gain.setValueAtTime(0.02, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    var lp = AC.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 600;
+    o.connect(lp); lp.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.12);
+  }
+  function click() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 1200;
+    g.gain.setValueAtTime(0.04, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.06);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcSharp();
+
+    if (pressing && stage === 'grinding' && !doneFired) {
+      crankAng += dt * 7;
+      var prevTurns = turns;
+      turns = Math.min(NEED, turns + dt * 1.15);
+      shavings = turns / NEED;
+      if (now - creakAt > 260) { creakAt = now; creak(); }
+      if (prevTurns < 3 && turns >= 3 && !saidHalf) {
+        saidHalf = true;
+        say('木屑出来了。再几圈，笔尖就睡醒了。');
+      }
+      if (turns >= NEED && !doneFired) {
+        doneFired = true;
+        stage = 'done';
+        say('削好了。明天写什么，都尖着写。', true);
+      }
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#161309');
+    bg.addColorStop(1, '#0d0a06');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 桌面
+    var deskG = ctx.createLinearGradient(0, h * 0.68, 0, h);
+    deskG.addColorStop(0, 'rgba(44,34,20,0)');
+    deskG.addColorStop(0.4, '#2c2214');
+    deskG.addColorStop(1, '#1c1509');
+    ctx.fillStyle = deskG;
+    ctx.fillRect(0, h * 0.68, w, h * 0.32);
+    // 木纹
+    ctx.strokeStyle = 'rgba(180,150,100,0.06)';
+    ctx.lineWidth = 1;
+    for (var gi = 0; gi < 6; gi++) {
+      ctx.beginPath();
+      ctx.moveTo(0, h * 0.7 + gi * 26 * L.s);
+      ctx.bezierCurveTo(w * 0.3, h * 0.7 + gi * 26 * L.s + 6, w * 0.6, h * 0.7 + gi * 26 * L.s - 6, w, h * 0.7 + gi * 26 * L.s);
+      ctx.stroke();
+    }
+
+    // 铅笔（未插入时整支躺在桌上；插入后横穿刀身，笔尾在左、尖从右伸出渐尖）
+    var pencilY = L.cy - 30 * L.s;
+    if (!inserted) {
+      drawPencil(L.cx - 170 * L.s, pencilY + 90 * L.s, 0, Math.PI * 0.985, false);
+    } else {
+      // 插入态：笔水平穿盒（y 对准盒内插孔高度），中段被盒身挡住
+      var penY = sharpY - 12 * L.s;
+      drawPencilBody(sharpX - 150 * L.s, penY, sharpX + 90 * L.s, penY);
+      // 前伸的笔头（削尖部分）
+      var tipLen = 18 * L.s + turns / NEED * 16 * L.s;
+      var tipR = 10 + (1 - turns / NEED) * 4;
+      drawTip(sharpX + 90 * L.s, penY, tipLen, tipR, turns / NEED);
+    }
+
+    // 卷笔刀（铁皮小盒）
+    ctx.save();
+    ctx.translate(sharpX, sharpY);
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(6, 44 * L.s, 52 * L.s, 10 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 盒身
+    var bgG = ctx.createLinearGradient(-40 * L.s, 0, 40 * L.s, 0);
+    bgG.addColorStop(0, '#7a4a3a');
+    bgG.addColorStop(0.5, '#a05a44');
+    bgG.addColorStop(1, '#6a3f30');
+    ctx.fillStyle = bgG;
+    ctx.beginPath();
+    ctx.roundRect(-40 * L.s, -42 * L.s, 80 * L.s, 84 * L.s, 6);
+    ctx.fill();
+    // 进笔口（盒左缘中部，对准笔的高度）
+    ctx.fillStyle = '#241610';
+    ctx.beginPath();
+    ctx.ellipse(-40 * L.s, -12 * L.s, 5 * L.s, 10 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,220,180,0.15)';
+    ctx.beginPath();
+    ctx.arc(-42 * L.s, -16 * L.s, 3 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 摇柄（轴心在盒右侧）
+    ctx.strokeStyle = '#8a8f96';
+    ctx.lineWidth = 5 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(38 * L.s, 0);
+    var crankR = 34 * L.s;
+    var cxx = 38 * L.s + Math.cos(crankAng) * crankR;
+    var cyy = Math.sin(crankAng) * crankR;
+    ctx.lineTo(cxx, cyy);
+    ctx.stroke();
+    // 摇柄握把
+    ctx.fillStyle = '#3a342c';
+    ctx.beginPath();
+    ctx.arc(cxx, cyy, 7 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 轴心
+    ctx.fillStyle = '#5a5148';
+    ctx.beginPath();
+    ctx.arc(38 * L.s, 0, 6 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 木屑卷（从盒前脸垂落，越长越卷）
+    if (shavings > 0.05) {
+      var shLen = 20 + shavings * 66;
+      ctx.save();
+      ctx.translate(sharpX - 12 * L.s, sharpY + 30 * L.s);
+      ctx.strokeStyle = '#e0c288';
+      ctx.lineWidth = 7 * L.s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      var wob = Math.sin(now / 300) * 2;
+      ctx.bezierCurveTo(-10 * L.s, shLen * 0.3, 8 * L.s + wob, shLen * 0.6, -4 * L.s, shLen);
+      ctx.stroke();
+      // 卷曲内缘
+      ctx.strokeStyle = 'rgba(160,120,60,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(2, 4);
+      ctx.bezierCurveTo(-8 * L.s, shLen * 0.3, 10 * L.s + wob, shLen * 0.6, -2 * L.s, shLen - 4);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 引导
+    if (!doneFired) {
+      var hint = stage === 'insert' ? '点铅笔，插进卷笔刀' : '按住卷笔刀，摇';
+      ctx.fillStyle = 'rgba(216,198,168,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, w / 2, h - 96);
+      ctx.textAlign = 'left';
+      // 圈数（等宽）
+      if (stage !== 'insert') {
+        ctx.fillStyle = 'rgba(135,120,96,0.85)';
+        ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(Math.min(NEED, Math.ceil(turns)) + ' / ' + NEED + ' 圈', w - 20, h - 44);
+        ctx.textAlign = 'left';
+      }
+    }
+  }
+
+  function drawPencilBody(x1, y1, x2, y2) {
+    var ang = Math.atan2(y2 - y1, x2 - x1);
+    ctx.save();
+    ctx.translate(x1, y1);
+    ctx.rotate(ang);
+    // 六角笔杆（三层色模拟棱面）
+    var len = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+    ctx.fillStyle = '#d8a83c';
+    ctx.fillRect(0, -8 * L.s, len, 8 * L.s);
+    ctx.fillStyle = '#e8bc4c';
+    ctx.fillRect(0, -8 * L.s, len, 5 * L.s);
+    ctx.fillStyle = '#b8882c';
+    ctx.fillRect(0, -1 * L.s, len, 3 * L.s);
+    // 笔杆金属箍+橡皮
+    ctx.fillStyle = '#b8b8b8';
+    ctx.fillRect(0, -8 * L.s, 6 * L.s, 8 * L.s);
+    ctx.fillStyle = '#d87a6a';
+    ctx.fillRect(-8 * L.s, -7.5 * L.s, 8 * L.s, 7 * L.s);
+    ctx.restore();
+  }
+
+  function drawPencil(x, y, tipLen, ang, sharp) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.fillStyle = '#d8a83c';
+    ctx.fillRect(0, -8 * L.s, 150 * L.s, 8 * L.s);
+    ctx.fillStyle = '#e8bc4c';
+    ctx.fillRect(0, -8 * L.s, 150 * L.s, 5 * L.s);
+    ctx.fillStyle = '#b8882c';
+    ctx.fillRect(0, -1 * L.s, 150 * L.s, 3 * L.s);
+    // 秃头（未削）
+    ctx.fillStyle = '#3a3230';
+    ctx.beginPath();
+    ctx.ellipse(150 * L.s, -4 * L.s, 5 * L.s, 4 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawTip(x, y, len, tipR, progress) {
+    // 削尖的笔头：木色锥体+铅芯
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(0);
+    var h = 8 * L.s;
+    // 木锥（削面两层色）
+    ctx.fillStyle = '#e8c88a';
+    ctx.beginPath();
+    ctx.moveTo(0, -h);
+    ctx.lineTo(len, -h * 0.12);
+    ctx.lineTo(len, h * 0.12);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#c8a060';
+    ctx.beginPath();
+    ctx.moveTo(0, -h);
+    ctx.lineTo(len, -h * 0.12);
+    ctx.lineTo(len, h * 0.12);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.globalAlpha = 0.4;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // 削痕（环纹）
+    ctx.strokeStyle = 'rgba(140,100,50,0.5)';
+    ctx.lineWidth = 0.8;
+    for (var ri = 1; ri <= 3; ri++) {
+      var rt = ri / 4;
+      ctx.beginPath();
+      ctx.moveTo(len * rt, -h * (1 - rt) + h * 0.12 * rt);
+      ctx.lineTo(len * rt, h * (1 - rt) - h * 0.12 * rt);
+      ctx.stroke();
+    }
+    // 铅芯（progress 满才露尖）
+    if (progress > 0.7) {
+      ctx.fillStyle = '#26221e';
+      ctx.beginPath();
+      ctx.moveTo(len * 0.72, -h * 0.24);
+      ctx.lineTo(len, 0);
+      ctx.lineTo(len * 0.72, h * 0.24);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__pencil = {
+    turns: function () { return +turns.toFixed(1); },
+    done: function () { return doneFired; },
+    insert: function () {
+      if (stage === 'insert') { inserted = true; stage = 'grinding'; }
+    },
+    grind: function (ms) {
+      if (stage !== 'grinding') { inserted = true; stage = 'grinding'; }
+      pressing = true;
+      setTimeout(function () { pressing = false; }, ms || 500);
+    },
+    forceDone: function () {
+      inserted = true;
+      stage = 'grinding';
+      turns = NEED;
+      doneFired = true;
+      stage = 'done';
+    }
+  };
+})();
+</script>
+</body>
+</html>

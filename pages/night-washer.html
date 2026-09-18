@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>深夜洗衣机</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0e1013;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #93a0ab;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #ccd6de; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #75808a; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #ccd6de;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #474f58;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #75808a;
+    text-decoration: none;
+    border-bottom: 1px dotted #75808a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #ccd6de; border-color: #ccd6de; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>深夜洗衣机</h1>
+  <p>白天的衬衫攒了一天，夜里交给滚筒。<br>点门装衣、按开始——然后听着它，替你把今天洗干净。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 640, L.h / 760)));
+    L.cx = L.w / 2;
+    L.drumY = L.h * 0.52;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态机：door(开门) → loaded → running(洗/漂/甩) → done ──
+  var stage = 'door';       // door / loaded / running / done
+  var doorOpen = true;
+  var doorT = 1;            // 门开合动画 0..1（1=开）
+  var phase = -1;           // -1 未开始 0 洗涤 1 漂洗 2 甩干 3 完成
+  var phaseT = 0;           // 当前阶段进度 0..1
+  var PHASE_DUR = [16, 12, 8];   // 秒（洗涤/漂洗/甩干）
+  var drumAng = 0;
+  var dir = 1;              // 正反转
+  var dirSwapAt = 0;
+  var foam = [];
+  var waterLevel = 0;       // 0..1
+  var saidLoad = false, saidStart = false, saidRinse = false, saidSpin = false;
+  var doneFired = false;
+  var shakeAmp = 0;
+  var humFreq = 60;
+
+  var DRUM_R = 0;
+  function calcR() { DRUM_R = 138 * L.s; }
+  calcR();
+
+  // 衣物团（滚筒里的布块）
+  var clothes = [];
+  for (var ci = 0; ci < 6; ci++) {
+    clothes.push({
+      a: rng() * Math.PI * 2,
+      r: 0.3 + rng() * 0.5,          // 距筒心比例
+      s: 16 + rng() * 14,            // 尺寸
+      col: ['#b8483e', '#4a6a8a', '#c8b070', '#6a8a5a', '#8a6a9a', '#c0c8cc'][ci],
+      rot: rng() * Math.PI
+    });
+  }
+
+  function hitDoor(px, py) {
+    var dx = px - L.cx, dy = py - L.drumY;
+    return dx * dx + dy * dy < Math.pow(DRUM_R * 1.1, 2);
+  }
+  function hitStart(px, py) {
+    var bw = DRUM_R * 2.5, bh = DRUM_R * 2.6;
+    var sx = L.cx + bw * 0.27, sy = L.drumY - bh * 0.62 + bh * 0.08 + bh * 0.04;
+    return Math.abs(px - sx) < 44 * L.s && Math.abs(py - sy) < 22 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (stage === 'door' && hitDoor(ev.clientX, ev.clientY)) {
+      // 装衣并关门
+      doorOpen = false;
+      doorT = 0.999;
+      stage = 'loaded';
+      if (!saidLoad) { saidLoad = true; say('衣服进去了。门关严——它认死理。'); }
+      return;
+    }
+    if (stage === 'loaded' && hitStart(ev.clientX, ev.clientY)) {
+      stage = 'running';
+      phase = 0;
+      phaseT = 0;
+      dirSwapAt = Date.now() + 2200;
+      if (!saidStart) { saidStart = true; say('启动了。接下来的一刻钟，交给它。'); }
+      return;
+    }
+    if (stage === 'done' && hitDoor(ev.clientX, ev.clientY)) {
+      // 重开一筒
+      stage = 'door';
+      doorOpen = true;
+      doorT = 1;
+      phase = -1;
+      waterLevel = 0;
+      foam = [];
+      doneFired = false;
+      saidLoad = false; saidStart = false; saidRinse = false; saidSpin = false;
+      say('下一筒。攒着的脏衣服，还多着呢。');
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null, humOsc = null, humGain = null, waterGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      humOsc = AC.createOscillator();
+      humOsc.type = 'sine';
+      humOsc.frequency.value = 55;
+      humGain = AC.createGain();
+      humGain.gain.value = 0;
+      humOsc.connect(humGain); humGain.connect(AC.destination);
+      humOsc.start();
+      var len = AC.sampleRate;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var lp = AC.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 1100;
+      waterGain = AC.createGain();
+      waterGain.gain.value = 0;
+      src.connect(lp); lp.connect(waterGain); waterGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+  function ding() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 1318;
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.72);
+    var o2 = AC.createOscillator();
+    var g2 = AC.createGain();
+    o2.frequency.value = 1760;
+    g2.gain.setValueAtTime(0.03, t);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    o2.connect(g2); g2.connect(AC.destination);
+    o2.start(t); o2.stop(t + 0.62);
+  }
+
+  function advancePhase() {
+    phaseT = 0;
+    phase++;
+    if (phase === 1) {
+      if (!saidRinse) { saidRinse = true; say('漂洗。泡沫走了，水又清了一遍——它做事不糊弄。'); }
+      waterLevel = 0.8;
+    }
+    if (phase === 2) {
+      if (!saidSpin) { saidSpin = true; say('甩干了。抱紧了——它转起来可不管谁在看。'); }
+    }
+    if (phase >= 3) {
+      phase = 3;
+      stage = 'done';
+      shakeAmp = 0;
+      doneFired = true;
+      ding();
+      say('叮。衣服还温着——今天就算洗干净了。', true);
+    }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcR();
+
+    // 门动画
+    if (doorT > 0 && doorOpen && doorT < 1) doorT = Math.min(1, doorT + dt * 2);
+    if (!doorOpen && doorT > 0) doorT = Math.max(0, doorT - dt * 2);
+
+    if (stage === 'running') {
+      phaseT += dt / PHASE_DUR[phase];
+      // 滚筒转速与方向
+      if (phase === 2) {
+        drumAng += dt * 9;
+        shakeAmp = 0.5 + 0.5 * Math.sin(now / 220);
+      } else {
+        if (Date.now() > dirSwapAt) {
+          dir *= -1;
+          dirSwapAt = Date.now() + 2200;
+          if (waterLevel > 0.2) {
+            for (var fb = 0; fb < 3; fb++) foam.push({ x: L.cx + (rng() - 0.5) * DRUM_R, y: L.drumY + (rng() - 0.3) * DRUM_R * 0.8, r: 4 + rng() * 8, born: now });
+          }
+        }
+        drumAng += dir * dt * 2.6;
+        shakeAmp = Math.max(0, shakeAmp - dt);
+      }
+      // 水位与泡沫
+      if (phase === 0) waterLevel = Math.min(1, waterLevel + dt / 4);
+      if (phase === 1 && waterLevel > 0) waterLevel = Math.max(0, waterLevel - dt / 6);
+      if (phase === 0 && rng() < dt * 8 * waterLevel) {
+        foam.push({ x: L.cx + (rng() - 0.5) * DRUM_R * 1.4, y: L.drumY + (rng() - 0.4) * DRUM_R * 0.7, r: 3 + rng() * 7, born: now });
+      }
+      for (var fi = foam.length - 1; fi >= 0; fi--) {
+        var f = foam[fi];
+        f.y -= dt * 6;
+        if (now - f.born > 2400) foam.splice(fi, 1);
+      }
+      // 阶段推进
+      if (phaseT >= 1) advancePhase();
+      // 声音
+      if (humGain) {
+        humFreq = phase === 2 ? 55 + phaseT * 90 : 55 + dir * 4;
+        humOsc.frequency.value = humFreq;
+        humGain.gain.value = 0.03 + (phase === 2 ? 0.02 : 0);
+      }
+      if (waterGain) waterGain.gain.value = phase === 2 ? 0 : 0.018 * (waterLevel > 0.1 ? 1 : 0);
+    } else {
+      if (humGain) humGain.gain.value = Math.max(0, humGain.gain.value - dt * 0.05);
+      if (waterGain) waterGain.gain.value = Math.max(0, waterGain.gain.value - dt * 0.05);
+    }
+
+    // ── 绘制 ──
+    // 洗衣房暗色墙
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#14171b');
+    bg.addColorStop(1, '#0b0d10');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 夜灯一角
+    var lamp = ctx.createRadialGradient(w * 0.82, h * 0.16, 0, w * 0.82, h * 0.16, w * 0.35);
+    lamp.addColorStop(0, 'rgba(190,205,190,0.08)');
+    lamp.addColorStop(1, 'rgba(190,205,190,0)');
+    ctx.fillStyle = lamp;
+    ctx.fillRect(0, 0, w, h);
+
+    // 机体（方箱）
+    var bx = L.cx, by = L.drumY;
+    var bodyW = DRUM_R * 2.5, bodyH = DRUM_R * 2.6;
+    var bodyX = bx - bodyW / 2, bodyY = by - bodyH * 0.62;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(bodyX + 8, bodyY + 12, bodyW, bodyH, 14);
+    ctx.fill();
+    var bodyG = ctx.createLinearGradient(bodyX, 0, bodyX + bodyW, 0);
+    bodyG.addColorStop(0, '#c8ccd0');
+    bodyG.addColorStop(0.5, '#e4e8ec');
+    bodyG.addColorStop(1, '#b4babf');
+    ctx.fillStyle = bodyG;
+    ctx.beginPath();
+    ctx.roundRect(bodyX, bodyY, bodyW, bodyH, 14);
+    ctx.fill();
+    // 顶面板（控制区）
+    ctx.fillStyle = '#a8b0b6';
+    ctx.beginPath();
+    ctx.roundRect(bodyX + 10, bodyY + 8, bodyW - 20, bodyH * 0.16, 8);
+    ctx.fill();
+
+    // 开始键（顶面板内，loaded 后亮起）
+    var bodyW2 = DRUM_R * 2.5, bodyH2 = DRUM_R * 2.6;
+    var bodyY2 = by - bodyH2 * 0.62;
+    var sbx = L.cx + bodyW2 * 0.27;
+    var sby = bodyY2 + bodyH2 * 0.08 + bodyH2 * 0.045;
+    var on = stage === 'running';
+    ctx.fillStyle = on ? '#7ac48a' : (stage === 'loaded' ? 'rgba(122,196,138,' + (0.5 + 0.3 * Math.sin(now / 380)).toFixed(2) + ')' : '#5a636b');
+    ctx.beginPath();
+    ctx.roundRect(sbx - 40 * L.s, sby - 15 * L.s, 80 * L.s, 30 * L.s, 7);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = Math.round(12 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(on ? '运行中' : (stage === 'loaded' ? '开始' : '开始'), sbx, sby + 4 * L.s);
+    // 程序字样
+    ctx.fillStyle = 'rgba(60,68,74,0.85)';
+    ctx.fillText('标准 · 棉织物', L.cx - bodyW2 * 0.27, sby + 4 * L.s);
+    ctx.textAlign = 'left';
+
+    // 舷窗门（外圈）
+    var shakeX = Math.sin(now / 30) * shakeAmp * 4;
+    ctx.save();
+    ctx.translate(bx + shakeX, by);
+    ctx.fillStyle = '#333a40';
+    ctx.beginPath();
+    ctx.arc(0, 0, DRUM_R + 16 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#8f979e';
+    ctx.lineWidth = 7 * L.s;
+    ctx.beginPath();
+    ctx.arc(0, 0, DRUM_R + 8 * L.s, 0, Math.PI * 2);
+    ctx.stroke();
+    // 舷窗玻璃（内部）
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, DRUM_R, 0, Math.PI * 2);
+    ctx.clip();
+    // 筒内底色
+    var inG = ctx.createRadialGradient(0, 0, DRUM_R * 0.2, 0, 0, DRUM_R);
+    inG.addColorStop(0, stage === 'running' || stage === 'done' ? '#3c444c' : '#22282d');
+    inG.addColorStop(1, '#181d22');
+    ctx.fillStyle = inG;
+    ctx.fillRect(-DRUM_R, -DRUM_R, DRUM_R * 2, DRUM_R * 2);
+    // 水位（洗/漂时）
+    if (waterLevel > 0.02 && (phase === 0 || phase === 1) && stage === 'running') {
+      ctx.fillStyle = 'rgba(120,160,190,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(0, DRUM_R * (0.9 - waterLevel * 0.55), DRUM_R, DRUM_R * waterLevel * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 滚筒提升筋（随转）
+    ctx.strokeStyle = '#4a545c';
+    ctx.lineWidth = 7 * L.s;
+    for (var pn = 0; pn < 3; pn++) {
+      var pa = drumAng + pn / 3 * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, DRUM_R * 0.94, pa, pa + 0.35);
+      ctx.stroke();
+    }
+    // 衣物团（门开着就看不见；running/done 可见）
+    if (!doorOpen) {
+      clothes.forEach(function (c) {
+        c.a += dir * dt * (phase === 2 ? 9 : 2.6) * (1.1 - c.r * 0.5);
+        var cx2 = Math.cos(c.a) * c.r * DRUM_R * 0.72;
+        var cy2 = Math.sin(c.a) * c.r * DRUM_R * 0.72;
+        ctx.save();
+        ctx.translate(cx2, cy2);
+        ctx.rotate(c.rot + c.a * 1.6);
+        ctx.fillStyle = c.col;
+        ctx.beginPath();
+        ctx.roundRect(-c.s * L.s / 2, -c.s * L.s * 0.4, c.s * L.s, c.s * L.s * 0.8, 6);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.14)';
+        ctx.fillRect(-c.s * L.s / 2 + 2, -c.s * L.s * 0.32, c.s * L.s - 4, 3);
+        ctx.restore();
+      });
+      // 泡沫
+      for (var fj = 0; fj < foam.length; fj++) {
+        var f2 = foam[fj];
+        var fAge = (now - f2.born) / 2400;
+        ctx.fillStyle = 'rgba(235,245,250,' + (0.55 * (1 - fAge)).toFixed(2) + ')';
+        ctx.beginPath();
+        ctx.arc(f2.x - bx, f2.y - by, f2.r * L.s * (1 - fAge * 0.4), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // 门开：筒内空腔+一点影
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(0, DRUM_R * 0.55, DRUM_R * 0.8, DRUM_R * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    // 玻璃反光
+    ctx.strokeStyle = 'rgba(220,235,245,0.18)';
+    ctx.lineWidth = 10 * L.s;
+    ctx.beginPath();
+    ctx.arc(0, -6 * L.s, DRUM_R * 0.82, Math.PI * 1.15, Math.PI * 1.5);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(220,235,245,0.1)';
+    ctx.beginPath();
+    ctx.arc(0, -6 * L.s, DRUM_R * 0.82, Math.PI * 1.6, Math.PI * 1.75);
+    ctx.stroke();
+    // 门把手
+    if (doorOpen) {
+      ctx.fillStyle = '#9aa2a9';
+      ctx.beginPath();
+      ctx.roundRect(DRUM_R * 0.55, -DRUM_R * 0.9, 12 * L.s, 34 * L.s, 5);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 进度条（running/done）
+    if (stage === 'running' || stage === 'done') {
+      var total = phase >= 3 ? 1 : (phase + phaseT) / 3;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath();
+      ctx.roundRect(L.cx - 120 * L.s, bodyY + bodyH + 18 * L.s, 240 * L.s, 8 * L.s, 4);
+      ctx.fill();
+      ctx.fillStyle = '#7ac48a';
+      ctx.beginPath();
+      ctx.roundRect(L.cx - 120 * L.s, bodyY + bodyH + 18 * L.s, Math.max(8, 240 * L.s * total), 8 * L.s, 4);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(147,160,171,0.9)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'center';
+      var phName = ['洗涤', '漂洗', '甩干', '完成'][Math.min(3, Math.max(0, phase))];
+      ctx.fillText(phName + ' · ' + Math.round(total * 100) + '%', L.cx, bodyY + bodyH + 48 * L.s);
+      ctx.textAlign = 'left';
+    }
+
+    // 引导
+    if (stage === 'door') {
+      ctx.fillStyle = 'rgba(204,214,222,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点舷窗，把衬衫放进去', L.cx, L.drumY + DRUM_R + 66 * L.s);
+      ctx.textAlign = 'left';
+    } else if (stage === 'loaded') {
+      ctx.fillStyle = 'rgba(122,196,138,' + (0.4 + 0.2 * Math.sin(now / 380)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('按面板上的「开始」', L.cx, L.drumY + DRUM_R + 66 * L.s);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__washer = {
+    stage: function () { return stage; },
+    phase: function () { return phase; },
+    done: function () { return doneFired; },
+    load: function () {
+      if (stage === 'door') { doorOpen = false; doorT = 0.001; stage = 'loaded'; }
+    },
+    start: function () {
+      if (stage === 'loaded') {
+        stage = 'running';
+        phase = 0;
+        phaseT = 0;
+      }
+    },
+    fast: function () {
+      // 快进：直接完成当前阶段并切换
+      if (stage === 'running' && phase < 3) { advancePhase(); }
+    }
+  };
+})();
+</script>
+</body>
+</html>

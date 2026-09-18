@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>睡前充电</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0d0e12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8e99a4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>睡前充电</h1>
+  <p>睡前最后一件事：把线插上。<br>它充它的电，你睡你的觉——明早都是满的。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 620, L.h / 720)));
+    L.cx = L.w / 2;
+    L.phoneY = L.h * 0.5;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var plugged = false;
+  var plugT = 0;            // 插线动画 0..1
+  var level = 23;           // 电量 %
+  var doneFired = false;
+  var saidPlug = false;
+  var midMsg = false;
+  var pulse = 0;
+
+  // 手机几何
+  function phoneRect() {
+    var pw = 150 * L.s, ph = 300 * L.s;
+    return { x: L.cx - pw / 2, y: L.phoneY - ph / 2, w: pw, h: ph };
+  }
+  // 插头位置（手机底部下方，线从右下来）
+  function plugRest() {
+    return { x: L.cx + 170 * L.s, y: L.phoneY + 220 * L.s };
+  }
+  function hitPlug(px, py) {
+    var p = plugRest();
+    return Math.abs(px - p.x) < 60 * L.s && Math.abs(py - p.y) < 60 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (!plugged && hitPlug(ev.clientX, ev.clientY)) {
+      plugged = true;
+      plugT = 0.001;
+      clickSound();
+      if (!saidPlug) { saidPlug = true; say('咔嗒。接上了——今晚它慢慢吃，你慢慢睡。'); }
+      setTimeout(function () { midMsg = true; }, 6000);
+    }
+  });
+
+  // 夜间消息预览（不涉及私人：天气与闹钟）
+  var msgs = [
+    '明晨有薄雾，出门早五分钟',
+    '闹钟已设：06:50',
+    '今晚风小，适合早睡'
+  ];
+  var msgIdx = 0;
+  var msgShowT = 0;
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function clickSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 2100;
+    g.gain.setValueAtTime(0.04, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.05);
+  }
+  function fullChime() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    [880, 1174.7, 1568].forEach(function (f, i) {
+      var o = AC.createOscillator();
+      var g = AC.createGain();
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.03, t + i * 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.12 + 0.5);
+      o.connect(g); g.connect(AC.destination);
+      o.start(t + i * 0.12); o.stop(t + i * 0.12 + 0.52);
+    });
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    if (plugT > 0 && plugT < 1) plugT = Math.min(1, plugT + dt * 1.6);
+
+    if (plugged && !doneFired) {
+      level = Math.min(100, level + dt * 4.2);
+      pulse = 0.5 + 0.5 * Math.sin(now / 500);
+      if (!midMsg && level > 45) { midMsg = true; }
+      if (level >= 100) {
+        level = 100;
+        doneFired = true;
+        fullChime();
+        say('满格。明早起来，又是满电的一天。', true);
+      }
+    }
+    if (midMsg && msgShowT < 1) msgShowT = Math.min(1, msgShowT + dt * 0.5);
+    msgIdx = Math.min(msgs.length - 1, Math.floor(level / 35));
+
+    // ── 绘制 ──
+    // 床头暗调
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#101218');
+    bg.addColorStop(1, '#090a0d');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 床头柜台面
+    ctx.fillStyle = '#1c1a17';
+    ctx.fillRect(0, L.phoneY + 170 * L.s, w, h);
+    ctx.fillStyle = 'rgba(220,210,180,0.06)';
+    ctx.fillRect(0, L.phoneY + 170 * L.s, w, 2);
+
+    // 手机
+    var pr = phoneRect();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(pr.x + 5, pr.y + 8, pr.w, pr.h, 22 * L.s);
+    ctx.fill();
+    // 机身
+    var bodyG = ctx.createLinearGradient(pr.x, 0, pr.x + pr.w, 0);
+    bodyG.addColorStop(0, '#2a2e34');
+    bodyG.addColorStop(0.5, '#3a4046');
+    bodyG.addColorStop(1, '#25292e');
+    ctx.fillStyle = bodyG;
+    ctx.beginPath();
+    ctx.roundRect(pr.x, pr.y, pr.w, pr.h, 22 * L.s);
+    ctx.fill();
+    // 屏幕
+    var scrPad = 7 * L.s;
+    var scrX = pr.x + scrPad, scrY = pr.y + scrPad;
+    var scrW = pr.w - scrPad * 2, scrH = pr.h - scrPad * 2;
+    var scrG = ctx.createLinearGradient(scrX, scrY, scrX, scrY + scrH);
+    if (plugged) {
+      scrG.addColorStop(0, '#141a22');
+      scrG.addColorStop(1, '#0c1016');
+    } else {
+      scrG.addColorStop(0, '#0a0c10');
+      scrG.addColorStop(1, '#07080b');
+    }
+    ctx.fillStyle = scrG;
+    ctx.beginPath();
+    ctx.roundRect(scrX, scrY, scrW, scrH, 16 * L.s);
+    ctx.fill();
+
+    // 屏幕内容
+    if (plugged) {
+      // 时间
+      ctx.fillStyle = 'rgba(220,228,236,0.9)';
+      ctx.font = '300 ' + Math.round(34 * L.s) + 'px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('00:' + String(12 + Math.floor(level / 12)).padStart(2, '0'), L.cx, scrY + 52 * L.s);
+      // 充电图标（电池，圆角框+液面）
+      var bW = 54 * L.s, bH = 26 * L.s;
+      var bX = L.cx - bW / 2, bY = scrY + 74 * L.s;
+      ctx.strokeStyle = 'rgba(200,210,220,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(bX, bY, bW, bH, 6);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(200,210,220,0.5)';
+      ctx.beginPath();
+      ctx.roundRect(bX + bW, bY + bH * 0.28, 5 * L.s, bH * 0.44, 2);
+      ctx.fill();
+      var fillW = (bW - 6) * level / 100;
+      ctx.fillStyle = level >= 100 ? 'rgba(130,220,150,0.9)' : 'rgba(130,190,230,' + (0.65 + pulse * 0.25).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.roundRect(bX + 3, bY + 3, Math.max(4, fillW), bH - 6, 4);
+      ctx.fill();
+      // 电量数字
+      ctx.fillStyle = level >= 100 ? 'rgba(150,230,170,0.95)' : 'rgba(200,212,222,0.9)';
+      ctx.font = '600 ' + Math.round(20 * L.s) + 'px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.fillText(Math.floor(level) + '%', L.cx, scrY + 130 * L.s);
+      if (level < 100) {
+        ctx.fillStyle = 'rgba(150,160,172,0.6)';
+        ctx.font = Math.round(11.5 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.fillText('正在慢慢吃电', L.cx, scrY + 152 * L.s);
+      }
+      // 夜间消息预览（浮条）
+      if (midMsg) {
+        var mh = 46 * L.s;
+        var my = scrY + scrH - mh - 14 * L.s;
+        var mA = msgShowT;
+        ctx.fillStyle = 'rgba(28,34,44,' + (0.92 * mA).toFixed(2) + ')';
+        ctx.beginPath();
+        ctx.roundRect(scrX + 10 * L.s, my + (1 - mA) * 14, scrW - 20 * L.s, mh, 10 * L.s);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(190,200,212,' + mA.toFixed(2) + ')';
+        ctx.font = Math.round(12 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(msgs[msgIdx], scrX + 20 * L.s, my + 28 * L.s);
+        ctx.textAlign = 'left';
+      }
+    } else {
+      // 熄屏反光
+      ctx.fillStyle = 'rgba(150,170,190,0.06)';
+      ctx.beginPath();
+      ctx.roundRect(scrX + 10 * L.s, scrY + 10 * L.s, scrW - 20 * L.s, scrH - 20 * L.s, 12 * L.s);
+      ctx.fill();
+    }
+
+    // 尾插孔（手机底端）
+    ctx.fillStyle = '#181b1f';
+    ctx.beginPath();
+    ctx.roundRect(L.cx - 12 * L.s, pr.y + pr.h - 3, 24 * L.s, 5 * L.s, 2);
+    ctx.fill();
+
+    // 数据线
+    var pr2 = plugRest();
+    var sockX = w - 60 * L.s, sockY = h - 84 * L.s;   // 插座中心
+    // 插上后插头落在插座里
+    var headX = plugged ? sockX : pr2.x + 10 * L.s;
+    var headY = plugged ? sockY : pr2.y;
+    ctx.strokeStyle = '#4a525b';
+    ctx.lineWidth = 4.4 * L.s;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (!plugged) {
+      // 线盘在旁边
+      ctx.moveTo(L.cx + 90 * L.s, pr2.y + 20 * L.s);
+      ctx.bezierCurveTo(L.cx + 140 * L.s, pr2.y - 40 * L.s, L.cx + 190 * L.s, pr2.y + 10 * L.s, headX, headY);
+    } else {
+      // 线插上了：从手机尾插弯到右下墙角插座
+      var endX = L.cx + 12 * L.s, endY = pr.y + pr.h + 1;
+      ctx.moveTo(endX, endY);
+      ctx.bezierCurveTo(endX + 40 * L.s, endY + 70 * L.s, headX - 60 * L.s, headY - 80 * L.s, headX - 18 * L.s, headY);
+    }
+    ctx.stroke();
+    // 插头
+    ctx.fillStyle = '#5a636c';
+    ctx.beginPath();
+    ctx.roundRect(headX - 26 * L.s, headY - 12 * L.s, 26 * L.s, 22 * L.s, 4);
+    ctx.fill();
+    ctx.fillStyle = '#3c434b';
+    ctx.fillRect(headX - 2 * L.s, headY - 6 * L.s, 12 * L.s, 10 * L.s);
+
+    // 插座（墙角）
+    ctx.fillStyle = '#22262c';
+    ctx.beginPath();
+    ctx.roundRect(w - 90 * L.s, h - 120 * L.s, 60 * L.s, 80 * L.s, 6);
+    ctx.fill();
+    ctx.fillStyle = '#14171b';
+    ctx.beginPath();
+    ctx.arc(w - 60 * L.s, h - 84 * L.s, 12 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 引导
+    if (!plugged) {
+      ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('点插头，把线插上', pr2.x - 10 * L.s, pr2.y - 44 * L.s);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__charge = {
+    level: function () { return Math.floor(level); },
+    plugged: function () { return plugged; },
+    done: function () { return doneFired; },
+    plug: function () {
+      if (!plugged) { plugged = true; plugT = 0.001; }
+    },
+    fast: function () { if (plugged) level = Math.min(100, level + 20); }
+  };
+})();
+</script>
+</body>
+</html>

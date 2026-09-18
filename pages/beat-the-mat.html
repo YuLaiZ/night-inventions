@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>拍地垫</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12100c;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a3967e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d6c9ac; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #857962; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d6c9ac;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #554b3b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #857962;
+    text-decoration: none;
+    border-bottom: 1px dotted #857962;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d6c9ac; border-color: #d6c9ac; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>拍地垫</h1>
+  <p>门口那块垫子，替全家吃了一年的灰。<br>搭上栏杆拍几巴掌——今天踩上去的每一脚，都是新的。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 660, L.h / 720)));
+    L.cx = L.w / 2;
+    L.railY = L.h * 0.42;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var hits = 0;
+  var NEED = 6;
+  var dustLevel = 1;        // 垫里余尘 0..1
+  var shock = 0;            // 垫子形变
+  var doneFired = false;
+  var saidFirst = false;
+  var flyGone = false;      // 惊飞的虫
+  var flyAng = 0, flyR = 0;
+  var puffs = [];           // 尘雾团 {x,y,vx,vy,r,born}
+  var motes = [];           // 金尘小粒 {x,y,vx,vy,born}
+
+  var MAT_W, MAT_H;
+  function calcM() {
+    MAT_W = 300 * L.s;
+    MAT_H = 150 * L.s;
+  }
+  calcM();
+
+  function hitMat(px, py) {
+    var my = L.railY + MAT_H * 0.55;
+    return Math.abs(px - L.cx) < MAT_W * 0.6 && Math.abs(py - my) < MAT_H * 0.6;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired) return;
+    if (hitMat(ev.clientX, ev.clientY)) {
+      hits++;
+      shock = 1;
+      beatSound();
+      // 尘雾团（随余尘减少渐稀）
+      var puffsN = Math.round(2 + dustLevel * 6);
+      for (var i = 0; i < puffsN; i++) {
+        puffs.push({
+          x: L.cx + (rng() - 0.5) * MAT_W * 0.8,
+          y: L.railY + MAT_H * 0.3 + rng() * MAT_H * 0.3,
+          vx: (rng() - 0.5) * 90,
+          vy: -30 - rng() * 70,
+          r: 12 + rng() * 22,
+          born: now()
+        });
+      }
+      for (var j = 0; j < Math.round(dustLevel * 10); j++) {
+        motes.push({
+          x: L.cx + (rng() - 0.5) * MAT_W * 0.9,
+          y: L.railY + MAT_H * 0.3,
+          vx: (rng() - 0.5) * 150,
+          vy: -60 - rng() * 120,
+          born: now()
+        });
+      }
+      dustLevel = Math.max(0, dustLevel - 1 / NEED);
+      if (dustLevel < 0.01) dustLevel = 0;
+      if (!saidFirst) { saidFirst = true; say('啪——晨光里的灰是金色的。再拍。'); }
+      if (dustLevel <= 0) announceDone();
+      if (hits === 2) say('一巴掌一层灰。这垫子攒了一整年。');
+      if (hits === 4) say('灰越来越少了。最后两下，用力。');
+      if (!flyGone && hits >= 2) {
+        flyGone = true;
+        flyAng = 0;
+        flyR = 0;
+      }
+      if (dustLevel <= 0) announceDone();
+    }
+  });
+
+  function now() { return Date.now(); }
+
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    setTimeout(function () {
+      say('干净了。今天踩上去的每一脚，都是新的。', true);
+    }, 300);
+  }
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function beatSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    // 低频拍击
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
+    g.gain.setValueAtTime(0.08, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.15);
+    // 尘沙沙
+    var len = AC.sampleRate * 0.22;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.3);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var bp = AC.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 2000;
+    var g2 = AC.createGain();
+    g2.gain.value = 0.03;
+    src.connect(bp); bp.connect(g2); g2.connect(AC.destination);
+    src.start(t);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var tNow = Date.now();
+    var dt = Math.min(0.08, (tNow - last) / 1000);
+    last = tNow;
+    var w = L.w, h = L.h;
+    calcM();
+    shock = Math.max(0, shock - dt * 3);
+
+    // ── 绘制 ──
+    // 晨光阳台
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mixRGB([18, 16, 12], [120, 100, 70], 0.35));
+    bg.addColorStop(1, mixRGB([12, 10, 8], [90, 76, 52], 0.3));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 斜射晨光
+    var sun = ctx.createLinearGradient(0, 0, w, h * 0.6);
+    sun.addColorStop(0, 'rgba(245,220,160,0.16)');
+    sun.addColorStop(1, 'rgba(245,220,160,0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, w, h);
+
+    // 栏杆（横杆+竖条）
+    ctx.fillStyle = '#4c4438';
+    ctx.fillRect(0, L.railY - 8 * L.s, w, 10 * L.s);
+    for (var ri = 0; ri < 10; ri++) {
+      var rx = (ri + 0.5) * w / 10;
+      if (Math.abs(rx - L.cx) < MAT_W * 0.55) continue;
+      ctx.fillStyle = '#3e372c';
+      ctx.fillRect(rx - 4 * L.s, L.railY, 8 * L.s, h - L.railY);
+    }
+
+    // 地垫（挂在栏杆上，拍击时下摆颤动）
+    ctx.save();
+    ctx.translate(L.cx, L.railY + 4 * L.s);
+    var sag = 1 + shock * 0.06;
+    var matH = MAT_H * sag;
+    // 垫影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(10, matH + 6, MAT_W * 0.5, 12 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 垫身
+    var matG = ctx.createLinearGradient(-MAT_W / 2, 0, MAT_W / 2, 0);
+    matG.addColorStop(0, '#7a5a3a');
+    matG.addColorStop(0.5, '#96724a');
+    matG.addColorStop(1, '#6a4e32');
+    ctx.fillStyle = matG;
+    ctx.beginPath();
+    ctx.moveTo(-MAT_W / 2, 0);
+    ctx.quadraticCurveTo(-MAT_W / 2 - 8 * L.s, matH * 0.5, -MAT_W / 2 + 10 * L.s, matH);
+    ctx.lineTo(MAT_W / 2 - 10 * L.s, matH);
+    ctx.quadraticCurveTo(MAT_W / 2 + 8 * L.s, matH * 0.5, MAT_W / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+    // 格纹
+    ctx.strokeStyle = 'rgba(50,34,20,0.5)';
+    ctx.lineWidth = 3 * L.s;
+    for (var gi = -2; gi <= 2; gi++) {
+      ctx.beginPath();
+      ctx.moveTo(gi * MAT_W * 0.18 - 14 * L.s, 0);
+      ctx.quadraticCurveTo(gi * MAT_W * 0.18, matH * 0.5, gi * MAT_W * 0.18 - 14 * L.s, matH);
+      ctx.stroke();
+    }
+    for (var gj = 1; gj <= 3; gj++) {
+      var gy = matH * gj / 4;
+      ctx.beginPath();
+      ctx.moveTo(-MAT_W / 2 + 6 * L.s, gy);
+      ctx.lineTo(MAT_W / 2 - 6 * L.s, gy);
+      ctx.stroke();
+    }
+    // 拍击凹陷（拍击瞬间下摆鼓出）
+    if (shock > 0.3) {
+      ctx.fillStyle = 'rgba(40,26,14,' + (0.25 * shock).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.ellipse(0, matH * 0.75, MAT_W * 0.4, matH * 0.2 * shock, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 尘雾团
+    for (var pi = puffs.length - 1; pi >= 0; pi--) {
+      var p = puffs[pi];
+      var pAge = (tNow - p.born) / 1000;
+      if (pAge > 2.2) { puffs.splice(pi, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 16 * dt;
+      var pA = 0.16 * (1 - pAge / 2.2);
+      ctx.fillStyle = 'rgba(214,196,150,' + pA.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (1 + pAge * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 金尘小粒
+    for (var mj = motes.length - 1; mj >= 0; mj--) {
+      var m = motes[mj];
+      var mAge = (tNow - m.born) / 1000;
+      if (mAge > 1.4) { motes.splice(mj, 1); continue; }
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.vy += 180 * dt;
+      ctx.fillStyle = 'rgba(240,214,150,' + (0.7 * (1 - mAge / 1.4)).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 惊飞的虫（绕圈逃走）
+    if (flyGone && flyR < 500) {
+      flyAng += dt * 5;
+      flyR += dt * 130;
+      var fX = L.cx + Math.cos(flyAng) * flyR * 0.9;
+      var fY = L.railY - 30 * L.s + Math.sin(flyAng * 2) * flyR * 0.3;
+      if (fX > -20 && fX < w + 20) {
+        ctx.strokeStyle = 'rgba(60,52,40,0.8)';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.ellipse(fX, fY, 5, 3, flyAng, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // 引导与计数
+    if (!doneFired) {
+      var hint = hits === 0 ? '拍它——使劲' : (dustLevel > 0.4 ? '灰还多，接着拍' : '快了——最后几下');
+      ctx.fillStyle = 'rgba(214,201,172,' + (0.3 + 0.2 * Math.sin(now() / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, w / 2, h - 96);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(163,150,126,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('拍了 ' + hits + ' 下', w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function mixRGB(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__mat = {
+    hits: function () { return hits; },
+    dust: function () { return +dustLevel.toFixed(2); },
+    done: function () { return doneFired; },
+    beat: function () {
+      if (doneFired) return;
+      hits++;
+      shock = 1;
+      dustLevel = Math.max(0, dustLevel - 1 / NEED);
+      if (dustLevel < 0.01) dustLevel = 0;
+      if (dustLevel <= 0) announceDone();
+    }
+  };
+})();
+</script>
+</body>
+</html>

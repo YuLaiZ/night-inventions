@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晨报</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #14120e;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a3967e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d6c9ac; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #857962; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d6c9ac;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #554b3b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #857962;
+    text-decoration: none;
+    border-bottom: 1px dotted #857962;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d6c9ac; border-color: #d6c9ac; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>晨报</h1>
+  <p>豆浆还没凉的功夫，把报纸展开。<br>今天的头条，是条好消息。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 6200);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 720, L.h / 680)));
+    L.cx = L.w / 2;
+    L.cy = L.h * 0.56;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var opened = false;
+  var openT = 0;            // 展开动画 0..1
+  var doneFired = false;
+  var saidOpen = false;
+  var jitter = 0;           // 纸张展开抖动
+
+  var FULL_W, FULL_H;       // 展开后整版
+  function calcP() {
+    FULL_W = 460 * L.s;
+    FULL_H = 330 * L.s;
+  }
+  calcP();
+
+  function hitPaper(px, py) {
+    var halfW = opened ? FULL_W / 2 : FULL_W * 0.29;
+    var halfH = opened ? FULL_H / 2 : FULL_H * 0.46;
+    return Math.abs(px - L.cx) < halfW && Math.abs(py - L.cy) < halfH;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (!opened && hitPaper(ev.clientX, ev.clientY)) {
+      opened = true;
+      openT = 0.001;
+      jitter = 1;
+      rustle();
+      if (!saidOpen) { saidOpen = true; }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function rustle() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.4;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) {
+      var env = Math.sin(i / len * Math.PI);
+      d[i] = (Math.random() * 2 - 1) * env;
+    }
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var hp = AC.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 1800;
+    var g = AC.createGain();
+    g.gain.value = 0.05;
+    src.connect(hp); hp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  // 模拟正文小字（横线条纹）
+  function fakeText(x, y, w, lines, gap) {
+    ctx.strokeStyle = 'rgba(90,84,70,0.4)';
+    ctx.lineWidth = 1.6;
+    for (var i = 0; i < lines; i++) {
+      var ly = y + i * gap;
+      ctx.beginPath();
+      ctx.moveTo(x, ly);
+      ctx.lineTo(x + w, ly);
+      ctx.stroke();
+    }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcP();
+    jitter = Math.max(0, jitter - dt * 1.6);
+    if (openT > 0 && openT < 1) openT = Math.min(1, openT + dt * 1.4);
+
+    // ── 绘制 ──
+    // 晨光餐桌
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, mix([20, 18, 13], [96, 82, 58], 0.3));
+    bg.addColorStop(1, mix([14, 12, 9], [70, 60, 42], 0.3));
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    var sun = ctx.createLinearGradient(0, 0, w, h * 0.7);
+    sun.addColorStop(0, 'rgba(245,222,165,0.14)');
+    sun.addColorStop(1, 'rgba(245,222,165,0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, w, h);
+    // 木纹桌
+    ctx.strokeStyle = 'rgba(180,150,100,0.07)';
+    for (var gi = 0; gi < 5; gi++) {
+      ctx.beginPath();
+      ctx.moveTo(0, h * 0.8 + gi * 24 * L.s);
+      ctx.bezierCurveTo(w * 0.3, h * 0.8 + gi * 24 * L.s + 5, w * 0.6, h * 0.8 + gi * 24 * L.s - 5, w, h * 0.8 + gi * 24 * L.s);
+      ctx.stroke();
+    }
+
+    var jx = Math.sin(now / 40) * jitter * 4;
+    var jy = Math.cos(now / 33) * jitter * 2.4;
+
+    ctx.save();
+    ctx.translate(L.cx + jx, L.cy + jy);
+    // 报影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(8, FULL_H / 2 + 10 * L.s, FULL_W * 0.5, 14 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (!opened) {
+      // 对折状态：两叠
+      var fw = FULL_W * 0.27, fh = FULL_H * 0.44;
+      var pg = ctx.createLinearGradient(-fw, 0, fw, 0);
+      pg.addColorStop(0, '#cfc4a6');
+      pg.addColorStop(0.5, '#e2d8bc');
+      pg.addColorStop(1, '#c4b99c');
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.roundRect(-fw, -fh, fw * 2, fh * 2, 4);
+      ctx.fill();
+      // 折痕
+      ctx.strokeStyle = 'rgba(90,80,60,0.4)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(0, -fh); ctx.lineTo(0, fh);
+      ctx.stroke();
+      // 头版一角露出字
+      ctx.fillStyle = '#5a5040';
+      ctx.font = '600 ' + Math.round(11 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('晨间快报', 0, -fh + 18 * L.s);
+      fakeText(-fw * 0.7, -fh + 34 * L.s, fw * 1.4, 3, 7 * L.s);
+      ctx.textAlign = 'left';
+    } else {
+      // 展开动画：左右翼从中间展开
+      var e = openT < 0.5 ? 2 * openT * openT : 1 - Math.pow(-2 * openT + 2, 2) / 2;
+      var halfW = FULL_W / 2 * e;
+      var paperG = ctx.createLinearGradient(-halfW, 0, halfW, 0);
+      paperG.addColorStop(0, '#d4c9ab');
+      paperG.addColorStop(0.35, '#e6dcc0');
+      paperG.addColorStop(0.65, '#ddd2b5');
+      paperG.addColorStop(1, '#c9bea1');
+      ctx.fillStyle = paperG;
+      ctx.beginPath();
+      ctx.roundRect(-halfW, -FULL_H / 2, halfW * 2, FULL_H, 3);
+      ctx.fill();
+      // 中缝折痕
+      ctx.strokeStyle = 'rgba(90,80,60,0.35)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(0, -FULL_H / 2 + 4);
+      ctx.lineTo(0, FULL_H / 2 - 4);
+      ctx.stroke();
+      // 纸边
+      ctx.strokeStyle = 'rgba(100,90,68,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(-halfW, -FULL_H / 2, halfW * 2, FULL_H, 3);
+      ctx.stroke();
+
+      if (openT > 0.6) {
+        // 报头
+        ctx.fillStyle = '#3a3428';
+        ctx.font = '700 ' + Math.round(26 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('晨 间 快 报', 0, -FULL_H / 2 + 34 * L.s);
+        ctx.font = Math.round(10 * L.s) + 'px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillStyle = 'rgba(90,84,70,0.75)';
+        ctx.fillText('2026-09-18 · 星期五 · 晨雾散', 0, -FULL_H / 2 + 52 * L.s);
+        // 头条分隔线
+        ctx.strokeStyle = 'rgba(70,62,48,0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-halfW + 14 * L.s, -FULL_H / 2 + 62 * L.s);
+        ctx.lineTo(halfW - 14 * L.s, -FULL_H / 2 + 62 * L.s);
+        ctx.stroke();
+        // 大标题
+        ctx.fillStyle = '#2e2a20';
+        ctx.font = '600 ' + Math.round(21 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.fillText('晨雾散，全天晴', 0, -FULL_H / 2 + 92 * L.s);
+        // 头条导语
+        ctx.fillStyle = 'rgba(90,84,70,0.8)';
+        ctx.font = Math.round(11.5 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.fillText('昨夜有雾，日出后散尽。今天适合把日子过慢一点。', 0, -FULL_H / 2 + 114 * L.s);
+        // 三栏小新闻
+        var colW = (halfW * 2 - 40 * L.s) / 3;
+        var cols = [
+          ['早起的猫已下班', 5],
+          ['空气质量：适合发呆', 6],
+          ['豆浆铺多磨了十斤豆', 4]
+        ];
+        for (var ci = 0; ci < 3; ci++) {
+          var cx2 = -halfW + 20 * L.s + ci * (colW + 10 * L.s);
+          ctx.fillStyle = '#443e32';
+          ctx.font = '600 ' + Math.round(11.5 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+          ctx.fillText(cols[ci][0], cx2, -FULL_H / 2 + 148 * L.s);
+          fakeText(cx2, -FULL_H / 2 + 164 * L.s, colW, cols[ci][1], 8 * L.s);
+        }
+        // 中缝下部：一小幅天气图（太阳）
+        var sunX = halfW * 0.55, sunY = FULL_H / 2 - 60 * L.s;
+        var sunG = ctx.createRadialGradient(sunX, sunY, 2, sunX, sunY, 30 * L.s);
+        sunG.addColorStop(0, 'rgba(235,190,100,0.85)');
+        sunG.addColorStop(1, 'rgba(235,190,100,0)');
+        ctx.fillStyle = sunG;
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, 30 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#d8a844';
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, 11 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(90,84,70,0.7)';
+        ctx.font = Math.round(10.5 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('全天晴 · 微风', sunX, sunY + 46 * L.s);
+        // 底部正文条
+        fakeText(-halfW + 20 * L.s, FULL_H / 2 - 40 * L.s, halfW * 2 - 40 * L.s, 3, 8 * L.s);
+        ctx.textAlign = 'left';
+      }
+    }
+    ctx.restore();
+
+    // 引导
+    if (!doneFired) {
+      var hint = opened ? (openT >= 1 ? '' : '') : '点报纸，展开它';
+      if (hint) {
+        ctx.fillStyle = 'rgba(214,201,172,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+    }
+  }
+
+  function mix(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走——三犯立规后首件遵守）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    setTimeout(function () {
+      say('头条是条好消息：今天适合把日子过慢一点。', true);
+    }, openT >= 1 ? 200 : 1400);
+  }
+
+  // 展开完成监听（放在 tick 外的逻辑：由 QA/真实路径共用）
+  var origTickAnnounce = function () {
+    if (opened && openT >= 1) announceDone();
+  };
+  // 挂到 rafLoop 循环尾部（不改 tick 本体）
+  var _raf = function () { tick(); origTickAnnounce(); requestAnimationFrame(_raf); };
+  requestAnimationFrame = (function (orig) {
+    return function (cb) { return orig(cb === rafLoop ? _raf : cb); };
+  })(window.requestAnimationFrame.bind(window));
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250);
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__paper = {
+    opened: function () { return opened; },
+    openT: function () { return +openT.toFixed(2); },
+    done: function () { return doneFired; },
+    open: function () {
+      if (!opened) { opened = true; openT = 0.001; rustle(); }
+    }
+  };
+})();
+</script>
+</body>
+</html>

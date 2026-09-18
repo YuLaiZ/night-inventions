@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把昨晚的碗洗了</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #101311;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #93a29a;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #cdd8d0; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #74827a; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #cdd8d0;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #48544d;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #74827a;
+    text-decoration: none;
+    border-bottom: 1px dotted #74827a;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #cdd8d0; border-color: #cdd8d0; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>把昨晚的碗洗了</h1>
+  <p>昨晚的碗泡在池子里，一夜了。<br>擦三只、冲三只——碗柜里又齐了，明天的一日三餐有着落。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 660, L.h / 720)));
+    L.cx = L.w / 2;
+    L.sinkY = L.h * 0.55;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态机：pick 拿碗 → scrub 擦（有泡沫）→ rinse 冲 → 放架 → 下一只 ──
+  var bowlIdx = 0;          // 当前第几只（0..2）
+  var sub = 'pick';         // pick / scrub / ready(可冲) / rinsing / placed
+  var scrubPath = 0;        // 累计擦拭移动量
+  var SCRUB_NEED = 900;     // px
+  var dirt = 1;             // 污渍 0..1
+  var foamDots = [];        // 泡沫 {x,y,r,born}
+  var rinseT = 0;
+  var water = 0;            // 龙头水流 0..1
+  var rackBowls = 0;
+  var doneFired = false;
+  var saidPick = false, saidScrub = false, saidReady = false, saidRinse = false;
+  var bowlPos = { x: 0, y: 0 };
+  var flyT = 0;             // 碗飞向沥水架动画
+
+  var bowlsOnSink = [0, 1, 2];   // 池里剩的
+
+  function tapPos() { return { x: L.cx - 200 * L.s, y: L.h * 0.26 }; }
+  function sinkCenter() { return { x: L.cx + 20 * L.s, y: L.sinkY }; }
+  function rackPos() { return { x: L.cx + 230 * L.s, y: L.sinkY - 10 * L.s }; }
+
+  function hitSinkBowl(px, py) {
+    var c = sinkCenter();
+    return Math.abs(px - c.x) < 150 * L.s && Math.abs(py - c.y) < 90 * L.s;
+  }
+  function hitTap(px, py) {
+    var t = tapPos();
+    return Math.abs(px - t.x) < 50 * L.s && Math.abs(py - t.y) < 50 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    var px = ev.clientX, py = ev.clientY;
+    if (sub === 'pick' && bowlsOnSink.length > 0 && hitSinkBowl(px, py)) {
+      sub = 'scrub';
+      var c = sinkCenter();
+      bowlPos = { x: c.x, y: c.y - 40 * L.s };
+      if (!saidPick) { saidPick = true; say('泡了一夜，污一擦就掉。按住海绵，转着圈擦。'); }
+      water = 1;
+      return;
+    }
+    if ((sub === 'scrub' || sub === 'ready') && hitTap(px, py) && sub === 'ready') {
+      sub = 'rinsing';
+      rinseT = 0;
+      if (!saidRinse) { saidRinse = true; say('冲——泡沫走了，碗就亮了。'); }
+      return;
+    }
+    // 擦拭开始（指针在碗上）
+    if (sub === 'scrub' || sub === 'ready') {
+      if (Math.abs(px - bowlPos.x) < 110 * L.s && Math.abs(py - bowlPos.y) < 90 * L.s) {
+        scrubbing = true;
+        lastScrub = { x: px, y: py };
+      }
+    }
+  });
+  var scrubbing = false;
+  var lastScrub = { x: 0, y: 0 };
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!scrubbing || (sub !== 'scrub' && sub !== 'ready')) return;
+    var px = ev.clientX, py = ev.clientY;
+    var dx = px - lastScrub.x, dy = py - lastScrub.y;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    if (d > 4) {
+      scrubPath += d;
+      if (sub === 'scrub') {
+        dirt = Math.max(0, 1 - scrubPath / SCRUB_NEED);
+        if (rng() < 0.5) foamDots.push({ x: bowlPos.x + (px - L.cx) + (rng() - 0.5) * 30, y: bowlPos.y + (py - bowlPos.y) * 0.6 + (rng() - 0.5) * 20, r: 4 + rng() * 7, born: Date.now() });
+        if (!saidScrub && scrubPath > 120) { saidScrub = true; say('对，转着圈——缝隙也别放过。'); }
+        if (dirt <= 0 && sub === 'scrub') {
+          sub = 'ready';
+          if (!saidReady) { saidReady = true; say('擦出沫了。点水龙头，冲。'); }
+        }
+      } else if (sub === 'ready') {
+        // ready 状态也可以继续擦着玩
+        if (rng() < 0.3) foamDots.push({ x: bowlPos.x + (px - L.cx), y: bowlPos.y + (py - bowlPos.y) * 0.6, r: 3 + rng() * 5, born: Date.now() });
+      }
+      lastScrub = { x: px, y: py };
+      scrubSqueak();
+    }
+  });
+  window.addEventListener('pointerup', function () { scrubbing = false; });
+  window.addEventListener('pointercancel', function () { scrubbing = false; });
+
+  // ── 声音 ──
+  var AC = null, waterGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var hp = AC.createBiquadFilter();
+      hp.type = 'bandpass'; hp.frequency.value = 1500; hp.Q.value = 0.6;
+      waterGain = AC.createGain();
+      waterGain.gain.value = 0;
+      src.connect(hp); hp.connect(waterGain); waterGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+  var squeakAt = 0;
+  function scrubSqueak() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    if (t - squeakAt < 0.18) return;
+    squeakAt = t;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 900 + rng() * 700;
+    g.gain.setValueAtTime(0.014, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.09);
+  }
+  function clinkDing() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 1520;
+    g.gain.setValueAtTime(0.035, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.36);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    // 冲水推进
+    if (sub === 'rinsing') {
+      rinseT += dt;
+      water = 1;
+      // 泡沫顺水消散
+      for (var fi = foamDots.length - 1; fi >= 0; fi--) {
+        foamDots[fi].y += dt * 40;
+        foamDots[fi].r *= Math.pow(0.4, dt);
+        if (foamDots[fi].r < 1) foamDots.splice(fi, 1);
+      }
+      if (rinseT >= 1.8) {
+        // 放架
+        sub = 'placed';
+        flyT = 0.001;
+        bowlsOnSink.pop();
+        rackBowls++;
+        clinkDing();
+        if (rackBowls >= 3 && !doneFired) {
+          doneFired = true;
+          setTimeout(function () {
+            say('碗柜里又齐了。明天的一日三餐，有着落了。', true);
+          }, 350);
+        } else {
+          say('一只齐了。还有 ' + bowlsOnSink.length + ' 只——泡着的那个，接着来。');
+          if (bowlsOnSink.length > 0) {
+            setTimeout(function () {
+              sub = 'pick';
+              dirt = 1; scrubPath = 0;
+              water = 0;
+            }, 900);
+          }
+        }
+      }
+    } else if (sub !== 'placed' && sub !== 'pick') {
+      water = Math.max(0, water - dt);
+    }
+    if (waterGain) waterGain.gain.value = water * 0.02;
+    if (flyT > 0 && flyT < 1) flyT = Math.min(1, flyT + dt * 1.5);
+
+    // ── 绘制 ──
+    // 晨光厨房墙面
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#20262a');
+    bg.addColorStop(1, '#141a1c');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 瓷砖
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (var ty = 0; ty < h * 0.55; ty += 66 * L.s) {
+      ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke();
+    }
+    for (var tx = 0; tx < w; tx += 66 * L.s) {
+      ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h * 0.55); ctx.stroke();
+    }
+    // 晨光
+    var sun = ctx.createLinearGradient(w, 0, w * 0.5, h * 0.4);
+    sun.addColorStop(0, 'rgba(240,222,180,0.1)');
+    sun.addColorStop(1, 'rgba(240,222,180,0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, w, h);
+
+    // 水槽台面
+    ctx.fillStyle = '#2a3034';
+    ctx.fillRect(0, L.sinkY - 60 * L.s, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(0, L.sinkY - 60 * L.s, w, 3);
+    // 水槽凹
+    var sc = sinkCenter();
+    ctx.fillStyle = '#232a2e';
+    ctx.beginPath();
+    ctx.roundRect(sc.x - 190 * L.s, sc.y - 50 * L.s, 380 * L.s, 150 * L.s, 18);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 龙头
+    var tp = tapPos();
+    ctx.strokeStyle = '#7d8892';
+    ctx.lineWidth = 9 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(tp.x + 60 * L.s, tp.y - 40 * L.s);
+    ctx.lineTo(tp.x + 60 * L.s, tp.y - 70 * L.s);
+    ctx.quadraticCurveTo(tp.x + 60 * L.s, tp.y - 92 * L.s, tp.x, tp.y - 92 * L.s);
+    ctx.lineTo(tp.x, tp.y - 30 * L.s);
+    ctx.stroke();
+    ctx.fillStyle = '#5a646e';
+    ctx.beginPath();
+    ctx.arc(tp.x, tp.y - 28 * L.s, 7 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 龙头水流（rinse 时）
+    if (sub === 'rinsing') {
+      ctx.fillStyle = 'rgba(170,205,230,0.5)';
+      ctx.beginPath();
+      ctx.roundRect(tp.x - 7 * L.s, tp.y - 26 * L.s, 14 * L.s, 130 * L.s, 6);
+      ctx.fill();
+      if (rng() < 0.4) {
+        dropsRain.push({ x: tp.x + (rng() - 0.5) * 20 * L.s, y: tp.y + 100 * L.s, vy: 100 });
+      }
+    }
+    for (var di = dropsRain.length - 1; di >= 0; di--) {
+      var dr = dropsRain[di];
+      dr.y += dr.vy * dt;
+      ctx.fillStyle = 'rgba(190,220,240,0.6)';
+      ctx.beginPath();
+      ctx.arc(dr.x, dr.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+      if (dr.y > sc.y + 80 * L.s) dropsRain.splice(di, 1);
+    }
+
+    // 池里待洗的碗（摞着，缩小表示在后）
+    for (var bi = 0; bi < bowlsOnSink.length; bi++) {
+      if (sub !== 'pick') break;
+      drawBowl(sc.x - 60 * L.s + bi * 26 * L.s, sc.y + 40 * L.s + bi * 6, 0.72 - bi * 0.05, 1, 0);
+    }
+
+    // 当前碗（擦/冲）
+    if (sub === 'scrub' || sub === 'ready' || sub === 'rinsing') {
+      var shine = sub === 'ready' || sub === 'rinsing';
+      drawBowl(bowlPos.x, bowlPos.y, 1.15, shine ? 1 : 0.92, dirt);
+    }
+    // 放架飞行/架上
+    var rp = rackPos();
+    if (sub === 'placed') {
+      var ft = Math.min(1, flyT);
+      var fx2 = bowlPos.x + (rp.x - bowlPos.x) * ft;
+      var fy2 = bowlPos.y + (rp.y - bowlPos.y) * ft - Math.sin(ft * Math.PI) * 70 * L.s;
+      drawBowl(fx2, fy2, 1, 1, 0);
+    }
+    for (var rb = 0; rb < rackBowls; rb++) {
+      drawBowl(rp.x - rb * 40 * L.s, rp.y + rb * 4, 0.95 - rb * 0.04, 1, 0);
+    }
+    // 沥水架
+    ctx.strokeStyle = '#5a646e';
+    ctx.lineWidth = 3.4 * L.s;
+    for (var rl = 0; rl < 4; rl++) {
+      ctx.beginPath();
+      ctx.moveTo(rp.x - 130 * L.s, rp.y + 60 * L.s - rl * 12 * L.s);
+      ctx.lineTo(rp.x + 130 * L.s, rp.y + 60 * L.s - rl * 12 * L.s);
+      ctx.stroke();
+    }
+
+    // 泡沫
+    for (var fj = 0; fj < foamDots.length; fj++) {
+      var f2 = foamDots[fj];
+      var fAge = (now - f2.born) / 2600;
+      if (sub !== 'rinsing' && fAge > 1) continue;
+      ctx.fillStyle = 'rgba(238,246,250,' + (0.6 * (1 - Math.min(1, fAge))).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(f2.x, f2.y, f2.r * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 海绵（跟手）
+    if (scrubbing) {
+      // 最后位置近似
+      ctx.fillStyle = '#c8862e';
+      ctx.beginPath();
+      ctx.roundRect(lastScrub.x - 24 * L.s, lastScrub.y - 16 * L.s, 48 * L.s, 32 * L.s, 6);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(90,60,30,0.4)';
+      for (var si2 = 0; si2 < 6; si2++) {
+        ctx.beginPath();
+        ctx.arc(lastScrub.x - 16 * L.s + si2 * 7 * L.s, lastScrub.y - 8 * L.s + (si2 % 3) * 9 * L.s, 1.6 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 引导与进度
+    if (!doneFired) {
+      var hint = sub === 'pick' ? '点池子里的碗，拿起来' : (sub === 'scrub' ? '按住碗面，转圈擦' : (sub === 'ready' ? '点水龙头，冲' : (sub === 'rinsing' ? '冲干净……' : '')));
+      if (hint) {
+        ctx.fillStyle = 'rgba(205,216,208,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+      ctx.fillStyle = 'rgba(147,162,154,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('洗了 ' + rackBowls + ' / 3 只', w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  var dropsRain = [];
+
+  function drawBowl(x, y, scale, bright, dirt) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    var base = 120 * L.s * 0.5;
+    // 碗影
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(0, base * 0.85, base * 1.0, base * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 碗身
+    var bowlG = ctx.createLinearGradient(-base, 0, base, 0);
+    var tint = Math.round(228 * bright + 20);
+    bowlG.addColorStop(0, 'rgb(' + Math.round(tint * 0.82) + ',' + Math.round(tint * 0.86) + ',' + Math.round(tint * 0.84) + ')');
+    bowlG.addColorStop(0.5, 'rgb(' + tint + ',' + Math.round(tint * 1.01) + ',' + Math.round(tint * 0.99) + ')');
+    bowlG.addColorStop(1, 'rgb(' + Math.round(tint * 0.78) + ',' + Math.round(tint * 0.82) + ',' + Math.round(tint * 0.8) + ')');
+    ctx.fillStyle = bowlG;
+    ctx.beginPath();
+    ctx.moveTo(-base, -base * 0.42);
+    ctx.quadraticCurveTo(-base * 0.94, base * 0.5, -base * 0.5, base * 0.62);
+    ctx.lineTo(base * 0.5, base * 0.62);
+    ctx.quadraticCurveTo(base * 0.94, base * 0.5, base, -base * 0.42);
+    ctx.closePath();
+    ctx.fill();
+    // 碗沿
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.3 * bright).toFixed(2) + ')';
+    ctx.beginPath();
+    ctx.ellipse(0, -base * 0.42, base, base * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 污渍（随擦除变淡）
+    if (dirt > 0.03) {
+      ctx.globalAlpha = dirt * 0.55;
+      ctx.fillStyle = '#8a6a3a';
+      ctx.beginPath();
+      ctx.ellipse(-base * 0.3, base * 0.1, base * 0.3, base * 0.14, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(base * 0.34, base * 0.24, base * 0.22, base * 0.1, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // 亮泽
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.22 * bright).toFixed(2) + ')';
+    ctx.beginPath();
+    ctx.ellipse(-base * 0.35, base * 0.05, base * 0.16, base * 0.3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__dish = {
+    sub: function () { return sub; },
+    washed: function () { return rackBowls; },
+    done: function () { return doneFired; },
+    pick: function () {
+      if (sub === 'pick' && bowlsOnSink.length > 0) {
+        sub = 'scrub';
+        var c = sinkCenter();
+        bowlPos = { x: c.x, y: c.y - 40 * L.s };
+        water = 1;
+      }
+    },
+    clean: function () { if (sub === 'scrub') { scrubPath = SCRUB_NEED; dirt = 0; sub = 'ready'; } },
+    rinse: function () { if (sub === 'ready') { sub = 'rinsing'; rinseT = 1.6; } }
+  };
+})();
+</script>
+</body>
+</html>
