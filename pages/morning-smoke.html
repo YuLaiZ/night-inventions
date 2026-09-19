@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>炊烟</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #141620;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8e99a4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>炊烟</h1>
+  <p>天蒙蒙亮，谁家的烟囱先醒了。<br>点它一把火——今天第一顿饭，在路上了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260919;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 680, L.h / 720)));
+    L.cx = L.w / 2;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var fires = 0;            // 加火次数
+  var NEED = 3;
+  var heat = 0;             // 火势 0..1
+  var doneFired = false;
+  var saidFirst = false;
+  var smoke = [];           // 烟粒 {x,y,vy,life,max,r,phase,drift}
+
+  var CHIM;                 // 烟囱口位置
+  function calcC() {
+    CHIM = { x: L.w * 0.6, y: L.h * 0.52 };
+  }
+  calcC();
+
+  function hitChim(px, py) {
+    return Math.abs(px - CHIM.x) < 60 * L.s && Math.abs(py - CHIM.y) < 70 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired) return;
+    if (hitChim(ev.clientX, ev.clientY)) {
+      fires++;
+      heat = Math.min(1, fires / NEED);
+      whoosh();
+      if (!saidFirst) { saidFirst = true; say('火柴划着了。灶膛里噼啪一声——烟要起来了。'); }
+      else if (fires === 2) say('烟浓了。锅盖开始跳舞。');
+      if (fires >= NEED) {
+        doneFired = true;
+        setTimeout(function () {
+          say('烟起来了。今天第一顿饭，在路上了。', true);
+        }, 400);
+      }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function whoosh() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.6;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.2);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var lp = AC.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 600;
+    var g = AC.createGain();
+    g.gain.value = 0.05;
+    src.connect(lp); lp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  function emitSmoke(n) {
+    for (var i = 0; i < n; i++) {
+      smoke.push({
+        x: CHIM.x + (rng() - 0.5) * 14 * L.s,
+        y: CHIM.y - 26 * L.s,
+        vy: 26 + rng() * 22 + heat * 20,
+        life: 0,
+        max: 3 + rng() * 2.5,
+        r: 6 + rng() * 9,
+        phase: rng() * Math.PI * 2,
+        drift: 14 + rng() * 14
+      });
+    }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcC();
+
+    if (heat > 0 && rng() < dt * (4 + heat * 14)) emitSmoke(1);
+    for (var si = smoke.length - 1; si >= 0; si--) {
+      var s = smoke[si];
+      s.life += dt;
+      s.y -= s.vy * dt;
+      s.x += Math.sin(s.life * 1.8 + s.phase) * s.drift * dt + 6 * dt;
+      s.r += dt * 4;
+      if (s.life > s.max) smoke.splice(si, 1);
+    }
+
+    // ── 绘制 ──
+    // 天色（拂晓：地平线微光）
+    var dawn = 0.3 + heat * 0.15;
+    var skyG = ctx.createLinearGradient(0, 0, 0, h);
+    skyG.addColorStop(0, mix([12, 16, 28], [54, 70, 100], dawn * 0.6));
+    skyG.addColorStop(0.62, mix([22, 26, 36], [120, 116, 104], dawn));
+    skyG.addColorStop(1, mix([18, 20, 26], [92, 88, 78], dawn));
+    ctx.fillStyle = skyG;
+    ctx.fillRect(0, 0, w, h);
+    // 残星
+    ctx.fillStyle = 'rgba(210,220,240,0.5)';
+    for (var si = 0; si < 12; si++) {
+      var sx = ((si * 149 + seed) % 100) / 100 * w;
+      var sy = ((si * 71) % 30) / 100 * h;
+      ctx.globalAlpha = 0.4 - dawn * 0.25;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1.1 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // 远处屋脊剪影
+    ctx.fillStyle = mix([16, 18, 24], [40, 40, 40], dawn * 0.7);
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.78);
+    ctx.lineTo(w * 0.14, h * 0.78);
+    ctx.lineTo(w * 0.14, h * 0.7);
+    ctx.lineTo(w * 0.3, h * 0.7);
+    ctx.lineTo(w * 0.3, h * 0.78);
+    ctx.lineTo(w * 0.55, h * 0.78);
+    ctx.lineTo(w * 0.55, h * 0.74);
+    ctx.lineTo(w * 0.85, h * 0.74);
+    ctx.lineTo(w * 0.85, h * 0.8);
+    ctx.lineTo(w, h * 0.8);
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // 烟（在屋顶层之下绘制部分、之上绘制部分——简单起见全画在屋顶前）
+    for (var sj = 0; sj < smoke.length; sj++) {
+      var s2 = smoke[sj];
+      var sA = (1 - s2.life / s2.max) * (0.16 + heat * 0.1);
+      var shade = mix([200, 205, 210], [235, 230, 220], 0.5);
+      ctx.fillStyle = 'rgba(205,208,212,' + sA.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(s2.x, s2.y, s2.r * (1 + s2.life * 0.4), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 屋顶（前景：本户的瓦顶+烟囱）
+    var roofY = L.h * 0.66;
+    ctx.fillStyle = mix([40, 32, 26], [80, 62, 46], heat * 0.4);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.28, roofY + 80 * L.s);
+    ctx.lineTo(L.cx, roofY - 60 * L.s);
+    ctx.lineTo(w * 0.86, roofY + 80 * L.s);
+    ctx.lineTo(w * 0.86, h);
+    ctx.lineTo(w * 0.28, h);
+    ctx.closePath();
+    ctx.fill();
+    // 瓦纹
+    ctx.strokeStyle = 'rgba(20,14,8,0.5)';
+    ctx.lineWidth = 2;
+    for (var wi = 0; wi < 7; wi++) {
+      var wt = wi / 7;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.28 + (w * 0.86 - w * 0.28) * 0.1 * wt, roofY + 80 * L.s + wt * 120 * L.s);
+      ctx.lineTo(w * 0.28 + (w * 0.86 - w * 0.28) * (0.86 - 0.1 * wt), roofY + 80 * L.s + wt * 120 * L.s);
+      ctx.stroke();
+    }
+    // 烟囱（砖）
+    var chW = 54 * L.s, chH = 96 * L.s;
+    var chX = CHIM.x - chW / 2, chY = CHIM.y - chH / 2 + 10 * L.s;
+    var chG = ctx.createLinearGradient(chX, 0, chX + chW, 0);
+    chG.addColorStop(0, '#5c4434');
+    chG.addColorStop(0.5, '#7a5a42');
+    chG.addColorStop(1, '#4c3828');
+    ctx.fillStyle = chG;
+    ctx.beginPath();
+    ctx.roundRect(chX, chY, chW, chH, 4);
+    ctx.fill();
+    // 砖缝
+    ctx.strokeStyle = 'rgba(30,18,10,0.5)';
+    ctx.lineWidth = 1.4;
+    for (var bi = 1; bi <= 4; bi++) {
+      ctx.beginPath();
+      ctx.moveTo(chX + 3, chY + bi * chH / 5);
+      ctx.lineTo(chX + chW - 3, chY + bi * chH / 5);
+      ctx.stroke();
+    }
+    // 囱口 heat 微光
+    if (heat > 0.05) {
+      ctx.fillStyle = 'rgba(240,180,100,' + (0.2 * heat * (0.8 + 0.2 * Math.sin(now / 260))).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.ellipse(CHIM.x, CHIM.y - 22 * L.s, 20 * L.s, 5 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (!doneFired) {
+      var hint = fires === 0 ? '点烟囱，加一把火' : (fires < NEED ? '再来一把' : '');
+      if (hint) {
+        ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, CHIM.x, CHIM.y + 90 * L.s);
+        ctx.textAlign = 'left';
+      }
+      ctx.fillStyle = 'rgba(142,153,164,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('加火 ' + fires + ' / ' + NEED, w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function mix(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    setTimeout(function () {
+      say('烟起来了。今天第一顿饭，在路上了。', true);
+    }, 400);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__smoke = {
+    fires: function () { return fires; },
+    puffs: function () { return smoke.length; },
+    done: function () { return doneFired; },
+    puff: function () {
+      if (fires < NEED) {
+        fires++;
+        heat = Math.min(1, fires / NEED);
+        emitSmoke(4);
+        if (fires >= NEED) announceDone();
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

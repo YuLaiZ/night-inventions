@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给暖气片放气</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #100e0b;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a3967e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d6c9ac; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #857962; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d6c9ac;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #554b3b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #857962;
+    text-decoration: none;
+    border-bottom: 1px dotted #857962;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d6c9ac; border-color: #d6c9ac; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给暖气片放气</h1>
+  <p>暖气片上截烫手、下截冰凉——是气堵住了水。<br>按住小阀，逆时针慢慢拧。呲完气，热水就填满了。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260918;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 660, L.h / 720)));
+    L.cx = L.w * 0.46;
+    L.radTop = L.h * 0.24;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var turned = 0;           // 拧开圈数 0..1
+  var pressing = false;
+  var airOut = 0;           // 放气进度（气→水的分界）
+  var waterOut = false;     // 阀口出水了
+  var doneFired = false;
+  var saidFirst = false, saidWater = false;
+  var heat = 0;             // 暖色蔓延 0..1
+  var hissT = 0;            // 呲气声计时
+  var drips = [];           // 滴水 {x,y,vy}
+  var steamWisps = [];      // 放出的气雾
+
+  var VALVE;                // 放气阀位置（右上角）
+  var RAD_W, RAD_H;
+  function calcR() {
+    VALVE = { x: L.cx + 130 * L.s, y: L.radTop - 20 * L.s };
+    RAD_W = 330 * L.s;
+    RAD_H = L.h * 0.52;
+  }
+  calcR();
+
+  function hitValve(px, py) {
+    return Math.abs(px - VALVE.x) < 50 * L.s && Math.abs(py - VALVE.y) < 50 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired) return;
+    if (hitValve(ev.clientX, ev.clientY)) {
+      pressing = true;
+      if (!saidFirst) { saidFirst = true; say('对准了。慢慢拧——里面有气憋了一年。'); }
+    } else {
+      say('找那只黄铜小阀——在暖气片右上角。');
+    }
+  });
+  window.addEventListener('pointerup', function () { pressing = false; });
+  window.addEventListener('pointercancel', function () { pressing = false; });
+
+  // ── 声音 ──
+  var AC = null, hissGain = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try {
+      AC = new (window.AudioContext || window.webkitAudioContext)();
+      var len = AC.sampleRate;
+      var buf = AC.createBuffer(1, len, AC.sampleRate);
+      var d = buf.getChannelData(0);
+      for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      var src = AC.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      var hp = AC.createBiquadFilter();
+      hp.type = 'bandpass'; hp.frequency.value = 3400; hp.Q.value = 0.7;
+      hissGain = AC.createGain();
+      hissGain.gain.value = 0;
+      src.connect(hp); hp.connect(hissGain); hissGain.connect(AC.destination);
+      src.start();
+    } catch (e) { AC = null; }
+  }
+  function dripSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.setValueAtTime(1000, t);
+    o.frequency.exponentialRampToValueAtTime(400, t + 0.06);
+    g.gain.setValueAtTime(0.025, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.08);
+  }
+  function tightSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 260;
+    g.gain.setValueAtTime(0.03, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.13);
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcR();
+
+    // 拧阀
+    if (pressing && !doneFired) {
+      var prev = turned;
+      turned = Math.min(1, turned + dt * 0.22);
+      if (turned > 0.15) {
+        // 开始呲气
+        hissT += dt;
+        if (rng() < dt * 6) {
+          steamWisps.push({
+            x: VALVE.x + (rng() - 0.5) * 16 * L.s,
+            y: VALVE.y - 6 * L.s,
+            vy: 30 + rng() * 30,
+            life: 0, max: 1 + rng(),
+            r: 5 + rng() * 8,
+            drift: (rng() - 0.5) * 16
+          });
+        }
+        // 气放尽（进度过 0.55 后出水）
+        if (turned > 0.55 && !waterOut) {
+          waterOut = true;
+          if (!saidWater) { saidWater = true; say('气呲完了——出水了！拧回去，慢慢拧。'); }
+        }
+        if (waterOut && rng() < dt * 3) {
+          drips.push({ x: VALVE.x + (rng() - 0.5) * 8 * L.s, y: VALVE.y + 8 * L.s, vy: 40 + rng() * 40 });
+          if (rng() < 0.3) dripSound();
+        }
+        // 出水后拧紧（进度满）
+        if (turned >= 1) {
+          doneFired = true;
+          pressing = false;
+          tightSound();
+          setTimeout(function () {
+            say('呲完了。热水填满每一根柱子——今晚它整片都热。', true);
+          }, 300);
+        }
+      }
+      if (hissGain) hissGain.gain.value = waterOut ? 0 : Math.min(0.05, 0.02 + turned * 0.02);
+    } else {
+      if (hissGain) hissGain.gain.value = Math.max(0, hissGain.gain.value - dt * 0.1);
+    }
+    // 暖色蔓延（拧紧后）
+    if (doneFired) heat = Math.min(1, heat + dt * 0.5);
+    // 气雾
+    for (var si = steamWisps.length - 1; si >= 0; si--) {
+      var st = steamWisps[si];
+      st.life += dt;
+      st.y -= st.vy * dt;
+      st.x += st.drift * dt;
+      if (st.life > st.max) steamWisps.splice(si, 1);
+    }
+    // 滴水
+    for (var di = drips.length - 1; di >= 0; di--) {
+      var dp = drips[di];
+      dp.vy += 200 * dt;
+      dp.y += dp.vy * dt;
+      if (dp.y > h * 0.8) drips.splice(di, 1);
+    }
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#15120e');
+    bg.addColorStop(1, '#0c0a07');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 墙面
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    for (var ty = 0; ty < h; ty += 70 * L.s) {
+      ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke();
+    }
+
+    // 暖光（放完气后从阀口晕开）
+    if (heat > 0.01) {
+      var gl = ctx.createRadialGradient(VALVE.x, VALVE.y, 0, VALVE.x, VALVE.y, 320 * L.s * heat);
+      gl.addColorStop(0, 'rgba(235,170,90,' + (0.14 * heat).toFixed(2) + ')');
+      gl.addColorStop(1, 'rgba(235,170,90,0)');
+      ctx.fillStyle = gl;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 暖气片（柱式，竖排柱）
+    var colW = 44 * L.s;
+    var cols = Math.floor(RAD_W / colW);
+    colW = RAD_W / cols;
+    var radX = L.cx - RAD_W / 2;
+    var radY = L.radTop;
+    for (var ci = 0; ci < cols; ci++) {
+      var cx2 = radX + ci * colW;
+      // 柱色：上部微暖（进水），下部随放气进度变暖
+      var warmTop = 0.25;
+      var warmBot = heat * 0.9;
+      var cg = ctx.createLinearGradient(0, radY, 0, radY + RAD_H);
+      cg.addColorStop(0, lerpC([72, 60, 46], [176, 108, 60], warmTop + heat * 0.1));
+      cg.addColorStop(0.5, lerpC([66, 55, 42], lerpArr([176, 108, 60], [196, 128, 72]), Math.max(warmTop * 0.4, warmBot * 0.6)));
+      cg.addColorStop(1, lerpC([58, 48, 38], [168, 104, 58], warmBot));
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.roundRect(cx2 + 2, radY, colW - 4, RAD_H, colW * 0.3);
+      ctx.fill();
+      // 凹槽
+      ctx.strokeStyle = 'rgba(18,12,6,0.35)';
+      ctx.lineWidth = 2;
+      for (var fl = 1; fl <= 2; fl++) {
+        ctx.beginPath();
+        ctx.moveTo(cx2 + colW * (0.32 + fl * 0.17), radY + 8);
+        ctx.lineTo(cx2 + colW * (0.32 + fl * 0.17), radY + RAD_H - 8);
+        ctx.stroke();
+      }
+    }
+    // 上下横箱
+    ctx.fillStyle = lerpC([92, 76, 58], [172, 110, 62], Math.max(0.25, heat));
+    ctx.fillRect(radX - 10, radY - 12, RAD_W + 20, 18);
+    ctx.fillRect(radX - 10, radY + RAD_H - 6, RAD_W + 20, 18);
+    ctx.fillStyle = 'rgba(240,220,180,0.1)';
+    ctx.fillRect(radX - 10, radY - 10, RAD_W + 20, 3);
+
+    // 放气阀（右上角：黄铜小阀）
+    ctx.save();
+    ctx.translate(VALVE.x, VALVE.y);
+    // 阀体
+    ctx.fillStyle = '#b08c3c';
+    ctx.beginPath();
+    ctx.roundRect(-14 * L.s, -4 * L.s, 28 * L.s, 20 * L.s, 4);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,230,160,0.35)';
+    ctx.fillRect(-10 * L.s, -2 * L.s, 5 * L.s, 14 * L.s);
+    // 阀芯（十字口，拧动时旋转）
+    ctx.save();
+    ctx.rotate(-turned * Math.PI * 2);
+    ctx.strokeStyle = '#d4b05a';
+    ctx.lineWidth = 4.5 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(-9 * L.s, -10 * L.s); ctx.lineTo(9 * L.s, -10 * L.s);
+    ctx.moveTo(0, -19 * L.s); ctx.lineTo(0, -1 * L.s);
+    ctx.stroke();
+    ctx.restore();
+    ctx.restore();
+
+    // 接水碗（阀口下方）
+    var bowlY = VALVE.y + 74 * L.s;
+    ctx.fillStyle = '#4c4238';
+    ctx.beginPath();
+    ctx.ellipse(VALVE.x, bowlY, 46 * L.s, 14 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (waterOut) {
+      ctx.fillStyle = 'rgba(150,180,205,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(VALVE.x, bowlY - 2, 38 * L.s, 9 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 滴水珠
+    ctx.fillStyle = 'rgba(170,200,225,0.8)';
+    for (var dj = 0; dj < drips.length; dj++) {
+      ctx.beginPath();
+      ctx.ellipse(drips[dj].x, drips[dj].y, 1.8 * L.s, 3.2 * L.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 阀口水线（出水时连到碗）
+    if (waterOut) {
+      ctx.strokeStyle = 'rgba(170,200,225,0.5)';
+      ctx.lineWidth = 3 * L.s;
+      ctx.beginPath();
+      ctx.moveTo(VALVE.x, VALVE.y + 16 * L.s);
+      ctx.lineTo(VALVE.x, bowlY - 8 * L.s);
+      ctx.stroke();
+    }
+
+    // 气雾
+    for (var sj = 0; sj < steamWisps.length; sj++) {
+      var st2 = steamWisps[sj];
+      var sA = (1 - st2.life / st2.max) * 0.18;
+      ctx.fillStyle = 'rgba(220,230,235,' + sA.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(st2.x + Math.sin(st2.life * 3 + st2.r) * 5, st2.y, st2.r * (1 + st2.life * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 引导
+    if (!doneFired) {
+      var hint = pressing ? (waterOut ? '出水了——拧回去' : '拧着……呲呲的是气') : '按住黄铜阀，慢慢拧';
+      ctx.fillStyle = 'rgba(214,201,172,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, VALVE.x, VALVE.y + 116 * L.s);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function lerpArr(a, t) { return [a[0], a[1], a[2]]; }
+  function lerpC(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    pressing = false;
+    tightSound();
+    setTimeout(function () {
+      say('呲完了。热水填满每一根柱子——今晚它整片都热。', true);
+    }, 300);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__bleed = {
+    turned: function () { return +turned.toFixed(2); },
+    waterOut: function () { return waterOut; },
+    done: function () { return doneFired; },
+    turn: function (ms) {
+      pressing = true;
+      setTimeout(function () { pressing = false; }, ms || 500);
+    },
+    force: function () { turned = 1; waterOut = true; announceDone(); }
+  };
+})();
+</script>
+</body>
+</html>

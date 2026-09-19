@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>窗棂影</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #131114;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8e99a4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>窗棂影</h1>
+  <p>晨光把窗格子搬到地板上，慢慢地走。<br>拖动百叶——影子会变疏，也会变密。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260919;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 680, L.h / 720)));
+    L.cx = L.w / 2;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var slat = 0.55;          // 百叶开度 0..1（影条密度）
+  var dragging = false;
+  var dragStartX = 0, slat0 = 0;
+  var cloudPhase = rng() * 10;   // 云影相位
+  var saidSlat = false;
+  var idleT = 0;
+  var doneFired = false;
+  var dust = [];            // 光斑里的微尘 {x,y,vx,vy,life}
+  var touchGlow = 0;        // 点地板光斑的亮闪
+  var touchX = 0, touchY = 0;
+
+  var SHADOW_X, SHADOW_Y;   // 影区左上
+  function calcS() {
+    SHADOW_X = L.w * 0.16;
+    SHADOW_Y = L.h * 0.5;
+  }
+  calcS();
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    // 滑杆（右下角）
+    if (ev.clientY > L.h * 0.78 && ev.clientX > L.w * 0.7) {
+      dragging = true;
+      dragStartX = ev.clientX;
+      slat0 = slat;
+      if (!saidSlat) { saidSlat = true; say('往右拖——百叶开大，影子就密了。'); }
+      return;
+    }
+    // 点地板影：光斑亮一下+微尘起舞
+    if (ev.clientX > SHADOW_X && ev.clientY > SHADOW_Y) {
+      touchGlow = 1;
+      touchX = ev.clientX; touchY = ev.clientY;
+      for (var i = 0; i < 8; i++) {
+        dust.push({
+          x: ev.clientX + (rng() - 0.5) * 60 * L.s,
+          y: ev.clientY + (rng() - 0.5) * 40 * L.s,
+          vx: (rng() - 0.5) * 10,
+          vy: -6 - rng() * 10,
+          life: 0
+        });
+      }
+      if (!doneFired && idleT > 3) {
+        doneFired = true;
+        say('影子在地板上走了很久——日头慢慢高了。', true);
+      }
+    }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+    slat = Math.max(0, Math.min(1, slat0 + (ev.clientX - dragStartX) / (220 * L.s)));
+  });
+  window.addEventListener('pointerup', function () { dragging = false; });
+  window.addEventListener('pointercancel', function () { dragging = false; });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcS();
+    idleT += dt;
+    cloudPhase += dt * 0.13;
+    touchGlow = Math.max(0, touchGlow - dt * 1.2);
+    for (var di = dust.length - 1; di >= 0; di--) {
+      var d = dust[di];
+      d.life += dt;
+      d.x += d.vx * dt + Math.sin(d.life * 3) * 0.4;
+      d.y += d.vy * dt;
+      if (d.life > 1.6) dust.splice(di, 1);
+    }
+    // 云影呼吸（0.7~1）
+    var cloud = 0.75 + 0.25 * Math.sin(cloudPhase) * Math.sin(cloudPhase * 0.6);
+
+    // ── 绘制 ──
+    // 地板与墙（逆光暖调）
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#1a1712');
+    bg.addColorStop(1, '#241f18');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 地板木纹
+    ctx.strokeStyle = 'rgba(190,160,110,0.07)';
+    for (var fi = 0; fi < 8; fi++) {
+      ctx.beginPath();
+      ctx.moveTo(0, SHADOW_Y + fi * 34 * L.s);
+      ctx.bezierCurveTo(w * 0.3, SHADOW_Y + fi * 34 * L.s + 6, w * 0.6, SHADOW_Y + fi * 34 * L.s - 6, w, SHADOW_Y + fi * 34 * L.s);
+      ctx.stroke();
+    }
+
+    // 晨光光区（斜光投进来的整片亮区）
+    var lightA = (0.16 + slat * 0.14) * cloud;
+    var lg = ctx.createLinearGradient(SHADOW_X, SHADOW_Y, SHADOW_X + L.w * 0.5, SHADOW_Y + L.h * 0.4);
+    lg.addColorStop(0, 'rgba(245,224,170,' + (lightA * 1.2).toFixed(3) + ')');
+    lg.addColorStop(1, 'rgba(245,224,170,' + (lightA * 0.5).toFixed(3) + ')');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.moveTo(SHADOW_X - 40 * L.s, SHADOW_Y - 60 * L.s);
+    ctx.lineTo(SHADOW_X + L.w * 0.44, SHADOW_Y - 120 * L.s);
+    ctx.lineTo(SHADOW_X + L.w * 0.52, h);
+    ctx.lineTo(SHADOW_X - 60 * L.s, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // 窗棂影（竖条+横档，随太阳缓移）
+    var sunShift = Math.sin(now / 40000) * 20 * L.s;   // 极缓日头移动
+    var slatW = 16 * L.s + (1 - slat) * 46 * L.s;      // 影条宽（开度小=影密）
+    var gap = slatW * (0.7 + slat * 0.6);
+    ctx.fillStyle = 'rgba(30,24,16,' + (0.42 * cloud).toFixed(3) + ')';
+    for (var sx = SHADOW_X - 30 * L.s + sunShift; sx < SHADOW_X + L.w * 0.4; sx += slatW + gap) {
+      ctx.beginPath();
+      ctx.moveTo(sx, SHADOW_Y - 40 * L.s);
+      ctx.lineTo(sx + slatW + 14 * L.s, SHADOW_Y - 40 * L.s);
+      ctx.lineTo(sx + slatW + 14 * L.s + 30 * L.s, h);
+      ctx.lineTo(sx + 30 * L.s, h);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // 横档影（两道）
+    ctx.fillStyle = 'rgba(30,24,16,' + (0.34 * cloud).toFixed(3) + ')';
+    ctx.fillRect(SHADOW_X - 30 * L.s, SHADOW_Y + 60 * L.s, L.w * 0.42, 14 * L.s);
+    ctx.fillRect(SHADOW_X - 30 * L.s, SHADOW_Y + 150 * L.s, L.w * 0.42, 10 * L.s);
+
+    // 点触光斑亮闪
+    if (touchGlow > 0) {
+      var tg = ctx.createRadialGradient(touchX, touchY, 0, touchX, touchY, 60 * L.s);
+      tg.addColorStop(0, 'rgba(255,240,200,' + (0.3 * touchGlow).toFixed(2) + ')');
+      tg.addColorStop(1, 'rgba(255,240,200,0)');
+      ctx.fillStyle = tg;
+      ctx.beginPath();
+      ctx.arc(touchX, touchY, 60 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 微尘
+    for (var dj = 0; dj < dust.length; dj++) {
+      var dd = dust[dj];
+      ctx.fillStyle = 'rgba(255,236,190,' + (0.7 * (1 - dd.life / 1.6)).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(dd.x, dd.y, 1.7 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 百叶滑杆（右下）
+    var barY = L.h * 0.82, barX = L.w * 0.72, barW = L.w * 0.24;
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.roundRect(barX, barY - 8 * L.s, barW, 16 * L.s, 8);
+    ctx.fill();
+    // 百叶刻度影
+    for (var ti = 0; ti < 8; ti++) {
+      ctx.fillStyle = 'rgba(30,24,16,0.5)';
+      ctx.fillRect(barX + 4 + ti * (barW - 8) / 8, barY - 5 * L.s, (barW - 8) / 16, 10 * L.s);
+    }
+    // 滑块
+    ctx.fillStyle = '#d8c070';
+    ctx.beginPath();
+    ctx.arc(barX + barW * slat, barY, 11 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(200,209,217,0.6)';
+    ctx.font = Math.round(11.5 * L.s) + 'px system-ui, "PingFang SC", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('百叶', barX - 14 * L.s, barY + 4 * L.s);
+    ctx.textAlign = 'left';
+
+    // 引导
+    if (!doneFired) {
+      var hint = idleT < 3 ? '看影子慢慢走——点光斑试试' : '';
+      if (hint) {
+        ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    say('影子在地板上走了很久——日头慢慢高了。', true);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__lattice = {
+    slat: function () { return +slat.toFixed(2); },
+    done: function () { return doneFired; },
+    idle: function (t) { idleT = t || 4; },
+    touch: function () {
+      touchGlow = 1;
+      touchX = SHADOW_X + L.w * 0.1; touchY = SHADOW_Y + 40 * L.s;
+      if (idleT > 3) announceDone();
+    }
+  };
+})();
+</script>
+</body>
+</html>

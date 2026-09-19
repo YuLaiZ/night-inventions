@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>试戴手套</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #12100d;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #a3967e;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #d6c9ac; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #857962; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #d6c9ac;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #554b3b;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #857962;
+    text-decoration: none;
+    border-bottom: 1px dotted #857962;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #d6c9ac; border-color: #d6c9ac; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>试戴手套</h1>
+  <p>今年冬天的第一副毛线手套。<br>一根一根戴上——冬天来了，手是先知道的。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260919;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 660, L.h / 720)));
+    L.cx = L.w / 2;
+    L.cy = L.h * 0.55;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var fingers = [false, false, false, false, false];  // 拇指→小指
+  var fingerPop = [0, 0, 0, 0, 0];                    // 戴入动画 0..1
+  var doneFired = false;
+  var saidFirst = false;
+  var fistT = 0;            // 握拳-张开动画 0..1..0
+  var knit = 0;             // 毛线摩擦声
+
+  // 五指指套位置（相对掌心）
+  function fingerPos(i) {
+    var base = { x: L.cx, y: L.cy };
+    var offs = [
+      { x: -74 * L.s, y: 26 * L.s, a: -2.3, len: 40 * L.s },   // 拇指
+      { x: -34 * L.s, y: -42 * L.s, a: -0.34, len: 52 * L.s }, // 食指
+      { x: -4 * L.s, y: -52 * L.s, a: -0.08, len: 58 * L.s },  // 中指
+      { x: 26 * L.s, y: -46 * L.s, a: 0.18, len: 52 * L.s },   // 无名指
+      { x: 54 * L.s, y: -30 * L.s, a: 0.5, len: 40 * L.s }     // 小指
+    ];
+    var o = offs[i];
+    var tipX = o.x + Math.sin(o.a + Math.PI / 2) * 0 + Math.cos(o.a - Math.PI / 2) * 0;
+    // 指尖沿角度向上
+    var dx = Math.sin(o.a), dy = -Math.cos(o.a);
+    return {
+      bx: base.x + o.x, by: base.y + o.y,
+      tx: base.x + o.x + dx * o.len, ty: base.y + o.y + dy * o.len,
+      w: (i === 0 ? 15 : i === 4 ? 11 : 13) * L.s,
+      tipX: base.x + o.x + dx * (o.len + 6 * L.s),
+      tipY: base.y + o.y + dy * (o.len + 6 * L.s)
+    };
+  }
+  function hitFinger(i, px, py) {
+    var f = fingerPos(i);
+    var mx = (f.bx + f.tx) / 2, my = (f.by + f.ty) / 2;
+    return Math.abs(px - mx) < f.w * 0.9 && Math.abs(py - my) < 50 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired) return;
+    for (var i = 0; i < 5; i++) {
+      if (!fingers[i] && hitFinger(i, ev.clientX, ev.clientY)) {
+        fingers[i] = true;
+        fingerPop[i] = 0.001;
+        knitFriction();
+        var n = fingers.filter(Boolean).length;
+        if (!saidFirst) { saidFirst = true; say('一根一根来——拇指先进。'); }
+        else if (n === 3) say('三根了。剩下两根，快了。');
+        else if (n < 5) say('进去了一根。毛线是新的，有点紧。');
+        if (n === 5) {
+          setTimeout(function () {
+            fistT = 0.001;
+            setTimeout(function () {
+              doneFired = true;
+              say('戴上了。冬天来的第一晚，手是先知道的。', true);
+            }, 900);
+          }, 250);
+        }
+        break;
+      }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function knitFriction() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.16;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.1);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var bp = AC.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1600; bp.Q.value = 0.9;
+    var g = AC.createGain();
+    g.gain.value = 0.04;
+    src.connect(bp); bp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  // 毛线织纹（V 形）
+  function knitPattern(x, y, w, h, clipPath) {
+    ctx.save();
+    clipPath();
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(60,44,30,0.28)';
+    ctx.lineWidth = 1.2;
+    var step = 7 * L.s;
+    for (var row = y - h; row < y + h; row += step) {
+      for (var col = x - w; col < x + w; col += step * 1.2) {
+        ctx.beginPath();
+        ctx.moveTo(col, row + step * 0.8);
+        ctx.lineTo(col + step * 0.6, row);
+        ctx.lineTo(col + step * 1.2, row + step * 0.8);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+
+    for (var i = 0; i < 5; i++) {
+      if (fingerPop[i] > 0 && fingerPop[i] < 1) fingerPop[i] = Math.min(1, fingerPop[i] + dt * 3);
+    }
+    if (fistT > 0 && fistT < 1) fistT = Math.min(1, fistT + dt * 1.1);
+
+    // ── 绘制 ──
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#161309');
+    bg.addColorStop(1, '#0d0a06');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 桌面
+    var deskG = ctx.createLinearGradient(0, h * 0.7, 0, h);
+    deskG.addColorStop(0, 'rgba(44,34,20,0)');
+    deskG.addColorStop(0.4, '#2c2214');
+    deskG.addColorStop(1, '#1c1509');
+    ctx.fillStyle = deskG;
+    ctx.fillRect(0, h * 0.7, w, h * 0.3);
+
+    // 拆开的包装纸（左上角，皱）
+    ctx.save();
+    ctx.translate(L.cx - 230 * L.s, L.cy - 150 * L.s);
+    ctx.rotate(-0.2);
+    ctx.fillStyle = '#b8a888';
+    ctx.beginPath();
+    ctx.moveTo(-40 * L.s, -30 * L.s);
+    ctx.lineTo(30 * L.s, -44 * L.s);
+    ctx.lineTo(52 * L.s, 6 * L.s);
+    ctx.lineTo(-10 * L.s, 34 * L.s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(80,66,44,0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-30 * L.s, -18 * L.s); ctx.lineTo(20 * L.s, -10 * L.s);
+    ctx.moveTo(-14 * L.s, 8 * L.s); ctx.lineTo(38 * L.s, -18 * L.s);
+    ctx.stroke();
+    ctx.restore();
+
+    // 手套掌身（圆掌形）
+    var fistSqueeze = fistT > 0 ? Math.sin(fistT * Math.PI) : 0;
+    var palmW = 120 * L.s * (1 - fistSqueeze * 0.12);
+    var palmH = 130 * L.s * (1 - fistSqueeze * 0.06);
+    var px = L.cx, py = L.cy + 10 * L.s;
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(px + 6, py + palmH * 0.55, palmW * 0.55, 16 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 掌身（圆角）
+    var palmG = ctx.createLinearGradient(px - palmW / 2, 0, px + palmW / 2, 0);
+    palmG.addColorStop(0, '#b06a4e');
+    palmG.addColorStop(0.5, '#c67e5a');
+    palmG.addColorStop(1, '#a05c44');
+    ctx.fillStyle = palmG;
+    ctx.beginPath();
+    ctx.roundRect(px - palmW / 2, py - palmH * 0.42, palmW, palmH, 34 * L.s);
+    ctx.fill();
+    knitPattern(px, py - palmH * 0.42 + palmH / 2, palmW / 2, palmH / 2, function () {
+      ctx.beginPath();
+      ctx.roundRect(px - palmW / 2, py - palmH * 0.42, palmW, palmH, 34 * L.s);
+    });
+    // 掌心织纹高光
+    ctx.strokeStyle = 'rgba(255,225,190,0.14)';
+    ctx.lineWidth = 1.4;
+    for (var vi = -1; vi <= 1; vi++) {
+      ctx.beginPath();
+      ctx.moveTo(px + vi * 30 * L.s, py - palmH * 0.3);
+      ctx.lineTo(px + vi * 30 * L.s, py + palmH * 0.34);
+      ctx.stroke();
+    }
+
+    // 五指
+    for (var fi = 0; fi < 5; fi++) {
+      var f = fingerPos(fi);
+      var worn = fingers[fi];
+      var pop = worn ? fingerPop[fi] : 0;
+      var flat = 1 - pop * 0.75;          // 空指套扁平
+      var fw = f.w * (worn ? 1 : 0.72) * (1 - fistSqueeze * 0.1);
+      var fh = 46 * L.s * pop + 22 * L.s * (1 - pop);
+      var midX = f.bx, midY = f.by - fh * 0.4 + 12 * L.s;
+      // 指根过渡段（填平指套圆头与掌身之间的视觉缝）
+      ctx.fillStyle = '#b06a4e';
+      ctx.beginPath();
+      ctx.roundRect(f.bx - fw * 0.42, f.by - 6 * L.s, fw * 0.84, fh * 0.5, fw * 0.3);
+      ctx.fill();
+      ctx.save();
+      ctx.translate(midX, midY);
+      var ang = fi === 0 ? -0.7 : (fi === 4 ? 0.55 : (fi - 2) * 0.14);
+      ctx.rotate(ang);
+      // 指套（圆角条：空=瘪、戴=鼓）
+      var segG = ctx.createLinearGradient(-fw / 2, 0, fw / 2, 0);
+      segG.addColorStop(0, '#a85e44');
+      segG.addColorStop(0.5, '#c67e5a');
+      segG.addColorStop(1, '#98523c');
+      ctx.fillStyle = segG;
+      ctx.beginPath();
+      ctx.roundRect(-fw / 2, -fh * flat / 2 - (worn ? 0 : fh * 0.1), fw, fh * flat + (worn ? 0 : fh * 0.2), fw / 2);
+      ctx.fill();
+      // 指套织纹
+      if (pop > 0.4) {
+        ctx.strokeStyle = 'rgba(60,44,30,0.3)';
+        ctx.lineWidth = 1;
+        for (var ki = 0; ki < 3; ki++) {
+          ctx.beginPath();
+          ctx.moveTo(-fw / 2 + 2, -fh * 0.2 + ki * fh * 0.22);
+          ctx.lineTo(fw / 2 - 2, -fh * 0.2 + ki * fh * 0.22);
+          ctx.stroke();
+        }
+      }
+      // 指尖圆头
+      ctx.fillStyle = '#c67e5a';
+      ctx.beginPath();
+      ctx.arc(0, -fh * flat / 2, fw / 2 * (worn ? 1 : 0.72), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      // 未戴指套的引导微光
+      if (!worn && !doneFired) {
+        ctx.fillStyle = 'rgba(240,220,170,' + (0.25 + 0.15 * Math.sin(now / 420 + fi)).toFixed(2) + ')';
+        var mx2 = (f.bx + f.tipX) / 2, my2 = (f.by + f.ty) / 2;
+        ctx.beginPath();
+        ctx.arc(mx2, my2, 3 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 腕口罗纹
+    var cuffW = palmW * 0.92;
+    ctx.fillStyle = '#8a4e38';
+    ctx.beginPath();
+    ctx.roundRect(px - cuffW / 2, py + palmH * 0.48, cuffW, 34 * L.s, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(50,32,22,0.5)';
+    ctx.lineWidth = 1.6;
+    for (var ri = 0; ri < 7; ri++) {
+      var rx2 = px - cuffW / 2 + 4 + ri * (cuffW - 8) / 6;
+      ctx.beginPath();
+      ctx.moveTo(rx2, py + palmH * 0.48 + 3);
+      ctx.lineTo(rx2, py + palmH * 0.48 + 31 * L.s);
+      ctx.stroke();
+    }
+
+    // 握拳完成的小字提示
+    if (fistT > 0 && fistT < 1) {
+      ctx.fillStyle = 'rgba(240,220,170,0.5)';
+      ctx.font = '12px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('暖', px, py - palmH * 0.62 - fistT * 20 * L.s);
+      ctx.textAlign = 'left';
+    }
+
+    // 引导
+    if (!doneFired) {
+      var left = fingers.filter(function (f) { return !f; }).length;
+      if (left === 5) {
+        ctx.fillStyle = 'rgba(214,201,172,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('点手指，一根一根戴上', w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+      ctx.fillStyle = 'rgba(163,150,126,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(left + ' / 5 根', w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    fistT = 0.001;
+    setTimeout(function () {
+      say('戴上了。冬天来的第一晚，手是先知道的。', true);
+    }, 1100);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__glove = {
+    fingers: function () { return fingers.filter(Boolean).length; },
+    done: function () { return doneFired; },
+    wear: function (i) {
+      var idx = (i == null) ? fingers.findIndex(function (f) { return !f; }) : i;
+      if (idx >= 0 && !fingers[idx]) {
+        fingers[idx] = true;
+        fingerPop[idx] = 0.001;
+        if (fingers.every(Boolean)) announceDone();
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

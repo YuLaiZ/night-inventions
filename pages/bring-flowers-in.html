@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>把花搬进屋</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0f1114;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #93a0ab;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>把花搬进屋</h1>
+  <p>霜要下来了，阳台的花一盆都不能留。<br>端进屋摆好——窗里窗外，隔着一层玻璃过冬。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260919;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 680, L.h / 720)));
+    L.cx = L.w / 2;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var moved = 0;            // 已搬进屋的盆数
+  var NEED = 3;
+  var doneFired = false;
+  var saidFirst = false;
+  var flyT = 1;             // 搬运动画 1=完成
+  var flyPot = -1;
+  var nightDeepen = 0;      // 屋外夜色渐深（霜意）
+  var lastMoveAt = 0;
+
+  // 三盆花（阳台栏架上）
+  var pots = [
+    { kind: 0, x: 0, y: 0, sway: rng() * Math.PI * 2 },   // 绿萝（垂叶）
+    { kind: 1, x: 0, y: 0, sway: rng() * Math.PI * 2 },   // 仙人掌
+    { kind: 2, x: 0, y: 0, sway: rng() * Math.PI * 2 }    // 天竺葵（花）
+  ];
+
+  var RAIL_Y;               // 阳台栏架面
+  var IN_Y;                 // 屋内窗台面
+  function calcY() {
+    RAIL_Y = L.h * 0.62;
+    IN_Y = L.h * 0.6;
+  }
+  calcY();
+
+  function railX(i) { return L.w * 0.68 + i * 76 * L.s; }
+  function inX(i) { return L.w * 0.62 + i * 84 * L.s; }
+  function hitPot(i, px, py) {
+    var p = pots[i];
+    if (p.gone) return false;
+    var x = p.gone ? 0 : railX(i);
+    return Math.abs(px - x) < 46 * L.s && Math.abs(py - RAIL_Y) < 80 * L.s;
+  }
+
+  pots.forEach(function (p, i) { p.gone = false; });
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (doneFired) return;
+    for (var i = 0; i < 3; i++) {
+      if (!pots[i].gone && hitPot(i, ev.clientX, ev.clientY)) {
+        pots[i].gone = true;
+        moved++;
+        flyPot = i;
+        flyT = 0.001;
+        lastMoveAt = Date.now();
+        liftSound();
+        if (!saidFirst) { saidFirst = true; say('端稳——土别洒了。'); }
+        else if (moved === 2) say('两盆了。这盆最爱冻，放里屋。');
+        else if (moved >= NEED) {
+          doneFired = true;
+          setTimeout(function () {
+            say('都进来了。窗里窗外，隔着一层玻璃过冬。', true);
+          }, 400);
+        } else {
+          say('进来了。就剩最后一盆。');
+        }
+        break;
+      }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function liftSound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.setValueAtTime(340, t);
+    o.frequency.exponentialRampToValueAtTime(520, t + 0.18);
+    g.gain.setValueAtTime(0.025, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.21);
+  }
+  function potSet() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.frequency.value = 620;
+    g.gain.setValueAtTime(0.035, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.11);
+  }
+
+  function drawPot(x, y, kind, swayPhase, now, scale) {
+    var s = L.s * (scale || 1);
+    ctx.save();
+    ctx.translate(x, y);
+    // 花盆（陶土色梯形）
+    var potG = ctx.createLinearGradient(-22 * s, 0, 22 * s, 0);
+    potG.addColorStop(0, '#8a5a3c');
+    potG.addColorStop(0.5, '#a86e48');
+    potG.addColorStop(1, '#7a4e34');
+    ctx.fillStyle = potG;
+    ctx.beginPath();
+    ctx.moveTo(-24 * s, -26 * s);
+    ctx.lineTo(24 * s, -26 * s);
+    ctx.lineTo(18 * s, 6 * s);
+    ctx.lineTo(-18 * s, 6 * s);
+    ctx.closePath();
+    ctx.fill();
+    // 盆沿
+    ctx.fillStyle = '#94624266';
+    ctx.fillStyle = '#966342';
+    ctx.beginPath();
+    ctx.roundRect(-26 * s, -32 * s, 52 * s, 9 * s, 3);
+    ctx.fill();
+    // 土
+    ctx.fillStyle = '#2e2118';
+    ctx.beginPath();
+    ctx.ellipse(0, -28 * s, 20 * s, 4.4 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 植物
+    if (kind === 0) {
+      // 绿萝：垂叶
+      ctx.strokeStyle = '#4e7a3e';
+      ctx.lineWidth = 2.4 * s;
+      for (var vi = -2; vi <= 2; vi++) {
+        ctx.beginPath();
+        ctx.moveTo(vi * 5 * s, -28 * s);
+        ctx.quadraticCurveTo(vi * 10 * s + Math.sin(now / 900 + swayPhase + vi) * 4 * s, -8 * s, vi * 13 * s, 14 * s + vi * -3 * s);
+        ctx.stroke();
+        ctx.fillStyle = '#5c8c48';
+        ctx.beginPath();
+        ctx.ellipse(vi * 13 * s, 15 * s + vi * -3 * s, 5 * s, 3.4 * s, vi, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (kind === 1) {
+      // 仙人掌：圆球+刺
+      ctx.fillStyle = '#4e7a4e';
+      ctx.beginPath();
+      ctx.ellipse(0, -40 * s, 13 * s, 16 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#2e4a2e';
+      ctx.lineWidth = 1 * s;
+      for (var ci = 0; ci < 8; ci++) {
+        var ca = -Math.PI / 2 + ci / 8 * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ca) * 10 * s, -40 * s + Math.sin(ca) * 13 * s);
+        ctx.lineTo(Math.cos(ca) * 14 * s, -40 * s + Math.sin(ca) * 18 * s);
+        ctx.stroke();
+      }
+    } else {
+      // 天竺葵：绿叶+小红花
+      ctx.fillStyle = '#3e6a3a';
+      for (var li = 0; li < 5; li++) {
+        var la = li / 5 * Math.PI * 2 + 0.4;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(la) * 12 * s, -34 * s + Math.sin(la) * 8 * s, 7 * s, 4.4 * s, la, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (var fl = 0; fl < 4; fl++) {
+        var fa = fl / 4 * Math.PI * 2 + 1;
+        ctx.fillStyle = '#c8554a';
+        ctx.beginPath();
+        ctx.arc(Math.cos(fa) * 7 * s, -44 * s + Math.sin(fa) * 5 * s, 3.4 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#e8c85a';
+      ctx.beginPath();
+      ctx.arc(0, -46 * s, 3.2 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcY();
+
+    if (flyT > 0 && flyT < 1) {
+      flyT = Math.min(1, flyT + dt * 1.2);
+      if (flyT >= 1) potSet();
+    }
+    // 屋外夜色渐深（搬完越冷）
+    nightDeepen = moved / NEED;
+
+    // ── 绘制 ──
+    // 屋内暖 / 阳台冷（分界：窗框）
+    var inG = ctx.createLinearGradient(0, 0, 0, h);
+    inG.addColorStop(0, mix([28, 24, 20], [52, 42, 32], 0.5));
+    inG.addColorStop(1, mix([18, 15, 12], [38, 30, 24], 0.5));
+    ctx.fillStyle = inG;
+    ctx.fillRect(0, 0, w, h);
+
+    // 屋内暖光（左侧一盏夜灯，光晕靠窗）
+    var lampX = L.w * 0.2, lampY = L.h * 0.4;
+    var lampG = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, L.w * 0.34);
+    lampG.addColorStop(0, 'rgba(240,214,150,0.13)');
+    lampG.addColorStop(1, 'rgba(240,214,150,0)');
+    ctx.fillStyle = lampG;
+    ctx.fillRect(0, 0, w, h);
+    // 壁灯本体（带灯罩）
+    ctx.fillStyle = '#3a342c';
+    ctx.beginPath();
+    ctx.roundRect(lampX - 7 * L.s, lampY - 4 * L.s, 14 * L.s, 12 * L.s, 2);
+    ctx.fill();
+    ctx.fillStyle = '#55483a';
+    ctx.beginPath();
+    ctx.moveTo(lampX - 16 * L.s, lampY - 6 * L.s);
+    ctx.lineTo(lampX + 16 * L.s, lampY - 6 * L.s);
+    ctx.lineTo(lampX + 10 * L.s, lampY - 18 * L.s);
+    ctx.lineTo(lampX - 10 * L.s, lampY - 18 * L.s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(240,220,160,0.75)';
+    ctx.beginPath();
+    ctx.arc(lampX, lampY + 4, 5.5 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 窗框（中偏右）：屋外是阳台夜色
+    var winX = L.w * 0.6, winW = L.w * 0.38;
+    var winTop = L.h * 0.18, winBot = L.h * 0.88;
+    // 窗外夜空（随搬完渐深、渐霜）
+    var outG = ctx.createLinearGradient(0, winTop, 0, winBot);
+    outG.addColorStop(0, mix([16, 20, 30], [10, 13, 22], nightDeepen));
+    outG.addColorStop(1, mix([22, 24, 30], [14, 16, 24], nightDeepen));
+    ctx.fillStyle = outG;
+    ctx.fillRect(winX, winTop, winW, winBot - winTop);
+    // 窗外月牙
+    ctx.fillStyle = 'rgba(220,222,210,' + (0.5 - nightDeepen * 0.2).toFixed(2) + ')';
+    ctx.beginPath();
+    ctx.arc(winX + winW * 0.72, winTop + (winBot - winTop) * 0.24, 13 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = outG;
+    ctx.beginPath();
+    ctx.arc(winX + winW * 0.72 + 5 * L.s, winTop + (winBot - winTop) * 0.24 - 3 * L.s, 11 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 窗上霜意（搬完越多霜花越多）
+    if (nightDeepen > 0.3) {
+      ctx.fillStyle = 'rgba(220,230,240,' + (0.2 * nightDeepen).toFixed(2) + ')';
+      for (var fi = 0; fi < 14; fi++) {
+        var fx2 = winX + ((fi * 97 + seed) % 100) / 100 * winW;
+        var fy2 = winTop + ((fi * 61) % 100) / 100 * (winBot - winTop);
+        ctx.beginPath();
+        ctx.arc(fx2, fy2, (3 + fi % 4) * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 窗框
+    ctx.fillStyle = '#3c342c';
+    ctx.fillRect(winX - 10 * L.s, winTop - 10 * L.s, winW + 20 * L.s, 10 * L.s);
+    ctx.fillRect(winX - 10 * L.s, winBot, winW + 20 * L.s, 10 * L.s);
+    ctx.fillRect(winX - 10 * L.s, winTop - 10 * L.s, 10 * L.s, winBot - winTop + 20 * L.s);
+    ctx.fillRect(winX + winW, winTop - 10 * L.s, 10 * L.s, winBot - winTop + 20 * L.s);
+    // 屋内窗柜台面（窗框下方，屋内侧——搬进来的花摆这里）
+    ctx.fillStyle = '#4a4038';
+    ctx.fillRect(winX - 26 * L.s, winBot, winW + 52 * L.s, 14 * L.s);
+    ctx.fillStyle = '#3a322b';
+    ctx.fillRect(winX - 20 * L.s, winBot + 14 * L.s, winW + 40 * L.s, 46 * L.s);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(winX - 26 * L.s, winBot, winW + 52 * L.s, 2);
+
+    // 阳台栏架（窗外右侧伸出，放花处）
+    var railX0 = L.w * 0.64, railY = RAIL_Y;
+    ctx.fillStyle = '#333c34';
+    ctx.fillRect(railX0, railY, w - railX0, 10 * L.s);
+    ctx.fillStyle = '#2a322b';
+    for (var ri = 0; ri < 6; ri++) {
+      ctx.fillRect(railX0 + 12 * L.s + ri * (w - railX0 - 20 * L.s) / 6, railY + 10 * L.s, 5 * L.s, winBot - railY - 12 * L.s);
+    }
+    // 栏架支撑
+    ctx.strokeStyle = '#2a322b';
+    ctx.lineWidth = 5 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(railX0 + 10 * L.s, railY + 10 * L.s);
+    ctx.lineTo(railX0 + 10 * L.s, winBot - 4 * L.s);
+    ctx.stroke();
+
+    // 阳台上的花（未搬走的）
+    for (var i = 0; i < 3; i++) {
+      if (pots[i].gone) continue;
+      drawPot(railX(i), railY, pots[i].kind, pots[i].sway, now, 1);
+    }
+    // 屋内窗柜的花（已搬入的，按搬入顺序摆在窗柜台面上）
+    var inCount = 0;
+    for (var j2 = 0; j2 < 3; j2++) {
+      if (pots[j2].gone) {
+        drawPot(inX(inCount), winBot + 56 * L.s, pots[j2].kind, pots[j2].sway, now, 1.05);
+        inCount++;
+      }
+    }
+    // 搬运中的花（飞行弧线）
+    if (flyPot >= 0 && flyT < 1) {
+      var fx3 = railX(flyPot) + (inX(moved - 1) - railX(flyPot)) * flyT;
+      var fy3 = railY + (winBot + 56 * L.s - railY) * flyT - Math.sin(flyT * Math.PI) * 90 * L.s;
+      drawPot(fx3, fy3, pots[flyPot].kind, pots[flyPot].sway, now, 1.05);
+    }
+
+    // 引导与进度
+    if (!doneFired) {
+      var hint = moved === 0 ? '点阳台上的花，一盆盆端进屋' : '还有 ' + (NEED - moved) + ' 盆';
+      ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+      ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(hint, w * 0.79, RAIL_Y + 66 * L.s);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(147,160,171,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('进屋 ' + moved + ' / ' + NEED + ' 盆', w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function mix(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    setTimeout(function () {
+      say('都进来了。窗里窗外，隔着一层玻璃过冬。', true);
+    }, 400);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__move = {
+    moved: function () { return moved; },
+    done: function () { return doneFired; },
+    carry: function (i) {
+      var idx = i == null ? pots.findIndex(function (p) { return !p.gone; }) : i;
+      if (idx >= 0 && !pots[idx].gone) {
+        pots[idx].gone = true;
+        moved++;
+        if (moved >= NEED) announceDone();
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

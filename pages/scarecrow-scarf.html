@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给稻草人系围巾</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0b0d12;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8e99a4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给稻草人系围巾</h1>
+  <p>夜里路过它八百回，它替你守着地。<br>今晚给它系上围巾——它也该过冬。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260919;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 660, L.h / 720)));
+    L.cx = L.w / 2;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var tied = false;
+  var scarfT = 0;           // 系围巾动画 0..1（0 未系，1 系好）
+  var doneFired = false;
+  var saidFirst = false;
+  var groundGlint = [];     // 夜里地上反光点
+
+  var SC;                   // 稻草人位置
+  function calcS() {
+    SC = { x: L.cx, y: L.h * 0.62 };
+  }
+  calcS();
+
+  function hitScarecrow(px, py) {
+    return Math.abs(px - SC.x) < 110 * L.s && Math.abs(py - (SC.y - 150 * L.s)) < 190 * L.s;
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    if (!tied && hitScarecrow(ev.clientX, ev.clientY)) {
+      tied = true;
+      scarfT = 0.001;
+      woosh();
+      if (!saidFirst) { saidFirst = true; say('围巾来了——它站了一整个秋天。'); }
+    }
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function woosh() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.5;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) {
+      var env = Math.sin(i / len * Math.PI);
+      d[i] = (Math.random() * 2 - 1) * env;
+    }
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var bp = AC.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 0.7;
+    var g = AC.createGain();
+    g.gain.value = 0.05;
+    src.connect(bp); bp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  // 红格纹围巾（一段：从 (x1,y1) 到 (x2,y2)，宽 w）
+  function drawScarfSeg(x1, y1, x2, y2, w) {
+    var ang = Math.atan2(y2 - y1, x2 - x1);
+    ctx.save();
+    ctx.translate(x1, y1);
+    ctx.rotate(ang);
+    var len = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+    // 底色红
+    ctx.fillStyle = '#a84a3e';
+    ctx.beginPath();
+    ctx.roundRect(0, -w / 2, len, w, w / 3);
+    ctx.fill();
+    // 格纹（深红横竖）
+    ctx.strokeStyle = 'rgba(70,24,20,0.55)';
+    ctx.lineWidth = 1.6;
+    for (var gi = w * 0.25; gi < len; gi += w * 0.5) {
+      ctx.beginPath();
+      ctx.moveTo(gi, -w / 2);
+      ctx.lineTo(gi, w / 2);
+      ctx.stroke();
+    }
+    for (var gj = -w * 0.25; gj <= w * 0.25; gj += w * 0.5) {
+      ctx.beginPath();
+      ctx.moveTo(0, gj);
+      ctx.lineTo(len, gj);
+      ctx.stroke();
+    }
+    // 边缘穗（末端）
+    ctx.strokeStyle = '#c8a850';
+    ctx.lineWidth = 1.6;
+    for (var fi = 0; fi < 4; fi++) {
+      ctx.beginPath();
+      ctx.moveTo(len, -w / 2 + fi * w / 3 + w / 6);
+      ctx.lineTo(len + 7 * L.s, -w / 2 + fi * w / 3 + w / 6);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  var last = Date.now();
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcS();
+    if (scarfT > 0 && scarfT < 1) scarfT = Math.min(1, scarfT + dt * 0.8);
+
+    // ── 绘制 ──
+    // 月夜田头
+    var bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0c1018');
+    bg.addColorStop(0.6, '#101420');
+    bg.addColorStop(1, '#0a0d12');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    // 星星
+    ctx.fillStyle = 'rgba(210,220,240,0.7)';
+    for (var si = 0; si < 26; si++) {
+      var sx = ((si * 137 + seed) % 100) / 100 * w;
+      var sy = ((si * 89) % 55) / 100 * h * 0.6;
+      var tw = 0.5 + 0.5 * Math.sin(now / 600 + si * 2.1);
+      ctx.globalAlpha = 0.3 + tw * 0.5;
+      ctx.beginPath();
+      ctx.arc(sx, sy, (si % 3 === 0 ? 1.6 : 1) * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // 月牙
+    var mx = w * 0.76, my = h * 0.16;
+    ctx.fillStyle = 'rgba(225,222,205,0.85)';
+    ctx.beginPath();
+    ctx.arc(mx, my, 24 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#0c1018';
+    ctx.beginPath();
+    ctx.arc(mx + 9 * L.s, my - 5 * L.s, 21 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 田埂地面
+    ctx.fillStyle = '#0e1210';
+    ctx.fillRect(0, L.h * 0.78, w, h);
+    ctx.strokeStyle = 'rgba(120,140,110,0.12)';
+    ctx.lineWidth = 1.4;
+    for (var fi = 0; fi < 4; fi++) {
+      ctx.beginPath();
+      ctx.moveTo(0, L.h * 0.8 + fi * 22 * L.s);
+      ctx.bezierCurveTo(w * 0.3, L.h * 0.8 + fi * 22 * L.s + 6, w * 0.6, L.h * 0.8 + fi * 22 * L.s - 6, w, L.h * 0.8 + fi * 22 * L.s);
+      ctx.stroke();
+    }
+
+    // 稻草人
+    ctx.save();
+    ctx.translate(SC.x, SC.y);
+    var sway = Math.sin(now / 1500) * 0.02;
+    ctx.rotate(sway);
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(6, 158 * L.s, 40 * L.s, 9 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 立杆
+    ctx.strokeStyle = '#5a4630';
+    ctx.lineWidth = 7 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(0, 150 * L.s);
+    ctx.lineTo(0, -80 * L.s);
+    ctx.stroke();
+    // 横杆手臂
+    ctx.strokeStyle = '#5a4630';
+    ctx.lineWidth = 6 * L.s;
+    ctx.beginPath();
+    ctx.moveTo(-90 * L.s, -40 * L.s);
+    ctx.lineTo(90 * L.s, -40 * L.s);
+    ctx.stroke();
+    // 草身子（枯草束）
+    ctx.strokeStyle = '#b8a05c';
+    ctx.lineWidth = 3 * L.s;
+    for (var si = -4; si <= 4; si++) {
+      ctx.beginPath();
+      ctx.moveTo(si * 9 * L.s, -60 * L.s);
+      ctx.quadraticCurveTo(si * 11 * L.s, 20 * L.s, si * 13 * L.s + Math.sin(now / 800 + si) * 2, 120 * L.s);
+      ctx.stroke();
+    }
+    // 袖口草（横杆两端垂草）
+    for (var hi = 0; hi < 2; hi++) {
+      var hx = hi === 0 ? -90 * L.s : 90 * L.s;
+      ctx.strokeStyle = '#b8a05c';
+      ctx.lineWidth = 2.6 * L.s;
+      for (var hj = -1; hj <= 1; hj++) {
+        ctx.beginPath();
+        ctx.moveTo(hx, -40 * L.s);
+        ctx.lineTo(hx + hj * 4 * L.s, -16 * L.s);
+        ctx.stroke();
+      }
+    }
+    // 脖子（草束领）
+    ctx.fillStyle = '#a88e50';
+    ctx.beginPath();
+    ctx.roundRect(-11 * L.s, -86 * L.s, 22 * L.s, 30 * L.s, 6);
+    ctx.fill();
+    // 头（麻布团）
+    ctx.fillStyle = '#c8b088';
+    ctx.beginPath();
+    ctx.arc(0, -104 * L.s, 26 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    // 缝线补丁脸
+    ctx.strokeStyle = 'rgba(90,70,44,0.7)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(-10 * L.s, -108 * L.s);
+    ctx.lineTo(-4 * L.s, -104 * L.s);
+    ctx.moveTo(8 * L.s, -102 * L.s);
+    ctx.lineTo(13 * L.s, -106 * L.s);
+    ctx.stroke();
+    // 眼睛（十字缝）
+    ctx.beginPath();
+    ctx.moveTo(-9 * L.s, -110 * L.s);
+    ctx.lineTo(-3 * L.s, -110 * L.s);
+    ctx.moveTo(-6 * L.s, -113 * L.s);
+    ctx.lineTo(-6 * L.s, -107 * L.s);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(5 * L.s, -110 * L.s);
+    ctx.lineTo(11 * L.s, -110 * L.s);
+    ctx.moveTo(8 * L.s, -113 * L.s);
+    ctx.lineTo(8 * L.s, -107 * L.s);
+    ctx.stroke();
+    // 草帽
+    ctx.fillStyle = '#8a7444';
+    ctx.beginPath();
+    ctx.ellipse(0, -122 * L.s, 40 * L.s, 10 * L.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, -124 * L.s, 22 * L.s, Math.PI, 0);
+    ctx.fill();
+    // 系上围巾后的脸变化：草帽下的「微笑」（多缝一道弯）
+    if (scarfT >= 1) {
+      ctx.beginPath();
+      ctx.arc(0, -98 * L.s, 7 * L.s, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 围巾（系好动画：绕两圈+两端垂下）
+    if (scarfT > 0) {
+      var t = Math.min(1, scarfT);
+      var neckY = SC.y - 74 * L.s;
+      // 绕脖两圈
+      var wrapW = 20 * L.s * Math.min(1, t * 2);
+      ctx.fillStyle = '#a84a3e';
+      ctx.beginPath();
+      ctx.ellipse(SC.x, neckY, 16 * L.s * Math.min(1, t * 2), wrapW * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(70,24,20,0.5)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(SC.x, neckY, 16 * L.s * Math.min(1, t * 2), wrapW * 0.35, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (t > 0.5) {
+        // 两端垂下（随风摆）
+        var sway = Math.sin(now / 700) * 4 * L.s;
+        var seg1 = Math.min(1, (t - 0.5) * 2.4);
+        var seg2 = Math.min(1, (t - 0.5) * 2.4 - 0.3);
+        drawScarfSeg(SC.x - 12 * L.s, neckY + 4, SC.x - 20 * L.s + sway, neckY + 4 + 62 * L.s * seg1, 17 * L.s);
+        if (seg2 > 0.05) {
+          drawScarfSeg(SC.x + 12 * L.s, neckY + 2, SC.x + 24 * L.s - sway, neckY + 2 + 48 * L.s * seg2, 15 * L.s);
+        }
+        // 结花
+        ctx.fillStyle = '#c85a4e';
+        ctx.beginPath();
+        ctx.arc(SC.x, neckY + 8 * L.s, 8 * L.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // 引导
+    if (!doneFired) {
+      var hint = !tied ? '点稻草人，把围巾给它系上' : '';
+      if (hint) {
+        ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    setTimeout(function () {
+      say('这下好了。它替你守着地，你替它系上围巾。', true);
+    }, 600);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__scarecrow = {
+    tied: function () { return tied; },
+    scarfT: function () { return +scarfT.toFixed(2); },
+    done: function () { return doneFired; },
+    tie: function () {
+      if (!tied) { tied = true; scarfT = 0.001; setTimeout(announceDone, 1400); }
+    }
+  };
+})();
+</script>
+</body>
+</html>

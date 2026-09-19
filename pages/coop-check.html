@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/svg+xml" href="../assets/logo/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/logo/favicon-32.png">
+<link rel="icon" type="image/x-icon" href="../assets/logo/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="../assets/logo/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>给鸡窝堵风口</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0c0a;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #8e99a4;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    touch-action: none;
+  }
+  .copy {
+    position: absolute; top: 44px; left: 0; right: 0;
+    text-align: center;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .copy h1 {
+    font-size: 20px; font-weight: 500; letter-spacing: 0.28em;
+    color: #c8d1d9; margin-bottom: 12px; padding-left: 0.28em;
+  }
+  .copy p { font-size: 13px; line-height: 2; color: #727d88; letter-spacing: 0.08em; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .caption {
+    position: absolute; bottom: 7vh; left: 0; right: 0;
+    text-align: center;
+    font-size: 14px; letter-spacing: 0.12em;
+    color: #c8d1d9;
+    min-height: 24px;
+    opacity: 0;
+    transition: opacity 1s ease;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .caption.show { opacity: 1; }
+  footer {
+    position: absolute; bottom: 12px; left: 0; right: 0;
+    text-align: center;
+    font-size: 11px; color: #454e57;
+    letter-spacing: 0.04em;
+    z-index: 4;
+  }
+  footer a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .back {
+    position: absolute; top: 16px; left: 18px;
+    font-size: 12px; color: #727d88;
+    text-decoration: none;
+    border-bottom: 1px dotted #727d88;
+    padding-bottom: 2px;
+    letter-spacing: 0.06em;
+    z-index: 5;
+  }
+  .back:hover { color: #c8d1d9; border-color: #c8d1d9; }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 返回陈列馆</a>
+<canvas id="fx"></canvas>
+
+<div class="copy">
+  <h1>给鸡窝堵风口</h1>
+  <p>霜要下来，鸡窝的两个风口得堵上。<br>打着手电过去——里面的咕咕声，是它们在道晚安。</p>
+</div>
+
+<div class="caption" id="caption"></div>
+
+<footer>
+  夜班出品 · 2026 · 客户端 ZCode · 模型 GLM-5.3-Flash · 指挥家 YuLaiZ ·
+  <a href="https://github.com/YuLaiZ/night-inventions" target="_blank" rel="noopener">GitHub 源码</a>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('fx');
+  var ctx = canvas.getContext('2d');
+  var DPR = Math.min(2, window.devicePixelRatio || 1);
+  var caption = document.getElementById('caption');
+  var capTimer = null;
+
+  var seed = 20260919;
+  function mulberry(s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  var rng = mulberry(seed);
+
+  function say(text, holdLong) {
+    caption.textContent = text;
+    caption.classList.add('show');
+    if (capTimer) clearTimeout(capTimer);
+    if (!holdLong) capTimer = setTimeout(function () { caption.classList.remove('show'); }, 5600);
+  }
+
+  var L = {};
+  function layout() {
+    L.w = window.innerWidth;
+    L.h = window.innerHeight;
+    L.s = Math.max(0.6, Math.min(1.05, Math.min(L.w / 680, L.h / 720)));
+    L.cx = L.w / 2;
+  }
+  canvas.width = window.innerWidth * DPR;
+  canvas.height = window.innerHeight * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+  window.addEventListener('resize', function () {
+    canvas.width = window.innerWidth * DPR;
+    canvas.height = window.innerHeight * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layout();
+  });
+
+  // ── 状态 ──
+  var mouseX = 0.56, mouseY = 0.52;   // 手电指向（初始照向鸡窝）
+  var vents = [false, false];       // 两个风口是否已堵
+  var doneFired = false;
+  var saidFirst = false;
+  var cluckAt = 0;
+  var hayFly = null;                // 草帘飞入动画 {vent, t}
+
+  // 鸡窝几何
+  var COOP;
+  function calcCoop() {
+    COOP = {
+      x: L.w * 0.56, y: L.h * 0.52,
+      w: 260 * L.s, h: 190 * L.s,
+      vent1: { x: L.w * 0.56 - 60 * L.s, y: L.h * 0.52 + 40 * L.s, r: 22 * L.s },
+      vent2: { x: L.w * 0.56 + 66 * L.s, y: L.h * 0.52 + 40 * L.s, r: 22 * L.s }
+    };
+  }
+  calcCoop();
+
+  function hitVent(i, px, py) {
+    var v = i === 0 ? COOP.vent1 : COOP.vent2;
+    if (vents[i]) return false;
+    var dx = px - v.x, dy = py - v.y;
+    return dx * dx + dy * dy < Math.pow(v.r + 26 * L.s, 2);
+  }
+
+  canvas.addEventListener('pointerdown', function (ev) {
+    ensureAudio();
+    for (var i = 0; i < 2; i++) {
+      if (hitVent(i, ev.clientX, ev.clientY)) {
+        vents[i] = true;
+        hayFly = { vent: i, t: 0.001 };
+        haySound();
+        var n = vents.filter(Boolean).length;
+        if (!saidFirst) { saidFirst = true; say('草帘塞进去——风口不透风，鸡窝里就存得住热。'); }
+        else if (n === 1) say('一个堵严了。还有一个，在另一头。');
+        if (vents[0] && vents[1] && !doneFired) {
+          doneFired = true;
+          setTimeout(function () {
+            say('风口都堵严了。咕咕两声，是它们在道晚安。', true);
+          }, 700);
+        }
+        break;
+      }
+    }
+  });
+  canvas.addEventListener('pointermove', function (ev) {
+    mouseX = ev.clientX / L.w;
+    mouseY = ev.clientY / L.h;
+  });
+
+  // ── 声音 ──
+  var AC = null;
+  function ensureAudio() {
+    if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function cluck() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var o = AC.createOscillator();
+    var g = AC.createGain();
+    o.type = 'square';
+    o.frequency.setValueAtTime(620, t);
+    o.frequency.exponentialRampToValueAtTime(380, t + 0.08);
+    g.gain.setValueAtTime(0.018, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t); o.stop(t + 0.1);
+    // 第二声
+    var o2 = AC.createOscillator();
+    var g2 = AC.createGain();
+    o2.type = 'square';
+    o2.frequency.setValueAtTime(560, t + 0.14);
+    o2.frequency.exponentialRampToValueAtTime(340, t + 0.21);
+    g2.gain.setValueAtTime(0.014, t + 0.14);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o2.connect(g2); g2.connect(AC.destination);
+    o2.start(t + 0.14); o2.stop(t + 0.23);
+  }
+  function haySound() {
+    if (!AC || AC.state !== 'running') return;
+    var t = AC.currentTime;
+    var len = AC.sampleRate * 0.3;
+    var buf = AC.createBuffer(1, len, AC.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.1);
+    var src = AC.createBufferSource();
+    src.buffer = buf;
+    var bp = AC.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1200; bp.Q.value = 0.8;
+    var g = AC.createGain();
+    g.gain.value = 0.04;
+    src.connect(bp); bp.connect(g); g.connect(AC.destination);
+    src.start(t);
+  }
+
+  var last = Date.now();
+  var clucked = false;
+  function tick() {
+    var now = Date.now();
+    var dt = Math.min(0.08, (now - last) / 1000);
+    last = now;
+    var w = L.w, h = L.h;
+    calcCoop();
+
+    if (hayFly && hayFly.t < 1) hayFly.t = Math.min(1, hayFly.t + dt * 1.5);
+    // 手电照到鸡窝时鸡叫一声（一次）
+    var dxc = mouseX * w - COOP.x, dyc = mouseY * h - COOP.y;
+    if (!clucked && dxc * dxc + dyc * dyc < Math.pow(200 * L.s, 2)) {
+      clucked = true;
+      cluck();
+      cluckAt = now;
+    }
+
+    // ── 绘制 ──
+    // 黑夜院子
+    ctx.fillStyle = '#07090a';
+    ctx.fillRect(0, 0, w, h);
+
+    // 手电光锥（从左下角手电射向指针方向）
+    var torchX = w * 0.08, torchY = h * 0.88;
+    var aimX = mouseX * w, aimY = mouseY * h;
+    var beamA = Math.atan2(aimY - torchY, aimX - torchX);
+    var beamLen = Math.sqrt((aimX - torchX) * (aimX - torchX) + (aimY - torchY) * (aimY - torchY)) + 240 * L.s;
+    var beamW = 90 * L.s;
+    var beamG = ctx.createRadialGradient(torchX, torchY, 10, aimX, aimY, 190 * L.s);
+    beamG.addColorStop(0, 'rgba(240,228,190,0.32)');
+    beamG.addColorStop(0.7, 'rgba(240,228,190,0.14)');
+    beamG.addColorStop(1, 'rgba(240,228,190,0)');
+    ctx.fillStyle = beamG;
+    ctx.beginPath();
+    ctx.moveTo(torchX, torchY);
+    ctx.lineTo(torchX + Math.cos(beamA - 0.12) * beamLen, torchY + Math.sin(beamA - 0.12) * beamLen);
+    ctx.lineTo(torchX + Math.cos(beamA + 0.12) * beamLen, torchY + Math.sin(beamA + 0.12) * beamLen);
+    ctx.closePath();
+    ctx.fill();
+    // 手电本体
+    ctx.save();
+    ctx.translate(torchX, torchY);
+    ctx.rotate(beamA);
+    ctx.fillStyle = '#39414a';
+    ctx.beginPath();
+    ctx.roundRect(-16 * L.s, -10 * L.s, 46 * L.s, 20 * L.s, 5);
+    ctx.fill();
+    ctx.fillStyle = '#cfd6dc';
+    ctx.beginPath();
+    ctx.roundRect(26 * L.s, -13 * L.s, 10 * L.s, 26 * L.s, 3);
+    ctx.fill();
+    ctx.restore();
+
+    // 鸡窝（木箱+斜顶，只在光锥内可见度高）
+    ctx.save();
+    ctx.translate(COOP.x, COOP.y);
+    var lit = Math.max(0, 1 - Math.sqrt(dxc * dxc + dyc * dyc) / (300 * L.s));
+    var litA = 0.35 + lit * 0.65;
+    ctx.globalAlpha = litA;
+    // 箱影
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(-COOP.w / 2 + 8, COOP.h / 2 - 8, COOP.w, 16 * L.s, 6);
+    ctx.fill();
+    // 箱体
+    var woodG = ctx.createLinearGradient(-COOP.w / 2, 0, COOP.w / 2, 0);
+    woodG.addColorStop(0, '#6a4e32');
+    woodG.addColorStop(0.5, '#8a6642');
+    woodG.addColorStop(1, '#5c442c');
+    ctx.fillStyle = woodG;
+    ctx.beginPath();
+    ctx.roundRect(-COOP.w / 2, -COOP.h / 2, COOP.w, COOP.h, 6);
+    ctx.fill();
+    // 木板横纹
+    ctx.strokeStyle = 'rgba(30,20,10,0.45)';
+    ctx.lineWidth = 2;
+    for (var pi = 1; pi <= 3; pi++) {
+      ctx.beginPath();
+      ctx.moveTo(-COOP.w / 2 + 4, -COOP.h / 2 + pi * COOP.h / 4);
+      ctx.lineTo(COOP.w / 2 - 4, -COOP.h / 2 + pi * COOP.h / 4);
+      ctx.stroke();
+    }
+    // 斜顶
+    ctx.fillStyle = '#4e3a26';
+    ctx.beginPath();
+    ctx.moveTo(-COOP.w / 2 - 12 * L.s, -COOP.h / 2);
+    ctx.lineTo(0, -COOP.h / 2 - 44 * L.s);
+    ctx.lineTo(COOP.w / 2 + 12 * L.s, -COOP.h / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(20,12,6,0.5)';
+    ctx.lineWidth = 1.6;
+    for (var si = 1; si <= 4; si++) {
+      ctx.beginPath();
+      ctx.moveTo(-COOP.w / 2 - 12 * L.s + si * (COOP.w + 24 * L.s) / 5, -COOP.h / 2);
+      ctx.lineTo(0 - 12 * L.s + si * (COOP.w + 24 * L.s) / 5, -COOP.h / 2 - 44 * L.s);
+      ctx.stroke();
+    }
+    // 圆洞门（正面）
+    ctx.fillStyle = '#120c06';
+    ctx.beginPath();
+    ctx.arc(-10 * L.s, 10 * L.s, 26 * L.s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,180,140,0.25)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 鸡眼睛反光（洞里一对亮点，光照射时眨）
+    if (lit > 0.3) {
+      var blink = (Math.sin(now / 900) > -0.7) ? 1 : 0.1;
+      ctx.fillStyle = 'rgba(240,220,140,' + (0.85 * lit * blink).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(-16 * L.s, 4 * L.s, 2.2 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(-4 * L.s, 4 * L.s, 2.2 * L.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 两个风口（侧面圆洞：未堵=黑洞，塞后=草帘黄）
+    var ventList = [COOP.vent1, COOP.vent2];
+    for (var vi = 0; vi < 2; vi++) {
+      var v = ventList[vi];
+      var vx = v.x - COOP.x, vy = v.y - COOP.y;
+      if (!vents[vi]) {
+        ctx.fillStyle = '#0c0805';
+        ctx.beginPath();
+        ctx.arc(vx, vy, v.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(200,180,140,0.3)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // 风口提示微光（光锥照到时）
+        if (lit > 0.5) {
+          ctx.strokeStyle = 'rgba(240,220,170,' + (0.3 + 0.15 * Math.sin(now / 380 + vi)).toFixed(2) + ')';
+          ctx.beginPath();
+          ctx.arc(vx, vy, v.r + 8 * L.s, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else {
+        // 草帘塞好（横纹草帘）
+        ctx.fillStyle = '#c8a850';
+        ctx.beginPath();
+        ctx.arc(vx, vy, v.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(140,100,30,0.65)';
+        ctx.lineWidth = 1.6;
+        for (var hi = -1; hi <= 1; hi++) {
+          ctx.beginPath();
+          ctx.moveTo(vx - v.r + 3, vy + hi * 5.5 * L.s);
+          ctx.lineTo(vx + v.r - 3, vy + hi * 5.5 * L.s);
+          ctx.stroke();
+        }
+        // 出头的几根草茎
+        ctx.strokeStyle = 'rgba(200,180,90,0.8)';
+        ctx.lineWidth = 1.4;
+        for (var hj = 0; hj < 4; hj++) {
+          var ha = -0.6 + hj * 0.4;
+          ctx.beginPath();
+          ctx.moveTo(vx + Math.cos(ha) * v.r * 0.6, vy + Math.sin(ha) * v.r * 0.6);
+          ctx.lineTo(vx + Math.cos(ha) * (v.r + 7 * L.s), vy + Math.sin(ha) * (v.r + 7 * L.s));
+          ctx.stroke();
+        }
+      }
+    }
+    // 草帘飞入动画
+    if (hayFly && hayFly.t < 1) {
+      var v2 = ventList[hayFly.vent];
+      var ft = hayFly.t;
+      var hayX = COOP.x + v2.x - COOP.x + (1 - ft) * 220 * L.s;
+      var hayY = v2.y - (1 - ft) * 160 * L.s;
+      ctx.globalAlpha = 1 - ft * 0.3;
+      ctx.fillStyle = '#c8a850';
+      ctx.beginPath();
+      ctx.ellipse(hayX, hayY, 20 * L.s, 14 * L.s, ft * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // 引导
+    if (!doneFired) {
+      var sealed = vents.filter(Boolean).length;
+      var hint = sealed === 0 ? '手电照到鸡窝，点两个风口塞草帘' : (sealed === 1 ? '还剩一个风口' : '');
+      if (hint) {
+        ctx.fillStyle = 'rgba(200,209,217,' + (0.3 + 0.2 * Math.sin(now / 520)) + ')';
+        ctx.font = '13px system-ui, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(hint, w / 2, h - 96);
+        ctx.textAlign = 'left';
+      }
+      ctx.fillStyle = 'rgba(142,153,164,0.85)';
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('堵了 ' + sealed + ' / 2 处', w - 20, h - 44);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  function rafLoop() { tick(); requestAnimationFrame(rafLoop); }
+  requestAnimationFrame(rafLoop);
+  setInterval(tick, 250); // rAF 停摆（后台标签页）时的兜底驱动
+
+  // 成就（提取共用，QA 与真实路径共走）
+  function announceDone() {
+    if (doneFired) return;
+    doneFired = true;
+    setTimeout(function () {
+      say('风口都堵严了。咕咕两声，是它们在道晚安。', true);
+    }, 700);
+  }
+
+  // QA 钩子（无私人信息；与真实状态机共用）
+  window.__coop = {
+    sealed: function () { return vents.filter(Boolean).length; },
+    done: function () { return doneFired; },
+    seal: function (i) {
+      var idx = (i == null) ? vents.findIndex(function (v) { return !v; }) : i;
+      if (idx >= 0 && !vents[idx]) {
+        vents[idx] = true;
+        if (vents[0] && vents[1]) announceDone();
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>
